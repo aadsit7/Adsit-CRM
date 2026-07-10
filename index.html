@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Partner Portal — Deal registration, joint marketing, and partner resources">
+  <title>Partner Portal</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230000CC'/><text x='50' y='62' font-size='24' text-anchor='middle' fill='white' font-family='Inter,system-ui,sans-serif' font-weight='900'>PP</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://accounts.google.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Poppins:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/calendar.css">
+  <link rel="stylesheet" href="css/transitions.css">
+  <link rel="stylesheet" href="css/responsive.css">
+  <link rel="stylesheet" href="css/ai-assistant.css">
+  <link rel="stylesheet" href="css/randy.css">
+  <link rel="stylesheet" href="css/quick-form.css">
+  <link rel="stylesheet" href="css/meeting-docs.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/hotkeys.css">
+  <link rel="stylesheet" href="css/field-dictation.css">
+  <link rel="stylesheet" href="css/ux-refresh.css">
+  <!-- mobile.css is the final override layer — it MUST stay last so its
+       phone-specific rules win by source order (see its header comment). -->
+  <link rel="stylesheet" href="css/mobile.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet" />
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- jsPDF + autotable — jsPDF first so autotable can attach itself to
+       jsPDF.API during script execution. All four libraries above use
+       `defer` (NOT `async`): deferred scripts execute in document order,
+       and the app's module script participates in that same ordered
+       queue, so every library is still guaranteed-ready before any
+       application code runs — same ordering guarantee as the old
+       synchronous tags, minus the multi-second HTML-parse block they
+       caused on phones over cellular.
+
+       IMPORTANT: use jspdf 2.5.1, NOT 2.5.2 or later 2.5.x. cdnjs
+       only mirrors 2.5.1 and 3.0.x on the 2.x/3.x lines — 2.5.2+ all
+       return 404. The portal previously referenced 2.5.2 silently,
+       which the first production MAP PDF test surfaced. Verified
+       empirically that autotable 3.8.2 attaches to jsPDF 2.5.1's
+       prototype at jsPDF.API.autoTable (see waitForJsPdf). -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <div id="app" class="app-shell--login">
+    <!-- Sidebar (hidden on login, shown after auth) -->
+    <aside id="sidebar" class="sidebar" aria-label="Navigation"></aside>
+
+    <!-- Sidebar overlay for mobile -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <!-- Main content -->
+    <main id="main-content" class="main-content">
+      <header id="topbar" class="topbar">
+        <button id="hamburger" class="topbar__hamburger" aria-label="Toggle navigation">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <h1 id="topbar-title" class="topbar__title"></h1>
+        <div id="topbar-actions" class="topbar__actions"></div>
+      </header>
+      <section id="view-container" class="view-container"></section>
+    </main>
+  </div>
+
+  <!-- Modal root (portaled modals mount here) -->
+  <div id="modal-root"></div>
+
+  <!-- Toast notification container -->
+  <div id="toast-root" class="toast-container"></div>
+
+  <!-- Voice assistant widget (persists across route changes) -->
+  <div id="voice-root"></div>
+
+  <!-- Randy wake-word voice assistant (persists across route changes) -->
+  <div id="randy-root"></div>
+</body>
+</html>
