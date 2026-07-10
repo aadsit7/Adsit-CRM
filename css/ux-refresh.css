@@ -316,3 +316,50 @@ h1, h2, h3,
 .modal__body::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---------- Row banding (grid separation without grid lines) ---------- */
+/* Rows in the data tables read as one flat white sheet — the 1px
+   hairlines alone don't separate records at a glance. Every other row
+   carries a faint band of the brand blue so the eye can track a single
+   opportunity/partner/event across columns, and the hover tint is
+   deepened so the active row always reads above the band. */
+
+.table tbody tr:nth-child(even) td {
+  background: rgba(47, 107, 255, 0.035);
+}
+
+.table tbody tr:hover td,
+.table tbody tr:nth-child(even):hover td {
+  background: rgba(47, 107, 255, 0.07);
+}
+
+/* Comp view table — same banding. Rows that carry their own semantic
+   background (flat / totals / goal-gap / excluded) are left alone. */
+.comp-table tbody tr:nth-child(even):not([class*="comp-table__row--"]) td {
+  background: rgba(47, 107, 255, 0.035);
+}
+
+.comp-table tbody tr:not([class*="comp-table__row--"]):hover td {
+  background: rgba(47, 107, 255, 0.07);
+}
+
+/* Event checklist tasks — alternate the same band so each task reads
+   as its own strip instead of a run of identical lines. */
+.checklist__item:nth-child(odd):not(.checklist__item--dragging) {
+  background: rgba(47, 107, 255, 0.035);
+}
+
+.checklist__item:hover {
+  background: rgba(47, 107, 255, 0.08);
+}
+
+/* On phones the tables become stacked cards (see mobile.css) — cards
+   are already separated, and hover tints read as misrenders on touch.
+   Neutralize the banding + hover there. */
+@media (max-width: 768px) {
+  .table tbody tr:nth-child(even) td,
+  .table tbody tr:hover td,
+  .table tbody tr:nth-child(even):hover td {
+    background: transparent;
+  }
+}
