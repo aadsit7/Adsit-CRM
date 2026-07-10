@@ -1,0 +1,96 @@
+/* ============================================
+   Partner Detail — Call Transcripts Panel
+   ============================================ */
+
+.partner-bottom-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light, var(--color-border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  max-height: 640px;
+  overflow: hidden;
+}
+
+.partner-bottom-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-light, var(--color-border));
+  background: var(--color-surface);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.partner-bottom-panel__title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.partner-bottom-panel__title {
+  font-size: 16px;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.partner-bottom-panel__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  background: var(--color-border-light, var(--color-border));
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+}
+
+.partner-bottom-panel__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.partner-bottom-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+}
+
+.partner-bottom-panel__body::-webkit-scrollbar {
+  width: 8px;
+}
+.partner-bottom-panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.partner-bottom-panel__body::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+.partner-bottom-panel__body::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary, #9B9A9B);
+}
+
+/* Responsive: relax max-height on mobile */
+@media (max-width: 768px) {
+  .partner-bottom-panel {
+    max-height: none;
+  }
+}
+
+/* Inline transcript list inside the panel
+   (reuses existing .transcript-card styles) */
+.partner-bottom-panel .transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

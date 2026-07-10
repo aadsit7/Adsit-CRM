@@ -1,0 +1,187 @@
+/* ============================================
+   Keyboard Shortcuts Help Overlay
+   ============================================ */
+
+.hk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.hk-overlay--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hk-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 22, 64, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.hk-panel {
+  position: relative;
+  z-index: 1;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(11, 22, 64, 0.25), 0 4px 16px rgba(11, 22, 64, 0.12);
+  width: min(560px, 92vw);
+  max-height: min(640px, 90vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(-8px) scale(0.98);
+  transition: transform 0.18s ease;
+}
+
+.hk-overlay--visible .hk-panel {
+  transform: translateY(0) scale(1);
+}
+
+/* Header */
+.hk-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.hk-panel__title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.hk-panel__close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+.hk-panel__close:hover {
+  background: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+/* Body */
+.hk-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Groups */
+.hk-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hk-group__title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* Rows */
+.hk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition: background 0.1s;
+}
+
+.hk-row:hover {
+  background: var(--color-bg);
+}
+
+.hk-desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.hk-keys {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.hk-plus {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  padding: 0 2px;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  min-width: 24px;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+/* Footer */
+.hk-panel__footer {
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border-light);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.hk-panel__footer kbd {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+}
+
+/* Scrollbar */
+.hk-panel__body::-webkit-scrollbar {
+  width: 4px;
+}
+.hk-panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hk-panel__body::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}

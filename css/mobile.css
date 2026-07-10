@@ -1,0 +1,431 @@
+/* ============================================
+   Mobile / iPhone Chrome Optimization
+   Additive overrides. Loaded LAST so it wins by
+   source order (no !important unless unavoidable).
+   Scoped inside @media (max-width: 768px) so the
+   desktop experience stays untouched.
+   ============================================ */
+
+/* ---------- Always-on: safe-area tokens + tap feel ---------- */
+:root {
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  -webkit-tap-highlight-color: rgba(47, 107, 255, 0.12);
+}
+
+/* ============================================
+   Mobile viewport (<= 768px)
+   ============================================ */
+@media (max-width: 768px) {
+
+  /* ---------- 1. Viewport height fix (dvh, with vh fallback) ----------
+     iOS Chrome's dynamic URL bar makes 100vh *taller* than the visible
+     viewport, so login / modal submit buttons hide below the fold.
+     dvh tracks the currently-visible viewport; vh is the fallback. */
+  .app-shell--login {
+    height: 100vh;                /* fallback */
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow-y: auto;             /* scroll login card if it ever exceeds viewport */
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+
+  .app-shell--app {
+    height: 100vh;                /* fallback */
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  /* Make the scrollable view area respect dvh too */
+  .view-container {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ---------- 2. Kill iOS focus-zoom on form inputs ----------
+     iOS zooms into any input with font-size < 16px on focus.
+     Bumping to 16px eliminates that behavior without changing layout. */
+  .form-input,
+  .form-select,
+  .form-textarea,
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Keep existing height; just the font grows */
+  .form-input,
+  .form-select {
+    height: 44px;                 /* also bumps tap area from 40 -> 44 */
+  }
+
+  .form-textarea {
+    min-height: 120px;
+  }
+
+  /* ---------- 3. Tap targets >= 44px (Apple HIG) ---------- */
+  .btn {
+    min-height: 44px;
+    font-size: 14px;
+    padding: 10px 18px;
+  }
+
+  .btn--sm {
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .btn--lg {
+    min-height: 48px;
+  }
+
+  .sidebar__link {
+    min-height: 44px;
+    padding: var(--space-3);
+    font-size: var(--text-base);
+  }
+
+  .sidebar__logout {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal__close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .topbar__hamburger {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ---------- 4. Safe-area insets (notch, home indicator) ----------
+     height → min-height + wrap: pages that put filter chips / CTAs in the
+     topbar (#topbar-actions) get a second, full-width topbar row on phones
+     instead of overflowing the fixed-height bar onto the content. */
+  .topbar {
+    padding-top: var(--safe-top);
+    padding-left: calc(var(--space-4) + var(--safe-left));
+    padding-right: calc(var(--space-4) + var(--safe-right));
+    height: auto;
+    min-height: calc(var(--header-height) + var(--safe-top));
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+
+  .sidebar {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .modal-backdrop {
+    padding-top: calc(var(--space-4) + var(--safe-top));
+    padding-bottom: calc(var(--space-4) + var(--safe-bottom));
+    padding-left: calc(var(--space-4) + var(--safe-left));
+    padding-right: calc(var(--space-4) + var(--safe-right));
+  }
+
+  .modal {
+    /* Override responsive.css:228 max-height:100vh which overflowed. */
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 32px);
+    margin: 0;                    /* padding on backdrop instead */
+  }
+
+  .modal__footer {
+    padding-bottom: calc(var(--space-3) + var(--safe-bottom));
+    position: sticky;
+    bottom: 0;
+    background: var(--color-surface);
+    z-index: 1;
+  }
+
+  .login-card {
+    margin-bottom: calc(var(--space-4) + var(--safe-bottom));
+  }
+
+  /* Toast container should dodge the notch too */
+  .toast-container {
+    top: calc(var(--space-4) + var(--safe-top));
+    left: calc(var(--space-4) + var(--safe-left));
+    right: calc(var(--space-4) + var(--safe-right));
+  }
+
+  /* ---------- 5. Randy voice widget + overlays ---------- */
+  .randy {
+    bottom: calc(12px + var(--safe-bottom));
+    right: calc(12px + var(--safe-right));
+  }
+
+  .randy-window {
+    max-height: 100dvh;
+  }
+
+  /* Override randy.css:701 which uses 100vh !important.
+     Match the selector specificity + add !important to win. */
+  .randy--fullscreen .randy-window {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  /* ---------- 6. Kanban hover actions visible on touch ----------
+     Components.css:2498 sets opacity:0, only revealing on :hover.
+     Touch devices never fire :hover, so actions are unreachable.
+     !important needed because the inline opacity:0 rule has the
+     same specificity and would tie. */
+  .kanban__card-actions {
+    opacity: 1 !important;
+    position: static;
+    margin-top: var(--space-2);
+    justify-content: flex-end;
+  }
+
+  .kanban__card {
+    padding-right: var(--space-3);
+  }
+
+  /* ---------- 7. Tap feedback (substitute for :hover) ---------- */
+  .btn:active,
+  .sidebar__link:active,
+  .kanban__card:active,
+  .card:active,
+  .stat-card:active,
+  .modal__close:active,
+  .topbar__hamburger:active {
+    transform: scale(0.97);
+    transition: transform 80ms ease;
+  }
+
+  /* ---------- 8. Topbar title must shrink, not push actions off-screen ----
+     .topbar is flex; the title block had no min-width:0, so a rich title
+     ("DASHBOARD · 8 partners · $1,215,000 pipeline …") could not shrink:
+     the meta clipped at the screen edge and any topbar CTA ("+ New Event")
+     was shoved out of the viewport entirely. Let it shrink and ellipsize. */
+  .topbar__title {
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+  }
+
+  .topbar__title:not(.topbar__title--rich) {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .topbar__meta {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  /* Chips + CTAs drop to their own full-width topbar row; the chip strip
+     scrolls horizontally (it is already nowrap + overflow-x), CTAs keep
+     their size. An empty actions zone disappears so plain-title pages
+     keep the normal single-row topbar height. */
+  .topbar__actions {
+    flex: 1 1 100%;
+    min-width: 0;
+    padding-bottom: var(--space-2);
+  }
+
+  .topbar__actions:empty {
+    display: none;
+  }
+
+  .topbar__chips {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* The chip strip must stay a single line so .topbar__chips' horizontal
+     scrolling works; wrapped pills collided with the pinned CTA. */
+  .topbar__chips .type-filter-bar {
+    flex-wrap: nowrap;
+  }
+
+  .topbar__actions .topbar__cta,
+  .topbar__actions .partner-detail-page__section-cta {
+    flex-shrink: 0;
+  }
+
+  /* ---------- 9. Data tables → stacked cards ----------
+     An 8-column table cannot fit a 390px screen; worse, the table wrappers
+     clip overflow (overflow: hidden), so columns were sliced mid-letter
+     with no way to scroll to them. Each row becomes a card and each cell a
+     label/value line. Labels come from data-label attributes stamped from
+     the column headers by js/utils/mobile-tables.js. */
+  .table-wrapper,
+  .events-page__table-wrapper {
+    overflow: visible;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .table,
+  .events-page__table {
+    min-width: 0;          /* responsive.css forces 600px for .table */
+    width: 100%;
+  }
+
+  .table thead,
+  .events-page__table thead {
+    display: none;
+  }
+
+  .table tbody,
+  .events-page__table tbody {
+    display: block;
+  }
+
+  .table tbody tr,
+  .events-page__table tbody tr {
+    display: block;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-3);
+  }
+
+  .table tbody td,
+  .events-page__table tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    min-width: 0;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--color-border-light);
+    font-size: 14px;
+    text-align: right;
+  }
+
+  .table tbody tr td:last-child,
+  .events-page__table tbody tr td:last-child {
+    border-bottom: 0;
+  }
+
+  .table tbody td::before,
+  .events-page__table tbody td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  /* First cell = the card title: no label, leading alignment, larger */
+  .table tbody td:first-child,
+  .events-page__table tbody td:first-child {
+    display: block;
+    text-align: left;
+    font-size: 15px;
+    padding-top: 0;
+  }
+
+  .table tbody td:first-child::before,
+  .events-page__table tbody td:first-child::before {
+    content: none;
+  }
+
+  /* Cells the stamper skipped (no matching header) lay out plainly */
+  .table tbody td:not([data-label]),
+  .events-page__table tbody td:not([data-label]) {
+    display: block;
+    text-align: left;
+  }
+
+  .table tbody td:not([data-label])::before,
+  .events-page__table tbody td:not([data-label])::before {
+    content: none;
+  }
+
+  /* Action buttons: the buttons speak for themselves — drop the label */
+  .table tbody td[data-label="Actions"]::before,
+  .events-page__table tbody td[data-label="Actions"]::before {
+    content: none;
+  }
+
+  .table tbody td[data-label="Actions"],
+  .events-page__table tbody td[data-label="Actions"] {
+    justify-content: flex-end;
+  }
+
+  .table__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /* Row-hover tint reads as a misrender on touch screens */
+  .table tr:hover td,
+  .events-page__table tbody tr:hover td {
+    background: transparent;
+  }
+
+  /* ---------- 10. Partner-detail section headers wrap ----------
+     Title + "View All Events"/"New Event" CTAs sat on one non-wrapping
+     row, so the buttons ran off the right edge of the screen. */
+  .partner-detail-page__section-header {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .partner-detail-page__section-title {
+    flex-wrap: wrap;
+  }
+
+  .partner-detail-page__section-actions {
+    flex-wrap: wrap;
+  }
+
+  .partner-detail-page__section-cta {
+    min-height: 40px;
+  }
+
+  /* ---------- 11. Form row stacking already handled elsewhere ---------- */
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  /* Prevent horizontal page scroll from rogue wide elements */
+  html, body {
+    overflow-x: hidden;
+  }
+}
+
+/* Small phones (<= 380px) — slightly tighter padding */
+@media (max-width: 380px) {
+  .btn {
+    padding: 10px 14px;
+  }
+
+  .view-container {
+    padding: var(--space-3);
+  }
+}

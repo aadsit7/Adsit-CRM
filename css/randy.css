@@ -1,0 +1,1561 @@
+/* ============================================
+   Randy — Floating Chat Window
+   Three states: collapsed, open, fullscreen
+   ============================================ */
+
+/* ── Container ─────────────────────────────────────────────────── */
+.randy {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+}
+
+/* ── STATE 1: Collapsed Avatar Button ──────────────────────────── */
+.randy__btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid #2F6BFF;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 200ms ease-out, border-color 200ms ease-out, transform 200ms ease-out;
+}
+
+.randy__btn:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.randy__btn:active {
+  transform: scale(0.96);
+}
+
+.randy__btn:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: 2px;
+}
+
+.randy__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+  pointer-events: none;
+}
+
+.randy__hint {
+  display: none;
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 10px;
+  color: #8888AA;
+  pointer-events: none;
+}
+
+/* Passive pulse */
+.randy--passive .randy__btn {
+  animation: randyPulse 3s infinite ease-in-out;
+}
+.randy--passive .randy__hint { display: block; }
+
+@keyframes randyPulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); }
+  50% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 4px rgba(47, 107, 255, 0.15); }
+}
+
+/* Listening red */
+.randy--listening .randy__btn {
+  border-color: #dc2626;
+  animation: randyListenPulse 3s infinite ease-in-out;
+}
+
+@keyframes randyListenPulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); }
+  50% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 4px rgba(220, 38, 38, 0.15); }
+}
+
+/* Speaking green */
+.randy--speaking .randy__btn {
+  border-color: #0A8F82;
+  animation: randySpeakPulse 500ms infinite ease-in-out;
+}
+
+@keyframes randySpeakPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+/* Processing spinner overlay */
+.randy--processing .randy__btn::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: #2F6BFF;
+  border-radius: 50%;
+  background: #fff;
+  animation: randySpin 0.7s infinite linear;
+}
+
+@keyframes randySpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Confirming amber */
+.randy--confirming .randy__btn { border-color: #B97A1A; }
+
+/* Wake flash */
+.randy--flash .randy__btn {
+  border-color: #fff !important;
+  box-shadow: 0 0 0 6px rgba(47, 107, 255, 0.2) !important;
+  transition: none;
+}
+
+/* Hide button and stop animations when window is open */
+.randy--open .randy__btn,
+.randy--open .randy__hint,
+.randy--fullscreen .randy__btn,
+.randy--fullscreen .randy__hint {
+  display: none;
+  animation: none;
+}
+
+/* ── STATE 2: Pop-out Chat Window ──────────────────────────────── */
+.randy-window {
+  display: none;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 40px));
+  height: min(820px, calc(100vh - 40px));
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  position: relative;
+  min-width: 300px;
+  min-height: 400px;
+  max-width: 100vw;
+  max-height: 100vh;
+  animation: randyWindowOpen 200ms ease-out;
+}
+
+.randy--open .randy-window {
+  display: flex;
+}
+
+@keyframes randyWindowOpen {
+  from { opacity: 0; transform: scale(0.85) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Resize Handles ───────────────────────────────────────────── */
+.randy-resize {
+  position: absolute;
+  z-index: 2;
+}
+.randy-resize--n  { top: -3px; left: 10px; right: 10px; height: 6px; cursor: n-resize; }
+.randy-resize--s  { bottom: -3px; left: 10px; right: 10px; height: 6px; cursor: s-resize; }
+.randy-resize--w  { left: -3px; top: 10px; bottom: 10px; width: 6px; cursor: w-resize; }
+.randy-resize--e  { right: -3px; top: 10px; bottom: 10px; width: 6px; cursor: e-resize; }
+.randy-resize--nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
+.randy-resize--ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
+.randy-resize--sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+.randy-resize--se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
+
+.randy--resizing .randy-window {
+  transition: none !important;
+  user-select: none;
+}
+
+/* ── Title Bar ─────────────────────────────────────────────────── */
+.randy-window__titlebar {
+  height: 36px;
+  background: #171D2B;
+  color: #fff;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 10px;
+  gap: 8px;
+  cursor: grab;
+  flex-shrink: 0;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.randy-window__titlebar:active { cursor: grabbing; }
+
+.randy-window__titlebar-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  flex-shrink: 0;
+}
+
+.randy-window__titlebar-name {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.randy-window__controls {
+  display: flex;
+  gap: 2px;
+}
+
+.randy-window__ctrl {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  transition: background 150ms, color 150ms;
+}
+
+.randy-window__ctrl:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* ── Chat Area ─────────────────────────────────────────────────── */
+.randy-window__chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+}
+
+/* Welcome state */
+.randy-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 16px;
+  flex: 1;
+  gap: 8px;
+}
+
+.randy-welcome__avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  background: #f3f4f6;
+  padding: 16px;
+  box-sizing: content-box;
+  margin-bottom: 4px;
+}
+
+.randy-welcome__text {
+  font-size: 14px;
+  color: #4A5468;
+  margin: 0;
+}
+
+/* Chat messages */
+.randy-msg {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  max-width: 85%;
+  animation: randyMsgIn 150ms ease-out;
+}
+
+.randy-msg--user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.randy-msg--assistant {
+  align-self: flex-start;
+}
+
+.randy-msg__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.randy-bubble {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  position: relative;
+}
+
+.randy-msg--user .randy-bubble {
+  background: #2F6BFF;
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+
+.randy-msg--assistant .randy-bubble {
+  background: #F5F5FA;
+  color: #171D2B;
+  border-bottom-left-radius: 3px;
+}
+
+/* Markdown in assistant bubbles */
+.randy-msg--assistant .randy-bubble strong { color: #2F6BFF; }
+.randy-msg--assistant .randy-bubble code {
+  background: #e8e8f0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.randy-msg--assistant .randy-bubble p { margin: 0 0 6px 0; }
+.randy-msg--assistant .randy-bubble p:last-child { margin-bottom: 0; }
+.randy-msg--assistant .randy-bubble ul { margin: 4px 0; padding-left: 18px; }
+.randy-msg--assistant .randy-bubble li { margin-bottom: 2px; }
+.randy-msg--assistant .randy-bubble h3,
+.randy-msg--assistant .randy-bubble h4 {
+  margin: 10px 0 4px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #171D2B;
+}
+.randy-msg--assistant .randy-bubble h3:first-child,
+.randy-msg--assistant .randy-bubble h4:first-child { margin-top: 0; }
+.randy-msg--assistant .randy-bubble hr {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 8px 0;
+}
+/* Scrollable wrapper so wide comparison tables don't overflow the bubble */
+.randy-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 8px 0;
+  border: 1px solid #e3e3ea;
+  border-radius: 6px;
+}
+.randy-msg--assistant .randy-bubble .randy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: auto;
+  background: #fff;
+  /* Border/radius handled by .randy-table-wrap */
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+}
+.randy-msg--assistant .randy-bubble .randy-table th,
+.randy-msg--assistant .randy-bubble .randy-table td {
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #eceef3;
+  word-break: break-word;
+  min-width: 80px;
+}
+.randy-msg--assistant .randy-bubble .randy-table thead th {
+  background: #f4f5fa;
+  color: #171D2B;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 2px solid #d8dae3;
+  white-space: nowrap;   /* prevent multi-word headers from line-breaking */
+}
+/* First column (label/dimension) stays compact and never breaks */
+.randy-msg--assistant .randy-bubble .randy-table th:first-child,
+.randy-msg--assistant .randy-bubble .randy-table td:first-child {
+  white-space: nowrap;
+  font-weight: 600;
+  color: #4a4a6a;
+  background: #f8f8fc;
+  border-right: 1px solid #e3e3ea;
+}
+.randy-msg--assistant .randy-bubble .randy-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.randy-msg--assistant .randy-bubble .randy-table tbody tr:nth-child(even) td {
+  background: #fafbfd;
+}
+.randy-msg--assistant .randy-bubble .randy-table tbody tr:nth-child(even) td:first-child {
+  background: #f4f4f8;
+}
+
+/* Voice badge */
+.randy-badge-voice {
+  display: inline-block;
+  font-size: 9px;
+  margin-left: 4px;
+  opacity: 0.6;
+  vertical-align: middle;
+}
+
+/* Typing indicator */
+.randy-typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.randy-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2F6BFF;
+  animation: randyBounce 1.2s infinite;
+}
+.randy-typing span:nth-child(2) { animation-delay: 0.15s; }
+.randy-typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes randyBounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+
+@keyframes randyMsgIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Action confirmation card (in-chat) */
+.randy-action-card {
+  background: #F7F9FD;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-top: 4px;
+  align-self: flex-start;
+  max-width: 85%;
+}
+
+.randy-action-card__summary {
+  font-weight: 500;
+  color: #171D2B;
+  margin-bottom: 6px;
+}
+
+.randy-action-card__buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.randy-action-card__confirm,
+.randy-action-card__cancel {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.randy-action-card__confirm {
+  background: #2F6BFF;
+  color: #fff;
+  border-color: #2F6BFF;
+}
+.randy-action-card__confirm:hover { background: #0000aa; }
+
+.randy-action-card__cancel {
+  background: #fff;
+  color: #4A5468;
+}
+.randy-action-card__cancel:hover { background: #f5f5fa; }
+
+.randy-action-card__status {
+  font-size: 11px;
+  color: #0A8F82;
+  font-weight: 500;
+}
+.randy-action-card__status--cancelled { color: #dc2626; }
+
+/* ── Status Bar ────────────────────────────────────────────────── */
+.randy-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 12px 2px;
+  min-height: 22px;
+  flex-shrink: 0;
+}
+
+.randy-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #d1d5db;
+}
+
+.randy-status-dot--listening {
+  background: #16a34a;
+  animation: randyDotListenPulse 1.2s infinite ease-in-out;
+}
+
+@keyframes randyDotListenPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+.randy-status-dot--thinking {
+  background: #2563eb;
+  animation: randyDotThinkPulse 1s infinite ease-in-out;
+}
+
+@keyframes randyDotThinkPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.randy-status-dot--speaking {
+  background: #2563eb;
+  animation: randyDotSpeakPulse 0.7s infinite ease-in-out;
+}
+
+@keyframes randyDotSpeakPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.6; }
+}
+
+.randy-status-dot--muted {
+  background: #dc2626;
+}
+
+.randy-status-dot--ready {
+  background: #d1d5db;
+}
+
+.randy-status-label {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  transition: color 200ms ease-out;
+}
+
+.randy-status-label--listening { color: #16a34a; }
+.randy-status-label--thinking { color: #2563eb; }
+.randy-status-label--speaking { color: #2563eb; }
+.randy-status-label--muted { color: #dc2626; }
+.randy-status-label--ready { color: #9ca3af; }
+
+/* ── Voice Button Bottom Area ───────────────────────────────────── */
+.randy-window__bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 12px 16px;
+  background: #F7F9FD;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.randy-window__voice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+/* Button + label wrapper */
+.randy-btn-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.randy-btn-label {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+/* Shared control button base */
+.randy-ctrl-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
+  background: white;
+  color: #6b7280;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 200ms ease-out, border-color 200ms ease-out, color 200ms ease-out, box-shadow 200ms ease-out;
+  flex-shrink: 0;
+}
+
+.randy-ctrl-btn:active { transform: scale(0.93); }
+
+/* Voice button states */
+.randy-ctrl-btn--voice-active {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.randy-ctrl-btn--voice-listening {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+  animation: randyVoiceListenGlow 1.5s infinite ease-out;
+}
+
+@keyframes randyVoiceListenGlow {
+  0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.45); }
+  100% { box-shadow: 0 0 0 12px rgba(22, 163, 74, 0); }
+}
+
+/* Type button states */
+.randy-ctrl-btn--type-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+/* Mute button states */
+.randy-ctrl-btn--muted {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.randy-input-row {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.randy-text-input {
+  flex: 1;
+  height: 44px;
+  padding: 0 10px;
+  font-size: 13px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  background: white;
+  color: #171D2B;
+  box-sizing: border-box;
+}
+.randy-text-input:focus { border-color: #2F6BFF; box-shadow: 0 0 0 2px rgba(47,107,255,0.08); }
+.randy-text-input::placeholder { color: #9ca3af; }
+
+.randy-send-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: none;
+  background: #2F6BFF;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 150ms;
+}
+.randy-send-btn:hover { background: #0000aa; }
+
+/* ── Interim transcription bubble ──────────────────────────────── */
+.randy-msg--interim .randy-bubble {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* ── Speaking highlight on assistant message ────────────────────── */
+.randy-msg--speaking .randy-bubble {
+  border-left: 2px solid #2F6BFF;
+  padding-left: 10px;
+}
+
+/* ── STATE 3: Fullscreen ───────────────────────────────────────── */
+.randy__backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 9998;
+}
+
+.randy--fullscreen .randy__backdrop { display: block; }
+
+.randy--fullscreen .randy-window {
+  position: fixed;
+  inset: 20px;
+  width: auto !important;
+  height: auto !important;
+  max-width: none;
+  max-height: none;
+  border-radius: 12px;
+  z-index: 9999;
+  resize: none;
+  transition: all 300ms ease-out;
+}
+
+.randy--fullscreen .randy-resize { display: none; }
+
+.randy--fullscreen .randy-window__titlebar {
+  border-radius: 12px 12px 0 0;
+}
+
+/* ── Focus States (keyboard accessibility) ─────────────────────── */
+.randy-window__ctrl:focus-visible,
+.randy-voice-btn:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: 1px;
+}
+
+/* ── Dragging State ────────────────────────────────────────────── */
+.randy--dragging .randy-window {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 200ms;
+}
+
+.randy--dragging .randy-window__titlebar { cursor: grabbing; }
+
+/* ── Error Overlay ─────────────────────────────────────────────── */
+.randy__error {
+  display: none;
+  position: absolute;
+  bottom: 48px;
+  right: 0;
+  background: #fff;
+  color: #171D2B;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.randy--error .randy__error { display: block; }
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .randy {
+    bottom: 12px;
+    right: 12px;
+  }
+
+  .randy-window {
+    position: fixed !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: clamp(300px, 60vh, 90vh) !important;
+    border-radius: 12px 12px 0 0;
+    max-width: none;
+    resize: none;
+  }
+
+  .randy-resize { display: none; }
+
+  .randy-window__titlebar {
+    border-radius: 12px 12px 0 0;
+    cursor: default;
+  }
+
+  .randy--fullscreen .randy-window {
+    inset: 0;
+    height: 100vh !important;
+    border-radius: 0;
+  }
+}
+
+/* ── Mode Selector (Assistant Presets) ───────────────────────────── */
+/* Dropdown of preset modes opened from the Voice/Mute/Type row. The
+   button itself doubles as the active-mode indicator — colored ring
+   plus the mode name as its sub-label. */
+.randy-btn-wrap--mode {
+  position: relative;
+  max-width: 72px;
+}
+.randy-btn-wrap--mode[hidden] { display: none; }
+
+.randy-ctrl-btn--mode { position: relative; }
+.randy-ctrl-btn--mode:hover {
+  border-color: #9ca3af;
+  color: #1f2937;
+}
+.randy-ctrl-btn--mode-active {
+  border-color: var(--mode-color, #2F6BFF);
+  color: var(--mode-color, #2F6BFF);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mode-color, #2F6BFF) 18%, transparent);
+}
+.randy-ctrl-btn--mode-open {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.randy-mode-btn__caret {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+.randy-ctrl-btn--mode-active .randy-mode-btn__caret {
+  border-color: var(--mode-color, #2F6BFF);
+  color: var(--mode-color, #2F6BFF);
+}
+
+/* Cap the label width so an active mode with a long name doesn't push
+   this button wider than its siblings. */
+.randy-btn-label--mode {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.randy-mode-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 180px;
+  max-width: 240px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: randyMenuOpen 120ms ease-out;
+}
+.randy-mode-menu[hidden] { display: none; }
+@keyframes randyMenuOpen {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.randy-mode-menu::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #fff;
+  filter: drop-shadow(0 1px 0 #e5e7eb);
+}
+
+.randy-mode-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1f2937;
+  text-align: left;
+  line-height: 1.3;
+}
+.randy-mode-item:hover { background: #f3f4f6; }
+.randy-mode-item:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: -2px;
+}
+.randy-mode-item--active {
+  background: #f0f0ff;
+  color: #2F6BFF;
+  font-weight: 600;
+}
+.randy-mode-item__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #6b7280;
+}
+.randy-mode-item__dot--default {
+  background: transparent;
+  border: 1.5px solid #9ca3af;
+}
+.randy-mode-item__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.randy-mode-item__check {
+  display: inline-flex;
+  color: #2F6BFF;
+  flex-shrink: 0;
+}
+
+/* Copy button on assistant messages */
+.randy-copy-btn {
+  display: block;
+  margin-top: 6px;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #aaaabd;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+  opacity: 0;
+  pointer-events: none;
+}
+.randy-bubble:hover .randy-copy-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.randy-copy-btn:hover {
+  color: #2F6BFF;
+  background: #e8e8f0;
+}
+.randy-copy-btn--copied {
+  color: #28a745 !important;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* MAP PDF download card — shown after Randy finishes generating a
+   Mutual Action Plan PDF. Rendered via the response-container /
+   sanitizeHTML path so it survives the XSS sanitizer. */
+.randy-map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #d8d8e8;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fafaff 0%, #f2f2fa 100%);
+  margin: 4px 0;
+}
+.randy-map-card__header {
+  font-weight: 600;
+  font-size: 14px;
+  color: #2F6BFF;
+  letter-spacing: -0.01em;
+}
+.randy-map-card__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  padding: 10px 18px;
+  background: #2F6BFF;
+  color: #fff !important;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s, transform 0.05s;
+  cursor: pointer;
+}
+.randy-map-card__btn:hover {
+  background: #0000aa;
+}
+.randy-map-card__btn:active {
+  transform: translateY(1px);
+}
+/* Fallback variant used when the Apps Script upload response didn't
+   surface a Drive URL. Still the primary action, still Recast-brand,
+   but nudges the user toward the in-portal Documents list instead of
+   a broken external link. */
+.randy-map-card__btn--in-portal {
+  background: #171D2B;
+}
+.randy-map-card__btn--in-portal:hover {
+  background: #0e0e1a;
+}
+.randy-map-card__filename {
+  font-size: 11px;
+  color: #888;
+  word-break: break-all;
+}
+.randy-map-card__flags {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: #fff6e0;
+  border: 1px solid #f0d79a;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #6b4e00;
+}
+.randy-map-card__flags summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.randy-map-card__flags > div {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+/* ============================================================
+ * MAP PDF success/failure cards (the V2 JSON-flow variants —
+ * replace the old download-button card styling). The base
+ * .randy-map-card rules above still apply; these add colour
+ * borders and action-area layout.
+ * ============================================================ */
+.randy-map-card--success {
+  border-left: 3px solid #0A8F82;
+}
+.randy-map-card--warning {
+  border-left: 3px solid #B97A1A;
+  background: linear-gradient(180deg, #fffbf2 0%, #fff6e0 100%);
+}
+.randy-map-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.randy-map-card__title-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.randy-map-card--success .randy-map-card__title-icon { color: #0A8F82; }
+.randy-map-card--warning .randy-map-card__title-icon { color: #B97A1A; }
+.randy-map-card__subline {
+  font-size: 12px;
+  color: #555;
+}
+.randy-map-card__filename {
+  /* already styled above — keep here as a guard in case selector
+   * specificity fights — this block is harmless if duplicated. */
+}
+.randy-map-card__details {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #555;
+}
+.randy-map-card__details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.randy-map-card__details pre {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #f7f7fb;
+  border: 1px solid #dddde8;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+}
+.randy-map-card__secondary-link {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #2F6BFF;
+  text-decoration: none;
+}
+.randy-map-card__secondary-link:hover { text-decoration: underline; }
+
+/* Compact "Try again" secondary button used in the warning card. */
+.randy-map-card__retry {
+  align-self: flex-start;
+  padding: 7px 14px;
+  background: #B97A1A;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.randy-map-card__retry:hover { background: #aa7200; }
+
+/* ============================================================
+ * MAP PDF progress pill stack
+ * ============================================================ */
+.randy-map-pill-stack {
+  position: absolute;
+  right: 12px;
+  bottom: 72px;       /* clear Randy's input row */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 40;
+  pointer-events: none;   /* stack is a positioning container; pills opt back in */
+}
+.randy-map-pill {
+  display: inline-flex;
+  flex-wrap: wrap;          /* allows .randy-map-pill__label to break to its own row */
+  align-items: center;
+  gap: 6px 8px;
+  max-width: 260px;
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid #ddde;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(26, 26, 46, 0.10);
+  font-size: 12px;
+  font-weight: 600;
+  color: #171D2B;
+  pointer-events: auto;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.randy-map-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #2A7FFF;
+}
+.randy-map-pill__icon svg { width: 100%; height: 100%; }
+.randy-map-pill__spinner-svg { animation: randy-map-pill-spin 0.9s linear infinite; }
+@keyframes randy-map-pill-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.randy-map-pill__stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.randy-map-pill__elapsed {
+  font-weight: 500;
+  color: #888;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.randy-map-pill--warn .randy-map-pill__icon { color: #B97A1A; }
+.randy-map-pill--warn { border-color: #f0d79a; background: #fffaf0; }
+.randy-map-pill--success .randy-map-pill__icon { color: #0A8F82; }
+.randy-map-pill--success .randy-map-pill__elapsed { color: #0A8F82; }
+.randy-map-pill--success { border-color: #b9dfc7; background: #f1faf4; }
+.randy-map-pill--failure .randy-map-pill__icon { color: #B97A1A; }
+.randy-map-pill--failure { border-color: #f0d79a; background: #fffaf0; }
+.randy-map-pill--fading {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* When the Randy window is collapsed to a bubble, the in-panel pill stack
+   shouldn't overhang into the page — it'll still work, just constrained. */
+.randy--collapsed .randy-map-pill-stack { display: none; }
+
+/* V1.5: scoped pill stack (legacy — kept for any future explicit use). */
+.randy-map-pill-stack--scoped {
+  position: absolute;
+  right: 40px;
+  bottom: 40px;
+  top: auto;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.randy-map-pill-stack--scoped .randy-map-pill {
+  pointer-events: auto;
+}
+
+/* V2: global body-fixed pill stack. Lives at viewport bottom-right,
+   always visible regardless of which modal or view is active. Used by
+   all background MAP PDF jobs (click-flow and Randy voice flow). */
+#map-pdf-global-pill-stack {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column-reverse; /* newest pill at bottom, older ones above */
+  gap: 8px;
+  pointer-events: none;
+}
+#map-pdf-global-pill-stack .randy-map-pill {
+  pointer-events: auto;
+}
+/* Label line — shows which opportunity this pill belongs to.
+   flex: 0 0 100% forces it to occupy its own row (flex-wrap: wrap on the pill). */
+.randy-map-pill__label {
+  flex: 0 0 100%;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+/* ===========================================================
+   V1.5 — Opportunity dialog MAP PDF cards + Generate MAP button
+   =========================================================== */
+
+.details-modal__section-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.details-modal__generate-map-btn {
+  background: #2F6BFF;
+  color: #fff;
+  border: 1px solid #2F6BFF;
+  font-weight: 600;
+}
+.details-modal__generate-map-btn:hover {
+  background: #0000AA;
+  border-color: #0000AA;
+}
+.details-modal__generate-map-btn:active {
+  background: #00008F;
+}
+
+.description-select__cta--generate {
+  background: #2F6BFF;
+  border-color: #2F6BFF;
+}
+.description-select__cta--generate:disabled {
+  background: #8888CC;
+  border-color: #8888CC;
+  opacity: 0.65;
+}
+
+.details-modal__map-card-slot {
+  margin-bottom: 12px;
+}
+.details-modal__map-card-slot:empty {
+  display: none;
+}
+
+.opp-map-card {
+  position: relative;
+  border: 1px solid #d4dbf0;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #F0F4FB;
+  padding: 12px 36px 12px 14px;
+  box-shadow: 0 1px 3px rgba(26, 26, 46, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: opp-map-card-in 0.22s ease-out;
+}
+@keyframes opp-map-card-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.opp-map-card--success {
+  border-color: #b9dfc7;
+  border-left-color: #0A8F82;
+  background: #f1faf4;
+}
+.opp-map-card--warning {
+  border-color: #f0d79a;
+  border-left-color: #B97A1A;
+  background: #fffaf0;
+}
+
+.opp-map-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.opp-map-card__title-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.opp-map-card__title-icon svg { width: 100%; height: 100%; }
+.opp-map-card--success .opp-map-card__title-icon { color: #0A8F82; }
+.opp-map-card--warning .opp-map-card__title-icon { color: #B97A1A; }
+
+.opp-map-card__header {
+  font-weight: 700;
+  font-size: 14px;
+  color: #171D2B;
+  flex: 1 1 auto;
+}
+
+.opp-map-card__dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.opp-map-card__dismiss:hover {
+  background: rgba(26, 26, 46, 0.08);
+  color: #171D2B;
+}
+
+.opp-map-card__subline {
+  font-size: 13px;
+  color: #171D2B;
+}
+
+.opp-map-card__filename {
+  font-size: 12px;
+  color: #555;
+  word-break: break-all;
+}
+
+.opp-map-card__btn {
+  align-self: flex-start;
+  margin-top: 4px;
+  display: inline-block;
+  background: #2F6BFF;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid #2F6BFF;
+  cursor: pointer;
+}
+.opp-map-card__btn:hover  { background: #0000AA; border-color: #0000AA; }
+.opp-map-card__btn:active { background: #00008F; }
+
+.opp-map-card__btn--in-portal {
+  background: #2A7FFF;
+  border-color: #2A7FFF;
+}
+.opp-map-card__btn--in-portal:hover { background: #1E66CC; border-color: #1E66CC; }
+
+.opp-map-card__details {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #555;
+}
+.opp-map-card__details summary {
+  cursor: pointer;
+  user-select: none;
+  color: #171D2B;
+  font-weight: 500;
+}
+.opp-map-card__details pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #444;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.opp-map-card__retry {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: #B97A1A;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+}
+.opp-map-card__retry:hover     { background: #aa7200; }
+.opp-map-card__retry:disabled  { opacity: 0.6; cursor: not-allowed; }
+
+/* ============================================================
+   Dedicated Randy page — docked mode
+   ------------------------------------------------------------
+   The dedicated "Randy" sidebar page hosts the SAME singleton
+   widget the floating assistant uses. dockRandy() relocates
+   #randy-widget into .randy-page and adds .randy--docked, which
+   pins the chat window to fill the page card instead of floating.
+   All rules use higher specificity (.randy--docked .foo) so they
+   beat the floating + mobile !important rules above, and !important
+   where they must override inline styles left by drag/resize.
+   ============================================================ */
+
+/* Page host — a full-height row split into two equal columns:
+   Randy on the left, the Quick Add form on the right. */
+.randy-page {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+
+/* Each column is its own card. */
+.randy-page__pane {
+  position: relative;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  box-shadow: 0 4px 24px rgba(11, 22, 64, 0.06);
+  background: #fff;
+}
+
+/* The form column scrolls internally; the embedded panel owns its own
+   header/body/footer layout. */
+.randy-page__pane--form {
+  background: #fff;
+}
+
+/* Stack the columns on narrow viewports. */
+@media (max-width: 900px) {
+  .randy-page {
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;
+  }
+  .randy-page__pane {
+    flex: 1 1 auto;
+    min-height: 480px;
+  }
+}
+
+/* Fallback shown when the browser has no Web Speech support and the
+   widget could not be mounted. */
+.randy-page__fallback {
+  margin: auto;
+  max-width: 420px;
+  padding: 32px;
+  text-align: center;
+  color: #4A5468;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.randy-page__fallback img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top center;
+  margin-bottom: 12px;
+}
+
+/* Docked widget fills the page host. */
+.randy--docked {
+  position: absolute !important;
+  inset: 0 !important;
+  bottom: auto;
+  right: auto;
+  z-index: auto;
+}
+
+.randy--docked .randy-window {
+  display: flex !important;
+  position: absolute !important;
+  inset: 0 !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* Hide the floating-only chrome while docked. */
+.randy--docked .randy__btn,
+.randy--docked .randy__hint,
+.randy--docked .randy__backdrop,
+.randy--docked .randy__error,
+.randy--docked .randy-resize,
+.randy--docked .randy-window__controls {
+  display: none !important;
+}
+
+/* Titlebar becomes a static page header — no grab cursor. */
+.randy--docked .randy-window__titlebar {
+  cursor: default;
+  border-radius: 0;
+}
+
+/* Comfortable but compact padding — the chat now lives in a half-width
+   column, so keep the horizontal inset modest. */
+.randy--docked .randy-window__chat {
+  padding: 18px clamp(14px, 3vw, 40px);
+}
+.randy--docked .randy-window__bottom {
+  padding-bottom: 22px;
+}
+
+/* Hide a control-row button wrap (used for the redundant Add button on
+   the split page, where the form is always visible). */
+.randy-btn-wrap--hidden {
+  display: none !important;
+}

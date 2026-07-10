@@ -1,0 +1,914 @@
+/* ============================================
+   Dashboard Page — Modern Functional Redesign
+   Scoped to admin dashboard only.
+   Does NOT affect Opportunities, Partners,
+   Accounts, Events, or Setup pages.
+   ============================================ */
+
+/* -----------------------------------------------
+   Base typography (dashboard context)
+   ----------------------------------------------- */
+.dashboard-top,
+#dashboard-activity-view,
+#dashboard-partners-view {
+  color: var(--color-text-secondary);
+}
+
+/* -----------------------------------------------
+   Top zone: KPI strip stacked above full-width chart
+   (was: 2x2 stats + chart side-by-side)
+   ----------------------------------------------- */
+.dashboard-top {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.dashboard-top__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-top__stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-top__stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* -----------------------------------------------
+   KPI Stat Cards (modern, icon-tile, accent strip)
+   ----------------------------------------------- */
+.dashboard-top__stats .stat-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  row-gap: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-left: 1px solid var(--color-border-light);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+  overflow: hidden;
+}
+
+.dashboard-top__stats .stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: currentColor;
+  opacity: 0.85;
+  color: var(--color-border);
+}
+
+/* Place icon top-right, label top-left, value below — a classic KPI layout */
+.dashboard-top__stats .stat-card__icon-wrap {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  opacity: 1;
+}
+
+.dashboard-top__stats .stat-card__icon-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.13;
+  border-radius: inherit;
+}
+
+.dashboard-top__stats .stat-card__icon-wrap svg {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+}
+
+.dashboard-top__stats .stat-card__label {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+
+.dashboard-top__stats .stat-card__value {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.dashboard-top__stats .stat-card--clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.dashboard-top__stats .stat-card--clickable:hover {
+  box-shadow: 0 8px 22px rgba(11, 22, 64, 0.10);
+  transform: translateY(-2px);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+.dashboard-top__stats .stat-card--active {
+  background: linear-gradient(180deg, rgba(47, 107, 255, 0.06) 0%, var(--color-surface) 65%);
+  box-shadow: 0 6px 18px rgba(47, 107, 255, 0.14);
+  transform: translateY(-1px);
+  border-color: rgba(47, 107, 255, 0.22);
+}
+
+.dashboard-top__stats .stat-card--active::before {
+  height: 4px;
+}
+
+.dashboard-top__stats .stat-card--active .stat-card__value {
+  color: var(--color-primary);
+}
+
+/* -----------------------------------------------
+   Opportunity Source Chart (full-width card)
+   ----------------------------------------------- */
+.dashboard-top__chart .demandgen-chart {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 14px;
+  padding: 22px 24px 20px;
+  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  height: auto;
+}
+
+.dashboard-top__chart .demandgen-chart__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+  margin-bottom: 2px;
+}
+
+.dashboard-top__chart .demandgen-chart__subtitle {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  margin-bottom: 18px;
+}
+
+.dashboard-top__chart .demandgen-bar-list {
+  gap: 4px;
+}
+
+.dashboard-top__chart .demandgen-bar-row {
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.dashboard-top__chart .demandgen-bar-row--clickable:hover {
+  background: rgba(47, 107, 255, 0.05);
+}
+
+.dashboard-top__chart .demandgen-bar-row--active {
+  background: rgba(47, 107, 255, 0.10);
+}
+
+.dashboard-top__chart .demandgen-bar-row__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  width: 200px;
+}
+
+.dashboard-top__chart .demandgen-bar-row__bar {
+  height: 12px;
+  background: var(--color-border-light);
+  border-radius: 99px;
+}
+
+.dashboard-top__chart .demandgen-bar-row__segment {
+  border-radius: 99px;
+  transition: filter 0.15s ease;
+}
+
+.dashboard-top__chart .demandgen-bar-row--clickable:hover .demandgen-bar-row__segment {
+  filter: brightness(1.08);
+}
+
+.dashboard-top__chart .demandgen-bar-row__value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.dashboard-top__chart .demandgen-legend {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-light);
+  gap: 12px 18px;
+}
+
+.dashboard-top__chart .demandgen-legend__item {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* -----------------------------------------------
+   Activity Hub / Partners — Tab Buttons
+   (view-toggle without type-filter-bar class)
+   ----------------------------------------------- */
+.view-toggle:not(.type-filter-bar) {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  gap: 4px;
+  margin: 4px 0 18px;
+  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+}
+
+.view-toggle:not(.type-filter-bar) .btn {
+  padding: 9px 18px;
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 600;
+  height: auto;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.view-toggle:not(.type-filter-bar) .btn:hover {
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.view-toggle:not(.type-filter-bar) .btn--primary {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  background: transparent;
+  box-shadow: none;
+}
+
+.view-toggle:not(.type-filter-bar) .btn--secondary {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  box-shadow: none;
+}
+
+/* -----------------------------------------------
+   Type Filter Bar (pill-style tabs)
+   ----------------------------------------------- */
+.view-toggle.type-filter-bar {
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 8px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.view-toggle.type-filter-bar .btn {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 7px 16px;
+  height: auto;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+
+.view-toggle.type-filter-bar .btn:hover {
+  background: var(--color-bg);
+  border-color: var(--color-text-muted);
+  transform: translateY(-1px);
+}
+
+.view-toggle.type-filter-bar .btn--primary {
+  background: var(--color-text-primary);
+  color: #ffffff;
+  border-color: var(--color-text-primary);
+  box-shadow: 0 2px 8px rgba(11, 22, 64, 0.18);
+}
+
+.view-toggle.type-filter-bar .btn--primary:hover {
+  background: var(--color-text-primary);
+}
+
+.view-toggle.type-filter-bar .btn .type-filter-label {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.view-toggle.type-filter-bar .btn .type-filter-pipeline {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  opacity: 1;
+}
+
+.view-toggle.type-filter-bar .btn--primary .type-filter-pipeline {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* -----------------------------------------------
+   Section Headers — accent bar + clear hierarchy
+   ----------------------------------------------- */
+#dashboard-activity-view .section-header,
+#dashboard-partners-view .section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+#dashboard-activity-view .section-header:first-child,
+#dashboard-partners-view .section-header:first-child {
+  margin-top: 0;
+}
+
+#dashboard-activity-view .section-header__title,
+#dashboard-partners-view .section-header__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.3;
+}
+
+#dashboard-activity-view .section-header__title::before,
+#dashboard-partners-view .section-header__title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  flex-shrink: 0;
+}
+
+#dashboard-activity-view .section-header__subtitle,
+#dashboard-partners-view .section-header__subtitle {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  margin: 0;
+  padding-left: 14px;
+  font-weight: 500;
+}
+
+#dashboard-activity-view .section-header + .activity-grid,
+#dashboard-activity-view .section-header + .empty-state,
+#dashboard-activity-view .section-header + .timeline-list {
+  margin-top: 0;
+}
+
+/* -----------------------------------------------
+   Partner Activity Cards (modern, breathable)
+   ----------------------------------------------- */
+.activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+.activity-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-card:hover {
+  box-shadow: 0 8px 24px rgba(11, 22, 64, 0.11);
+  transform: translateY(-3px);
+  border-color: var(--color-border);
+}
+
+.activity-card__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.activity-card__name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.005em;
+}
+
+/* Metrics: tinted block with grid layout (not flex with dividers) */
+.activity-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 0;
+  padding: 12px 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.activity-card__metric {
+  position: static;
+  padding: 0 4px;
+  text-align: center;
+  flex: none;
+  min-width: 0;
+}
+
+.activity-card__metric + .activity-card__metric::before {
+  display: none !important;
+  content: none !important;
+}
+
+.activity-card__metric-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-card__metric-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* Events list inside card */
+.activity-card__events {
+  margin-top: auto;
+}
+
+.activity-card__events-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.activity-card__event-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 0.15s ease;
+}
+
+.activity-card__event-chip:hover {
+  background: var(--color-bg);
+}
+
+.activity-card__event-name {
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-card__event-date {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.activity-card__event-more {
+  padding-left: 8px;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+}
+
+/* -----------------------------------------------
+   Upcoming Events Timeline — compact, calendar-feel
+   ----------------------------------------------- */
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  padding: 12px 16px 12px 12px;
+  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  cursor: pointer;
+  transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
+}
+
+.timeline-card:hover {
+  box-shadow: 0 6px 18px rgba(11, 22, 64, 0.10);
+  transform: translateY(-2px);
+  border-color: var(--color-border);
+}
+
+.timeline-card__date-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, #2A3FE0 100%);
+  border-radius: 10px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(47, 107, 255, 0.2);
+}
+
+.timeline-card__month {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.timeline-card__day {
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.timeline-card__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.timeline-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+  letter-spacing: -0.005em;
+}
+
+.timeline-card__details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-card .badge--xs {
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.timeline-card__partner {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.timeline-card__location {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.timeline-card__checklist {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 240px;
+}
+
+.timeline-card__checklist-bar {
+  flex: 1;
+  height: 5px;
+  background: var(--color-border-light);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.timeline-card__checklist-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-lighter) 100%);
+  border-radius: 99px;
+}
+
+.timeline-card__checklist-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* -----------------------------------------------
+   Partners View — Type Distribution panel & cards
+   ----------------------------------------------- */
+.type-distribution {
+  border-radius: 14px;
+  padding: 22px 26px;
+  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  border: 1px solid var(--color-border-light);
+}
+
+.type-card {
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
+}
+
+.type-card:hover {
+  border-color: var(--color-text-muted);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(11, 22, 64, 0.10);
+}
+
+.type-card--active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary), 0 4px 14px rgba(47, 107, 255, 0.16);
+  background: var(--color-surface);
+}
+
+.type-card__count {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.type-card__pipeline {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ============================================
+   Recast Dashboard — page header + KPI strip + chart card
+   ============================================
+   Scoped under .dashboard-page so the rest of the portal is unaffected.
+   The legacy .dashboard-top__* rules above remain harmless (no markup
+   uses those classes after this restyle). */
+
+.dashboard-page__top {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+/* 4-cell stat strip — single row, dividers between cells, ≤64px tall */
+.dashboard-page__stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.dashboard-page__stat-cell {
+  padding: 12px 24px;
+  border-right: 1px solid #F1F4FA;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: default;
+  transition: background var(--transition-fast);
+  min-height: 0;
+}
+
+.dashboard-page__stat-cell:last-child {
+  border-right: 0;
+}
+
+.dashboard-page__stat-cell--clickable {
+  cursor: pointer;
+}
+
+.dashboard-page__stat-cell--clickable:hover {
+  background: #F7F9FD;
+}
+
+.dashboard-page__stat-cell--active {
+  background: #F0F4FB;
+  box-shadow: inset 0 2px 0 0 #2F6BFF;
+}
+
+.dashboard-page__stat-cell--active .dashboard-page__stat-value {
+  color: #2F6BFF;
+}
+
+.dashboard-page__stat-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #2F6BFF;
+  line-height: 1.2;
+}
+
+.dashboard-page__stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #171D2B;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+/* Chart card — flat white surface, sharp corners, no shadow */
+.dashboard-page__chart-card {
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 18px 22px 16px;
+}
+
+.dashboard-page__chart-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #171D2B;
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+
+.dashboard-page__chart-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4A5468;
+  margin: 2px 0 14px;
+}
+
+.dashboard-page__bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dashboard-page__bar-row {
+  display: grid;
+  grid-template-columns: 200px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 6px;
+  border-radius: 0;
+  transition: background var(--transition-fast);
+}
+
+.dashboard-page__bar-row--clickable {
+  cursor: pointer;
+}
+
+.dashboard-page__bar-row--clickable:hover {
+  background: #F7F9FD;
+}
+
+.dashboard-page__bar-row--active {
+  background: #F0F4FB;
+  box-shadow: inset 2px 0 0 0 #2F6BFF;
+}
+
+.dashboard-page__bar-row__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #171D2B;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dashboard-page__bar-row__bar {
+  height: 12px;
+  background: #F1F4FA;
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  min-width: 0;
+}
+
+.dashboard-page__bar-row__segment {
+  height: 100%;
+  border-radius: 0;
+  transition: filter var(--transition-fast), width var(--transition-normal);
+  min-width: 0;
+}
+
+.dashboard-page__bar-row--clickable:hover .dashboard-page__bar-row__segment {
+  filter: brightness(1.08);
+}
+
+.dashboard-page__bar-row__value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #171D2B;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+.dashboard-page__chart-empty {
+  font-size: 13px;
+  color: #4A5468;
+  padding: 8px 0 4px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-page__stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .dashboard-page__stat-cell:nth-child(2) {
+    border-right: 0;
+  }
+  .dashboard-page__stat-cell:nth-child(-n+2) {
+    border-bottom: 1px solid #F1F4FA;
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-page__stat-strip {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-page__stat-cell {
+    border-right: 0;
+    border-bottom: 1px solid #F1F4FA;
+  }
+  .dashboard-page__stat-cell:last-child {
+    border-bottom: 0;
+  }
+  .dashboard-page__bar-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .dashboard-page__bar-row__label,
+  .dashboard-page__bar-row__value {
+    text-align: left;
+  }
+}

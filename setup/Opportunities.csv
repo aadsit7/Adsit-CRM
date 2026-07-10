@@ -1,0 +1,9 @@
+opportunity_id,partner_id,deal_name,customer_name,deal_value,status,stage,expected_close,description,created_at,updated_at
+opp_001,p_acme001,Enterprise Cloud Migration,TechCorp Industries,150000,In Progress,Proposal,2026-06-15,Full cloud migration for 500-seat enterprise,2026-03-01,2026-04-01
+opp_002,p_acme001,Security Suite Deployment,Metro Health Systems,85000,Registered,Qualified,2026-07-30,Security suite for healthcare provider,2026-03-15,2026-03-15
+opp_003,p_globex01,Data Analytics Platform,Global Retail Co,200000,In Progress,Negotiation,2026-05-20,Analytics platform for 200 retail locations,2026-02-10,2026-03-28
+opp_004,p_globex01,Network Refresh,EuroBank AG,120000,Won,Closed,2026-03-15,Complete network infrastructure refresh,2026-01-20,2026-03-15
+opp_005,p_initec1,SaaS Implementation,StartupXYZ,45000,Registered,Prospect,2026-08-01,SaaS platform deployment for startup,2026-04-01,2026-04-01
+opp_006,p_wayne01,Digital Transformation,City of Gotham,350000,In Progress,Proposal,2026-09-30,Full digital transformation initiative,2026-02-15,2026-03-20
+opp_007,p_wayne01,Cybersecurity Audit,Gotham PD,75000,Won,Closed,2026-03-01,Comprehensive cybersecurity assessment,2026-01-10,2026-03-01
+opp_008,p_acme001,Collaboration Platform,Sunrise Media,60000,Lost,Closed,2026-02-28,Unified communications platform,2025-12-01,2026-02-28

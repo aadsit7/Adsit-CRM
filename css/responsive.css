@@ -1,0 +1,370 @@
+/* ============================================
+   Responsive Breakpoints
+   ============================================ */
+
+/* Demand Gen Dashboard responsive */
+@media (max-width: 768px) {
+  .demandgen-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demandgen-bar-row__label {
+    width: 80px;
+    font-size: var(--text-xs);
+  }
+
+  .date-range-slider__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .bento-grid--partners,
+  .bento-grid--events {
+    grid-template-columns: 1fr;
+  }
+
+  .bento-grid--events .bento-cell:nth-child(3) {
+    grid-row: auto;
+  }
+
+  .stat-card__value {
+    font-size: var(--text-xl);
+  }
+
+  .bento-bar-row__label {
+    width: 80px;
+  }
+
+  .dashboard-section__summary {
+    display: none;
+  }
+
+  .dashboard-section__body {
+    padding: var(--space-3);
+  }
+}
+
+@media (max-width: 1024px) {
+  .dashboard-top {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .bento-grid--events {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .bento-grid--events .bento-cell:nth-child(3) {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .demandgen-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Type distribution responsive */
+@media (max-width: 768px) {
+  .type-distribution {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .type-breakdown {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .filter-pills {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: var(--space-2);
+  }
+
+  .kanban {
+    flex-direction: column;
+  }
+
+  .kanban__column {
+    max-width: none;
+    min-width: auto;
+  }
+
+  .calendar__day {
+    min-height: 50px;
+  }
+
+  .calendar__event-chip {
+    font-size: 8px;
+    padding: 1px 4px;
+  }
+}
+
+/* Tablet (640px - 1024px) */
+@media (max-width: 1024px) {
+  .app-shell--app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform var(--transition-normal);
+  }
+
+  .sidebar--open {
+    transform: translateX(0);
+  }
+
+  .main-content {
+    grid-column: 1;
+  }
+
+  .topbar__hamburger {
+    display: flex;
+  }
+
+  .view-container {
+    padding: var(--space-6);
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+/* Tablet dashboard and detail */
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-bar__select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 1024px) {
+  .detail-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .detail-header__stats {
+    width: 100%;
+    justify-content: flex-start;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--color-border-light);
+  }
+
+  .detail-header__stat:first-child {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
+/* Mobile (< 640px) */
+@media (max-width: 640px) {
+  :root {
+    --sidebar-width: 280px;
+  }
+
+  .view-container {
+    padding: var(--space-4);
+  }
+
+  .topbar {
+    padding: 0 var(--space-4);
+  }
+
+  .topbar__title {
+    font-size: var(--text-base);
+  }
+
+  /* Stack cards single column */
+  .card-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  .stat-card {
+    padding: var(--space-4);
+  }
+
+  .stat-card__value {
+    font-size: 20px;
+  }
+
+  /* Forms */
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Modal */
+  .modal {
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: var(--radius-lg);
+    margin: var(--space-4);
+  }
+
+  .modal__header {
+    padding: var(--space-4) var(--space-4) var(--space-3);
+  }
+
+  .modal__body {
+    padding: 0 var(--space-4) var(--space-4);
+  }
+
+  .modal__footer {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  /* Section header */
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .section-header__title {
+    font-size: var(--text-xl);
+  }
+
+  /* Calendar compact */
+  .calendar__day {
+    min-height: 60px;
+    padding: var(--space-1);
+  }
+
+  .calendar__event {
+    font-size: 10px;
+    padding: 1px var(--space-1);
+  }
+
+  .calendar__header {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .calendar__title {
+    font-size: var(--text-base);
+  }
+
+  /* Detail header mobile */
+  .detail-header__stats {
+    gap: var(--space-4);
+  }
+
+  .detail-header__stat {
+    padding: 0 var(--space-3);
+  }
+
+  .detail-header__name {
+    font-size: var(--text-xl);
+  }
+
+  /* Tab bar mobile */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-bar__tab {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  /* Table responsive */
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table {
+    min-width: 600px;
+  }
+
+  /* Toast */
+  .toast-container {
+    left: var(--space-4);
+    right: var(--space-4);
+    top: var(--space-4);
+  }
+
+  .toast {
+    max-width: 100%;
+  }
+
+  /* Login */
+  .login-card {
+    margin: var(--space-4);
+    padding: var(--space-6);
+  }
+
+  /* Search bar full width on mobile */
+  .search-bar {
+    max-width: 100%;
+  }
+}
+
+/* Small mobile (< 380px) */
+@media (max-width: 380px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar__weekday {
+    font-size: 9px;
+  }
+}
+
+/* Large desktop (> 1440px) */
+@media (min-width: 1440px) {
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+}
+
+/* Print styles */
+@media print {
+  .sidebar,
+  .topbar,
+  .toast-container,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  .app-shell--app {
+    grid-template-columns: 1fr;
+  }
+
+  .main-content {
+    grid-column: 1;
+  }
+
+  .view-container {
+    overflow: visible;
+    padding: 0;
+  }
+}

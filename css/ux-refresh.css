@@ -1,0 +1,318 @@
+/* ============================================================
+   UX Refresh — Adsit / Revolutionary. AI pass
+   ------------------------------------------------------------
+   Loaded after all component styles (before mobile.css).
+   Softens sharp Recast-era chrome, applies the Poppins/Figtree
+   type system, and adds interaction affordances (hover, focus,
+   clickable rows). Pure override layer — no JS hooks change.
+   ============================================================ */
+
+/* ---------- Type system ---------- */
+h1, h2, h3,
+.section-header__title,
+.modal__title,
+.stat-card__value {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.section-header__title {
+  font-weight: var(--font-bold);
+}
+
+/* Page title in the topbar: calm Poppins title, not a shouty eyebrow */
+.topbar__eyebrow {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--color-text-primary);
+}
+
+.topbar__meta {
+  color: var(--color-text-muted);
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:focus-visible,
+.form-input:focus-visible,
+.form-select:focus-visible,
+.search-bar__input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.btn--primary {
+  box-shadow: none;
+}
+
+.btn--primary:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+/* Topbar CTA — sentence case, soft radius */
+.topbar__actions .topbar__cta {
+  border-radius: var(--radius-md);
+  height: 34px;
+  padding: 0 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Topbar filter chips — pills */
+.topbar__chips .type-filter-bar .btn {
+  border-radius: var(--radius-full);
+}
+
+.type-filter-bar .btn {
+  border-radius: var(--radius-full);
+}
+
+/* View toggle — segmented control */
+.view-toggle {
+  display: inline-flex;
+  background: #EEF1F8;
+  border-radius: var(--radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+
+.view-toggle .btn {
+  border-radius: var(--radius-full);
+  height: 28px;
+  padding: 0 14px;
+  box-shadow: none;
+  border: none;
+}
+
+.view-toggle .btn--secondary {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.view-toggle .btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-primary);
+}
+
+.view-toggle .btn--primary {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.view-toggle .btn--primary:hover {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ---------- Stat cards ---------- */
+.stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.stat-card--clickable:hover {
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
+  border-color: var(--color-border);
+}
+
+.stat-card--active {
+  border-color: var(--color-primary);
+  background: #F0F4FB;
+  box-shadow: var(--focus-ring);
+}
+
+.stat-card__label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.stat-card__value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Tables ---------- */
+.table-wrapper {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+
+.table th {
+  background: #F7F9FD;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.table td {
+  font-size: 13px;
+}
+
+.table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.table tbody tr:hover td {
+  background: #F7F9FD;
+}
+
+.table__row--clickable {
+  cursor: pointer;
+}
+
+.table__row--clickable:hover .deal-name-link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- Badges / pills ---------- */
+.badge,
+.status-pill,
+.stage-pill {
+  border-radius: var(--radius-full);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+
+/* ---------- Kanban ---------- */
+.kanban__column {
+  background: #EEF1F8;
+  border-radius: var(--radius-lg);
+  border: none;
+}
+
+.kanban__column-title {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.kanban__card {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.kanban__card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* ---------- Forms ---------- */
+.form-input,
+.form-select,
+.form-textarea {
+  border-radius: var(--radius-md);
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.form-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.search-bar__input {
+  border-radius: var(--radius-full);
+}
+
+.search-bar__input:focus {
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* ---------- Modals ---------- */
+.modal {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-xl);
+}
+
+.modal__title {
+  text-transform: none;
+  letter-spacing: -0.02em;
+}
+
+.modal__close {
+  border-radius: var(--radius-full);
+}
+
+/* Deal pop-out hero strip — soft, not flat sharp */
+.details-hero {
+  border-radius: var(--radius-md);
+}
+
+/* ---------- Events-page Recast strips ---------- */
+.events-page__stat-strip {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  overflow: hidden;
+}
+
+/* ---------- Empty states ---------- */
+.empty-state__title {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Scrollbars — subtle, cool ---------- */
+.view-container::-webkit-scrollbar,
+.kanban__cards::-webkit-scrollbar,
+.modal__body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.view-container::-webkit-scrollbar-thumb,
+.kanban__cards::-webkit-scrollbar-thumb,
+.modal__body::-webkit-scrollbar-thumb {
+  background: #C9D1E3;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.view-container::-webkit-scrollbar-track,
+.kanban__cards::-webkit-scrollbar-track,
+.modal__body::-webkit-scrollbar-track {
+  background: transparent;
+}

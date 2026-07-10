@@ -1,0 +1,115 @@
+/* ============================================
+   Universal Field Voice Dictation
+   ============================================
+   Floating "voice typing" pill that follows the focused text field while
+   the mic is transcribing into it. Positioned in JS via fixed coords. */
+
+.field-dictation-indicator {
+  position: fixed;
+  z-index: 9000;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  max-width: min(60vw, 360px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #2F6BFF;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  box-shadow: 0 4px 14px rgba(47, 107, 255, 0.28);
+  pointer-events: none; /* never intercept clicks on the field below */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.field-dictation-indicator--visible {
+  display: inline-flex;
+}
+
+.field-dictation-indicator__dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff5252;
+  box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7);
+  animation: field-dictation-pulse 1.4s ease-out infinite;
+}
+
+.field-dictation-indicator__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes field-dictation-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7); }
+  70%  { box-shadow: 0 0 0 7px rgba(255, 82, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-dictation-indicator__dot { animation: none; }
+}
+
+/* ── Per-field mic button ───────────────────────────────────────────
+   A small circular affordance that appears anchored to the right edge of
+   whichever text field currently has focus. Positioned in JS via fixed
+   coords. Click to start/stop voice input for that field. */
+.field-dictation-mic {
+  position: fixed;
+  z-index: 9001;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-bg, #F4F6FB);
+  color: var(--color-text-muted, #8A93A8);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.field-dictation-mic--visible {
+  display: inline-flex;
+}
+
+.field-dictation-mic svg {
+  width: 16px;
+  height: 16px;
+}
+
+.field-dictation-mic:hover {
+  background: var(--color-primary, #2F6BFF);
+  color: #fff;
+}
+
+.field-dictation-mic:active {
+  transform: scale(0.92);
+}
+
+/* Listening — red pulsing state so it's unmistakable the mic is live. */
+.field-dictation-mic--active,
+.field-dictation-mic--active:hover {
+  background: #ff5252;
+  color: #fff;
+  animation: field-dictation-mic-pulse 1.6s ease-out infinite;
+}
+
+@keyframes field-dictation-mic-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(255, 82, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-dictation-mic--active { animation: none; }
+}

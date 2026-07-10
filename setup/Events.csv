@@ -1,0 +1,8 @@
+event_id,title,description,event_date,end_date,event_type,location,url,created_by,created_at,status,partner_id
+evt_001,Q2 Partner Kickoff Webinar,"Quarterly partner kickoff covering new products, incentive programs, and roadmap updates.",2026-04-10,2026-04-10,Webinar,Virtual (Zoom),https://zoom.us/example,p_admin001,2026-03-01,Upcoming,
+evt_002,Cloud Security Workshop,Hands-on workshop covering cloud security best practices and our security suite.,2026-04-22,2026-04-23,Workshop,"San Francisco, CA",,p_admin001,2026-03-01,Upcoming,p_nerdio1
+evt_003,Partner Summit 2026,"Annual partner summit with keynotes, breakouts, and networking.",2026-05-15,2026-05-17,Conference,"Las Vegas, NV",,p_admin001,2026-03-15,Upcoming,
+evt_004,Spring Campaign Launch,Joint marketing campaign for spring demand generation push.,2026-04-01,2026-04-30,Campaign,Digital,,p_admin001,2026-03-20,In Progress,p_ridgep1
+evt_005,Technical Certification Bootcamp,Two-day certification prep for partner technical staff.,2026-05-05,2026-05-06,Workshop,Virtual (Teams),,p_admin001,2026-04-01,Upcoming,p_insigh1
+evt_006,EMEA Partner Roundtable,Regional partner discussion on EMEA market strategy.,2026-04-18,2026-04-18,Webinar,Virtual (Zoom),,p_admin001,2026-04-01,Upcoming,p_syscd01
+evt_007,Summer Pipeline Blitz,Summer demand gen campaign focusing on pipeline acceleration.,2026-06-01,2026-06-30,Campaign,Digital,,p_admin001,2026-04-05,Upcoming,p_qualc01
