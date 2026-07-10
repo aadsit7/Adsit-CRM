@@ -13,7 +13,7 @@ export const SHEET_HEADERS = {
   Events: ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count'],
   Transcripts: ['transcript_id', 'partner_id', 'partner_name', 'conversation_date', 'transcript_text', 'created_at'],
   Meeting_Index: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
-  AI_Conversations: ['conversation_id', 'user_id', 'started_at', 'title', 'messages', 'status'],
+  AI_Conversations: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
 };
 export const BLOCKED_FIELDS = ['password_hash', 'is_admin'];
 

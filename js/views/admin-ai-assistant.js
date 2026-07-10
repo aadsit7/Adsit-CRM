@@ -183,7 +183,7 @@ async function loadConversations() {
     const all = await readSheetAsObjects(CONFIG.SHEET_AI_CONVERSATIONS);
     const user = getCurrentUser();
     conversations = all
-      .filter(c => c.user_id === (user?.username || ''))
+      .filter(c => c.username === (user?.username || ''))
       .sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''));
   } catch {
     conversations = [];
