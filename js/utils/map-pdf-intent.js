@@ -9,7 +9,7 @@
 // verb-phrase triggers so we don't false-positive on stray words like
 // "map" in "show me on a map". When a user is more elliptical, the
 // triggered flag can still fire with a null opportunityHint, in which
-// case Randy will ask "which opportunity, boss?".
+// case Randy will ask "which opportunity, man?".
 //
 // Pure function, no side effects — easy to unit test.
 
