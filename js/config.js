@@ -59,8 +59,9 @@ export const CONFIG = {
   // Separate from the Sheets API above — handles listFiles / uploadFile / deleteFile.
   FILE_API_URL: 'https://script.google.com/macros/s/AKfycbwFURmpvnwu6Ge5Pyt2zJVMwwV4jcRIR8Q9BmUwQJyRM3l5Aq9PsFjdA-ysoDL1jQeK/exec',
 
-  // Google OAuth (for Admin SSO login)
-  GOOGLE_CLIENT_ID: '206815760499-ip5cgia4j8fk9nb5qq83fdv3cfd95lvp.apps.googleusercontent.com',
+  // Google OAuth (for Admin SSO login) — "Adsit CRM" client, whose
+  // authorized redirect URI is https://aadsit7.github.io/Adsit-CRM/
+  GOOGLE_CLIENT_ID: '206815760499-manavdgrggafbtp0l7q77ekh6n3f1gnq.apps.googleusercontent.com',
 
   // OAuth scope for Google Sheets read/write access (used by the silent
   // token-refresh client).
