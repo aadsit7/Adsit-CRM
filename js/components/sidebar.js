@@ -7,7 +7,7 @@ import { navigate, getCurrentPath } from '../router.js';
 import { el, $ } from '../utils/dom.js';
 
 const PARTNER_NAV = [
-  { path: '/partner/opportunities', label: 'Opportunities', icon: 'dashboard' },
+  { path: '/partner/opportunities', label: 'Opportunities', icon: 'dashboard', short: 'Deals' },
   { path: '/partner/leadcheck', label: 'LeadCheck', icon: 'leadcheck' },
   { path: '/partner/demandgen', label: 'Demand Gen', icon: 'calendar' },
   { path: '/partner/resources', label: 'Resources', icon: 'support' },
@@ -15,9 +15,9 @@ const PARTNER_NAV = [
 
 const ADMIN_NAV = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { path: '/admin/opportunities', label: 'Opportunities', icon: 'opportunities' },
+  { path: '/admin/opportunities', label: 'Opportunities', icon: 'opportunities', short: 'Deals' },
   { path: '/admin/partners', label: 'Partners', icon: 'partners' },
-  { path: '/admin/events', label: 'Events / JLG', icon: 'events' },
+  { path: '/admin/events', label: 'Events / JLG', icon: 'events', short: 'Events' },
   { path: '/admin/leadcheck', label: 'Accounts', icon: 'leadcheck' },
   { label: 'Pricing', icon: 'pricing', externalUrl: 'https://aadsit7.github.io/Partner-Calculator/' },
   { path: '/admin/comp', label: 'Comp', icon: 'comp' },
@@ -38,7 +38,14 @@ const ICONS = {
   pricing: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M13.5 6.5h-5a2 2 0 100 4h3a2 2 0 110 4h-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   comp: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7h2M5.5 10h2M5.5 13h2M10 7h4.5M10 10h4.5M10 13h2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   logout: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M7 16H4a2 2 0 01-2-2V4a2 2 0 012-2h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 13l4-4-4-4M7.5 9H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  more: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="4" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="16" cy="10" r="1.5" fill="currentColor"/></svg>',
 };
+
+// The phone bottom tab bar shows this many primary destinations before an
+// overflow "More" tab (Apple HIG caps a tab bar at ~5 items). Partner nav
+// has 4 routed items → all fit; admin nav has 8 → first 4 become tabs and
+// the rest live behind "More" (which opens the full drawer).
+const MAX_PRIMARY_TABS = 4;
 
 /**
  * Render the sidebar.
@@ -49,6 +56,7 @@ export function renderSidebar() {
 
   if (!user) {
     sidebar.innerHTML = '';
+    renderBottomNav();
     return;
   }
 
@@ -124,8 +132,80 @@ export function renderSidebar() {
 
   sidebar.append(header, nav, footer);
 
+  // Mirror the primary destinations into the phone bottom tab bar.
+  renderBottomNav();
+
   // Listen for route changes to update active state
   window.addEventListener('routechange', updateActiveLink);
+}
+
+/**
+ * Render the iOS-style bottom tab bar (visible only on phones via CSS).
+ *
+ * The first MAX_PRIMARY_TABS routed nav items become tabs; a trailing
+ * "More" tab opens the full drawer so every destination + account/logout
+ * stays reachable. Rebuilt on each navigation (renderSidebar runs per
+ * route), so the active tab is always correct.
+ */
+export function renderBottomNav() {
+  const bottomNav = $('#bottom-nav');
+  if (!bottomNav) return;
+
+  const user = getCurrentUser();
+  if (!user) {
+    bottomNav.innerHTML = '';
+    return;
+  }
+
+  const navItems = user.is_admin ? ADMIN_NAV : PARTNER_NAV;
+  // Only in-app routes are eligible for a tab (external links live in "More").
+  const primary = navItems.filter(item => item.path).slice(0, MAX_PRIMARY_TABS);
+  const primaryPaths = new Set(primary.map(item => item.path));
+  const currentPath = getCurrentPath();
+
+  bottomNav.innerHTML = '';
+
+  primary.forEach(item => {
+    bottomNav.appendChild(
+      el('a', {
+        class: `bottom-nav__tab ${isTabActive(item.path, currentPath) ? 'bottom-nav__tab--active' : ''}`,
+        href: `#${item.path}`,
+        dataset: { path: item.path },
+        'aria-label': item.label,
+        onClick: (e) => {
+          e.preventDefault();
+          navigate(item.path);
+          closeMobileSidebar();
+        },
+      },
+        el('span', { class: 'bottom-nav__icon', html: ICONS[item.icon] }),
+        el('span', { class: 'bottom-nav__label' }, item.short || item.label),
+      )
+    );
+  });
+
+  // "More" — opens the existing drawer (all destinations + user/logout).
+  // It reads as active whenever the current route isn't one of the visible
+  // tabs, so an overflow screen (Setup, Comp, …) still shows a lit tab.
+  const moreActive = !primaryPaths.has(currentPath)
+    && currentPath !== '/admin/partner-detail'; // partner-detail lights Dashboard
+  bottomNav.appendChild(
+    el('button', {
+      class: `bottom-nav__tab bottom-nav__tab--more ${moreActive ? 'bottom-nav__tab--active' : ''}`,
+      type: 'button',
+      'aria-label': 'More',
+      onClick: () => openMobileSidebar(),
+    },
+      el('span', { class: 'bottom-nav__icon', html: ICONS.more }),
+      el('span', { class: 'bottom-nav__label' }, 'More'),
+    )
+  );
+}
+
+/** A tab is active on its own path, or (Dashboard) on partner-detail. */
+function isTabActive(tabPath, currentPath) {
+  return tabPath === currentPath
+    || (tabPath === '/admin/dashboard' && currentPath === '/admin/partner-detail');
 }
 
 function updateActiveLink(e) {
@@ -137,6 +217,25 @@ function updateActiveLink(e) {
       || (path === '/admin/partner-detail' && link.dataset.path === '/admin/dashboard');
     link.classList.toggle('sidebar__link--active', isActive);
   });
+
+  // Keep the phone bottom tab bar in sync too. The visible tabs carry a
+  // data-path; the trailing "More" button has none and lights up whenever
+  // the route lives behind it.
+  const tabs = document.querySelectorAll('.bottom-nav__tab');
+  let anyPrimaryActive = false;
+  tabs.forEach(tab => {
+    if (!tab.dataset.path) return; // skip the More button on this pass
+    const active = isTabActive(tab.dataset.path, path);
+    if (active) anyPrimaryActive = true;
+    tab.classList.toggle('bottom-nav__tab--active', active);
+  });
+  const moreTab = document.querySelector('.bottom-nav__tab--more');
+  if (moreTab) {
+    moreTab.classList.toggle(
+      'bottom-nav__tab--active',
+      !anyPrimaryActive && path !== '/admin/partner-detail'
+    );
+  }
 }
 
 /**
@@ -160,6 +259,13 @@ function toggleMobileSidebar() {
   const overlay = $('#sidebar-overlay');
   sidebar.classList.toggle('sidebar--open');
   overlay.classList.toggle('sidebar-overlay--visible');
+}
+
+function openMobileSidebar() {
+  const sidebar = $('#sidebar');
+  const overlay = $('#sidebar-overlay');
+  sidebar.classList.add('sidebar--open');
+  overlay.classList.add('sidebar-overlay--visible');
 }
 
 function closeMobileSidebar() {
