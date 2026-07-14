@@ -218,8 +218,10 @@ function normalizeCriterion(rawCriterion, stageId, validSourceIds) {
     }
   }
 
-  // A criterion with no supporting claim carries no evidence payload.
-  if (status === 'no_evidence' || status === 'not_met') {
+  // "no_evidence" means the notes are silent — it carries no payload.
+  // "not_met" is a negative claim ("a note says this hasn't happened") and
+  // may legitimately cite that note, so its evidence is preserved.
+  if (status === 'no_evidence') {
     evidence = '';
     sourceDate = '';
     sourceId = '';

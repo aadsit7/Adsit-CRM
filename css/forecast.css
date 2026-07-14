@@ -1,0 +1,410 @@
+/* ============================================================
+   Forecast tab — chevron sales-stage board
+   ------------------------------------------------------------
+   Uses the design tokens in css/variables.css only (no raw hex).
+   Status colour map:
+     complete    → --color-primary            (solid blue + check)
+     in_progress → --color-primary-lighter    (soft-blue fill)
+     not_started → neutral surface/border
+     met         → --color-success
+     partial     → --color-warning
+     not_met     → --color-danger
+     no_evidence → --color-text-muted
+   ============================================================ */
+
+.forecast {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-2) 0 var(--space-10);
+}
+
+/* ── Controls ─────────────────────────────────────────────── */
+.forecast__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.forecast__control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 280px;
+  flex: 1 1 320px;
+}
+
+.forecast__control-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+
+.forecast__select {
+  width: 100%;
+}
+
+.forecast__analyze {
+  white-space: nowrap;
+}
+
+.forecast__loading,
+.forecast__intro {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+}
+.forecast__intro { flex-direction: column; text-align: center; }
+
+/* ── Result / board ───────────────────────────────────────── */
+.forecast-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ── Coverage banner (un-analyzed documents) ──────────────── */
+.forecast-coverage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-warning-bg, #FDF3E3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+.forecast-coverage__icon {
+  flex: 0 0 auto;
+  color: var(--color-warning);
+  display: inline-flex;
+}
+.forecast-coverage__icon svg { width: 20px; height: 20px; }
+.forecast-coverage__text { flex: 1 1 auto; }
+.forecast-coverage__btn { flex: 0 0 auto; }
+
+/* ── Summary header ───────────────────────────────────────── */
+.forecast-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.forecast-summary--working { border-left-color: var(--color-primary-lighter); }
+.forecast-summary--none { border-left-color: var(--color-text-muted); }
+
+.forecast-summary__eyebrow {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+}
+.forecast-summary__chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.forecast-summary__stage-chip {
+  font-size: var(--text-lg);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+.forecast-summary__bucket-chip {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-primary);
+  background: var(--color-sidebar-active);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+}
+.forecast-summary__confidence {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.forecast-summary__confidence--high { color: var(--color-success); border-color: var(--color-success); }
+.forecast-summary__confidence--medium { color: var(--color-warning); border-color: var(--color-warning); }
+.forecast-summary__confidence--low { color: var(--color-text-muted); }
+.forecast-summary__text {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* ── Horizontal scroller (stages + bands scroll together) ─── */
+.forecast-board__scroll {
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+  -webkit-overflow-scrolling: touch;
+}
+
+.forecast-grid,
+.forecast-bands {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(190px, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* ── Stage column ─────────────────────────────────────────── */
+.forecast-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Chevron banner — pointed right, notched left (process-arrow look). */
+.forecast-chevron {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) + 8px);
+  min-height: 56px;
+  justify-content: center;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%);
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+  border: 0;
+}
+.forecast-stage:first-child .forecast-chevron {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+  padding-left: var(--space-3);
+}
+.forecast-chevron--complete {
+  background: var(--color-primary);
+  color: #fff;
+}
+.forecast-chevron--in_progress {
+  background: var(--color-primary-lighter);
+  color: #fff;
+}
+.forecast-chevron--not_started {
+  background: var(--color-surface-hover);
+  color: var(--color-text-muted);
+}
+.forecast-chevron__num {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  opacity: 0.8;
+}
+.forecast-chevron__name {
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  line-height: 1.2;
+}
+.forecast-chevron__meta {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  opacity: 0.85;
+}
+
+/* ── Criteria ─────────────────────────────────────────────── */
+.forecast-criteria {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.forecast-criterion {
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.forecast-criterion--open {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+.forecast-criterion__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--color-text-primary);
+}
+.forecast-criterion__head:hover:not(:disabled) { background: var(--color-surface-hover); }
+.forecast-criterion__head--flat,
+.forecast-criterion__head:disabled { cursor: default; }
+.forecast-criterion__icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  margin-top: 1px;
+}
+.forecast-criterion__icon svg { width: 14px; height: 14px; }
+.forecast-criterion__icon--met { color: var(--color-success); }
+.forecast-criterion__icon--partial { color: var(--color-warning); }
+.forecast-criterion__icon--not_met { color: var(--color-danger); }
+.forecast-criterion__icon--no_evidence { color: var(--color-text-muted); }
+.forecast-criterion__label {
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  color: var(--color-text-primary);
+}
+.forecast-criterion--no_evidence .forecast-criterion__label { color: var(--color-text-muted); }
+
+/* ── Evidence detail ──────────────────────────────────────── */
+.forecast-evidence {
+  padding: 0 var(--space-2) var(--space-3) calc(var(--space-2) + 26px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.forecast-evidence__quote {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--color-success);
+  background: var(--color-surface-hover);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--color-text-primary);
+}
+.forecast-evidence__none {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.forecast-evidence__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.forecast-evidence__date {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+}
+.forecast-evidence__link {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.forecast-evidence__link:hover { text-decoration: underline; }
+
+/* ── Stage notes ──────────────────────────────────────────── */
+.forecast-stage__notes {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+  padding: var(--space-2);
+  border-top: 1px dashed var(--color-border-light);
+}
+
+/* ── Buying-process bands ─────────────────────────────────── */
+.forecast-bands__wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.forecast-bands__eyebrow {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+}
+.forecast-band {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.forecast-band--why_change { border-top-color: var(--color-primary); }
+.forecast-band--why_now { border-top-color: var(--color-primary-lighter); }
+.forecast-band--why_recast { border-top-color: var(--color-teal); }
+.forecast-band__label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+.forecast-band__points {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+
+/* ── Gaps / open questions ────────────────────────────────── */
+.forecast-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+.forecast-list-card {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.forecast-list-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+.forecast-list-card__subtitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+.forecast-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.forecast-list li {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+}
+.forecast-list__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.forecast__error .empty-state__title { color: var(--color-danger); }

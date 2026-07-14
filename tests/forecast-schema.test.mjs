@@ -187,18 +187,26 @@ test('a real source_id passes validSourceIds and stays "met"', () => {
   assert.equal(out.stages[0].criteria[0].status, 'met');
 });
 
-test('"not_met" and "no_evidence" carry no evidence payload', () => {
+test('"no_evidence" carries no evidence payload', () => {
   const f = validForecast();
   f.stages[0].criteria = [
-    { criterion_id: 'icp_match', status: 'not_met', evidence: 'should be cleared', source_date: '2026-01-01', source_id: 'dsc_1' },
     { criterion_id: 'pain_validated', status: 'no_evidence', evidence: 'should be cleared', source_date: '2026-01-01', source_id: 'dsc_1' },
   ];
   const out = parseForecastJsonResponse(JSON.stringify(f));
-  for (const c of out.stages[0].criteria) {
-    assert.equal(c.evidence, '');
-    assert.equal(c.source_date, '');
-    assert.equal(c.source_id, '');
-  }
+  assert.equal(out.stages[0].criteria[0].evidence, '');
+  assert.equal(out.stages[0].criteria[0].source_date, '');
+  assert.equal(out.stages[0].criteria[0].source_id, '');
+});
+
+test('"not_met" preserves a cited note (it is a negative claim, not a false checkmark)', () => {
+  const f = validForecast();
+  f.stages[0].criteria = [
+    { criterion_id: 'icp_match', status: 'not_met', evidence: 'Buyer said the budget was cut.', source_date: '2026-01-01', source_id: 'dsc_1' },
+  ];
+  const out = parseForecastJsonResponse(JSON.stringify(f), { validSourceIds: ['dsc_1'] });
+  assert.equal(out.stages[0].criteria[0].status, 'not_met');
+  assert.equal(out.stages[0].criteria[0].evidence, 'Buyer said the budget was cut.');
+  assert.equal(out.stages[0].criteria[0].source_id, 'dsc_1');
 });
 
 test('duplicate stage and criterion entries are de-duplicated (first wins)', () => {
