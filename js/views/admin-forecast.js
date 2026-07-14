@@ -24,7 +24,7 @@ import { ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
 import { requestForecastJson } from '../utils/forecast-client.js';
-import { FORECAST_STAGES, BUYING_PROCESS_BANDS } from '../utils/forecast-stages.js';
+import { FORECAST_STAGES } from '../utils/forecast-stages.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
 
 // ── Module state (torn down in cleanup) ─────────────────────────────
@@ -233,14 +233,14 @@ function renderForecastBoard({ forecast, board, opp, descriptions, documents }) 
 
   frag.appendChild(buildSummary(forecast, board));
 
-  // The stage grid and the buying-process bands live in ONE horizontal
-  // scroller so the bands stay column-aligned with the stages when the
-  // board scrolls on narrow screens.
+  // The stage grid lives in a horizontal scroller so the chevrons keep
+  // their width and the board scrolls on narrow screens.
   frag.appendChild(el('div', { class: 'forecast-board__scroll' },
     buildBoardGrid({ board, opp, descriptions }),
-    buildBands(),
   ));
 
+  // Gaps + open questions sit directly under the stage board (where the
+  // buying-process bands used to be), as tickable working checklists.
   frag.appendChild(buildLists(forecast));
 
   return frag;
@@ -406,23 +406,6 @@ function resolveSourceNote(criterion, descriptions) {
   return null;
 }
 
-function buildBands() {
-  const grid = el('div', { class: 'forecast-bands' });
-  BUYING_PROCESS_BANDS.forEach(band => {
-    grid.appendChild(el('div', {
-      class: `forecast-band forecast-band--${band.id}`,
-      style: { gridColumn: `${band.startStage} / ${band.endStage + 1}` },
-    },
-      el('span', { class: 'forecast-band__label' }, band.label),
-      el('span', { class: 'forecast-band__points' }, band.points.join(' · ')),
-    ));
-  });
-  return el('div', { class: 'forecast-bands__wrap' },
-    el('div', { class: 'forecast-bands__eyebrow' }, 'Customer buying process'),
-    grid,
-  );
-}
-
 function buildLists(forecast) {
   const cols = [];
   cols.push(buildListCard('Gaps', 'What’s missing to advance', forecast.gaps));
@@ -431,14 +414,29 @@ function buildLists(forecast) {
 }
 
 function buildListCard(title, subtitle, items) {
-  const list = (items && items.length)
-    ? el('ul', { class: 'forecast-list' }, ...items.map(t => el('li', {}, t)))
+  const body = (items && items.length)
+    ? el('ul', { class: 'forecast-checklist' }, ...items.map(t => buildCheckItem(t)))
     : el('p', { class: 'forecast-list__empty' }, 'Nothing flagged from the notes.');
   return el('div', { class: 'forecast-list-card' },
     el('div', { class: 'forecast-list-card__title' }, title),
     el('div', { class: 'forecast-list-card__subtitle' }, subtitle),
-    list,
+    body,
   );
+}
+
+// One tickable checklist row. The checked state is a view-only working aid
+// (recomputed on each analysis run) — checking a gap or question strikes it
+// through so the rep can track what they've handled.
+function buildCheckItem(text) {
+  const checkbox = el('input', { type: 'checkbox', class: 'forecast-checklist__box' });
+  const label = el('label', { class: 'forecast-checklist__item' },
+    checkbox,
+    el('span', { class: 'forecast-checklist__text' }, text),
+  );
+  checkbox.addEventListener('change', () => {
+    label.classList.toggle('forecast-checklist__item--done', checkbox.checked);
+  });
+  return el('li', { class: 'forecast-checklist__row' }, label);
 }
 
 // ── Coverage banner + one-click analyze ─────────────────────────────
