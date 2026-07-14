@@ -510,7 +510,7 @@ function buildTranscriptsPanel(partner, transcripts) {
   return el('div', {},
     el('div', { class: 'partner-detail-page__section-header' },
       el('div', { class: 'partner-detail-page__section-title' },
-        'Call Transcripts',
+        'Descriptions',
         el('span', { class: 'partner-detail-page__section-count' }, String(transcripts.length)),
       ),
       actions,
