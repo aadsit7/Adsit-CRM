@@ -115,7 +115,7 @@ addRoute('/admin/opportunities', {
 });
 
 addRoute('/admin/forecast', {
-  title: 'Forecast',
+  title: 'Analyzer',
   render: async (container) => {
     setupAppShell();
     await adminForecast.render(container);
