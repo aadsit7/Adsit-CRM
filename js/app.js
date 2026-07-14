@@ -16,6 +16,7 @@ import * as adminDashboard from './views/admin-dashboard.js';
 import * as adminPartners from './views/admin-partners.js';
 import * as adminEvents from './views/admin-events.js';
 import * as adminOpportunities from './views/admin-opportunities.js';
+import * as adminForecast from './views/admin-forecast.js';
 import * as adminComp from './views/admin-comp.js';
 import * as adminPartnerDetail from './views/admin-partner-detail.js';
 import * as adminSetup from './views/admin-setup.js';
@@ -111,6 +112,15 @@ addRoute('/admin/opportunities', {
     await adminOpportunities.render(container);
   },
   cleanup: adminOpportunities.cleanup,
+});
+
+addRoute('/admin/forecast', {
+  title: 'Forecast',
+  render: async (container) => {
+    setupAppShell();
+    await adminForecast.render(container);
+  },
+  cleanup: adminForecast.cleanup,
 });
 
 addRoute('/admin/leadcheck', {

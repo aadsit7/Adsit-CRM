@@ -17,6 +17,7 @@ const PARTNER_NAV = [
 const ADMIN_NAV = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { path: '/admin/opportunities', label: 'Opportunities', icon: 'opportunities', short: 'Deals' },
+  { path: '/admin/forecast', label: 'Forecast', icon: 'forecast' },
   { path: '/admin/partners', label: 'Partners', icon: 'partners' },
   { path: '/admin/events', label: 'Events / JLG', icon: 'events', short: 'Events' },
   { path: '/admin/leadcheck', label: 'Accounts', icon: 'leadcheck' },
@@ -32,6 +33,7 @@ const ICONS = {
   support: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 5a2 2 0 012-2h4v14H6a2 2 0 01-2-2V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 3h4a2 2 0 012 2v10a2 2 0 01-2 2h-4V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
   partners: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="7.5" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M2 17c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="6.5" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M13 12c2 0 4.5 1 4.5 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   opportunities: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 2l2.2 4.4 4.9.72-3.55 3.46.84 4.88L10 13.27l-4.4 2.23.84-4.88L2.9 7.12l4.9-.72L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  forecast: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 17h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.5 17V13M9 17V9M13.5 17V11M18 17V5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M14.5 5.5L18 5v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   events: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 9h14" stroke="currentColor" stroke-width="1.5"/><path d="M7 2v4M13 2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 13h6M7 16h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   ai: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3.5l1.55 3.15L15 7.55l-2.3 2.25.55 3.2L10 11.5l-3.25 1.5.55-3.2L5 7.55l3.45-.9L10 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M15.5 13.5l.8 1.6 1.7.4-1.25 1.2.3 1.75-1.55-.85-1.55.85.3-1.75L13 15.5l1.7-.4.8-1.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   setup: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h2m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h8M3 10h8m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h2M3 15h2m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
