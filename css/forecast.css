@@ -68,6 +68,24 @@
   gap: var(--space-5);
 }
 
+/* ── Board toolbar (Create PDF) ───────────────────────────── */
+.forecast-board__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.forecast-board__pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.forecast-board__pdf-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ── Coverage banner (un-analyzed documents) ──────────────── */
 .forecast-coverage {
   display: flex;

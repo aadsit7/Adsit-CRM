@@ -204,3 +204,60 @@ export function getProbabilityForStageId(stageId) {
   const stage = getStageById(stageId);
   return stage ? stage.probability : null;
 }
+
+// ── Board derivation ────────────────────────────────────────────────
+/**
+ * Derive the visual stage board from a validated forecast object. This is
+ * the SINGLE SOURCE OF TRUTH shared by the Analyzer DOM render and the
+ * Analyzer PDF export, so the two can never drift apart.
+ *
+ * The chevron colours and the current-stage header are computed from the
+ * PARSER-VALIDATED criteria, not from the model's self-reported stage
+ * status — so nothing on the board can be more advanced than the evidence
+ * that survived parsing. A stage is "complete" only if every one of its
+ * criteria is "met".
+ *
+ * @param {object} forecast  Parsed forecast JSON (see forecast-schema.js).
+ * @returns {{ stages: Array, currentIndex: number, workingIndex: number }}
+ *   `stages` has one entry per FORECAST_STAGES definition, each shaped as
+ *   `{ def, index, status, criteria, notes, metCount }`. `currentIndex` is
+ *   the furthest fully-complete stage (-1 if none); `workingIndex` is the
+ *   furthest stage with any progress (-1 if none).
+ */
+export function deriveForecastBoard(forecast) {
+  const stageResults = new Map(((forecast && forecast.stages) || []).map(s => [s.stage_id, s]));
+
+  const stages = FORECAST_STAGES.map((stageDef, i) => {
+    const res = stageResults.get(stageDef.id);
+    const critResults = new Map(((res && res.criteria) || []).map(c => [c.criterion_id, c]));
+
+    const criteria = stageDef.criteria.map(def => {
+      const cr = critResults.get(def.id);
+      return {
+        id: def.id,
+        label: def.label,
+        status: cr ? cr.status : 'no_evidence',
+        evidence: cr ? cr.evidence : '',
+        source_date: cr ? cr.source_date : '',
+        source_id: cr ? cr.source_id : '',
+      };
+    });
+
+    const metCount = criteria.filter(c => c.status === 'met').length;
+    const claimedCount = criteria.filter(c => c.status === 'met' || c.status === 'partial').length;
+    let status = 'not_started';
+    if (criteria.length > 0 && metCount === criteria.length) status = 'complete';
+    else if (claimedCount > 0) status = 'in_progress';
+
+    return { def: stageDef, index: i, status, criteria, notes: (res && res.notes) || '', metCount };
+  });
+
+  let currentIndex = -1;
+  let workingIndex = -1;
+  stages.forEach((s, i) => {
+    if (s.status === 'complete') currentIndex = i;
+    if (s.status !== 'not_started') workingIndex = i;
+  });
+
+  return { stages, currentIndex, workingIndex };
+}

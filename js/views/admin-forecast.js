@@ -24,7 +24,8 @@ import { ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
 import { requestForecastJson } from '../utils/forecast-client.js';
-import { FORECAST_STAGES } from '../utils/forecast-stages.js';
+import { deriveForecastBoard } from '../utils/forecast-stages.js';
+import { buildForecastPdf, forecastFilename } from '../utils/forecast-pdf-builder.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
 
 // ── Module state (torn down in cleanup) ─────────────────────────────
@@ -157,7 +158,7 @@ async function runForecast(explicitOpp = null) {
     if (currentPill === pill) currentPill = null;
     if (currentController === controller) currentController = null;
 
-    const board = deriveBoard(forecast);
+    const board = deriveForecastBoard(forecast);
     resultSlot.replaceChildren(renderForecastBoard({ forecast, board, opp, descriptions, documents }));
   } catch (err) {
     if (controller.signal.aborted) return;
@@ -179,53 +180,12 @@ async function runForecast(explicitOpp = null) {
   }
 }
 
-// ── Derive the board from the validated criteria ────────────────────
-// The chevron colours and the current-stage header are computed from the
-// PARSER-VALIDATED criteria, not from the model's self-reported stage
-// status — so nothing on the board can be more advanced than the evidence
-// that survived parsing. A stage is "complete" only if every one of its
-// criteria is "met".
-function deriveBoard(forecast) {
-  const stageResults = new Map((forecast.stages || []).map(s => [s.stage_id, s]));
-
-  const stages = FORECAST_STAGES.map((stageDef, i) => {
-    const res = stageResults.get(stageDef.id);
-    const critResults = new Map(((res && res.criteria) || []).map(c => [c.criterion_id, c]));
-
-    const criteria = stageDef.criteria.map(def => {
-      const cr = critResults.get(def.id);
-      return {
-        id: def.id,
-        label: def.label,
-        status: cr ? cr.status : 'no_evidence',
-        evidence: cr ? cr.evidence : '',
-        source_date: cr ? cr.source_date : '',
-        source_id: cr ? cr.source_id : '',
-      };
-    });
-
-    const metCount = criteria.filter(c => c.status === 'met').length;
-    const claimedCount = criteria.filter(c => c.status === 'met' || c.status === 'partial').length;
-    let status = 'not_started';
-    if (criteria.length > 0 && metCount === criteria.length) status = 'complete';
-    else if (claimedCount > 0) status = 'in_progress';
-
-    return { def: stageDef, index: i, status, criteria, notes: (res && res.notes) || '', metCount };
-  });
-
-  let currentIndex = -1;
-  let workingIndex = -1;
-  stages.forEach((s, i) => {
-    if (s.status === 'complete') currentIndex = i;
-    if (s.status !== 'not_started') workingIndex = i;
-  });
-
-  return { stages, currentIndex, workingIndex };
-}
-
 // ── Render ──────────────────────────────────────────────────────────
 function renderForecastBoard({ forecast, board, opp, descriptions, documents }) {
   const frag = el('div', { class: 'forecast-board' });
+
+  // Toolbar: export the board to a two-page, print-ready PDF.
+  frag.appendChild(buildBoardActions({ forecast, board, opp }));
 
   // Coverage banner (honesty pass): documents Randy could not read.
   const banner = buildCoverageBanner(documents, opp);
@@ -244,6 +204,63 @@ function renderForecastBoard({ forecast, board, opp, descriptions, documents }) 
   frag.appendChild(buildLists(forecast));
 
   return frag;
+}
+
+// ── PDF export toolbar ──────────────────────────────────────────────
+// A "Create PDF" button that renders the board to a two-page, Recast-
+// branded PDF (js/utils/forecast-pdf-builder.js) and downloads it. The
+// board passed here is the exact one the DOM was rendered from, so the
+// PDF can't drift from what's on screen.
+function buildBoardActions({ forecast, board, opp }) {
+  const btn = el('button', {
+    class: 'btn btn--secondary btn--sm forecast-board__pdf-btn',
+    type: 'button',
+  }, el('span', { class: 'forecast-board__pdf-icon', html: pdfIcon() }), 'Create PDF');
+
+  btn.addEventListener('click', () => handleCreatePdf({ forecast, board, opp, btn }));
+
+  return el('div', { class: 'forecast-board__actions' }, btn);
+}
+
+async function handleCreatePdf({ forecast, board, opp, btn }) {
+  if (btn.disabled) return;
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Building PDF…';
+
+  try {
+    const blob = await buildForecastPdf({ forecast, board, opp });
+    const filename = forecastFilename(
+      forecast.customer_name || opp?.customer_name || opp?.deal_name || 'Opportunity',
+    );
+    downloadBlob(blob, filename);
+    showToast('Analysis PDF downloaded', 'success');
+  } catch (err) {
+    console.error('[Forecast] PDF export failed', err);
+    showToast(err.message || 'Could not create the PDF', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+// Trigger a browser download for a Blob without leaking the object URL.
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick — Safari needs the URL to survive the click.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function pdfIcon() {
+  return '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">'
+    + '<path d="M4 1.5h5L13 5.5V14a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 4 14V1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '<path d="M9 1.5V5.5H13" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '<path d="M6.2 11.5V8.5h1.1a.9.9 0 1 1 0 1.8H6.2" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '</svg>';
 }
 
 function buildSummary(forecast, board) {
