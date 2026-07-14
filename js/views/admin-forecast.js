@@ -39,7 +39,7 @@ function abortInflight() {
 }
 
 export async function render(container) {
-  setTopbarTitle('Forecast');
+  setTopbarTitle('Analyzer');
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
@@ -135,7 +135,7 @@ async function runForecast(explicitOpp = null) {
 
   const controller = new AbortController();
   currentController = controller;
-  const pill = createPill('Reading the notes…', { label: opp.customer_name || opp.deal_name || 'Forecast' });
+  const pill = createPill('Reading the notes…', { label: opp.customer_name || opp.deal_name || 'Analyzer' });
   currentPill = pill;
 
   try {
