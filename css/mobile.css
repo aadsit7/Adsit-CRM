@@ -141,6 +141,32 @@ html {
     letter-spacing: 0.01em;
   }
 
+  /* Center "Add" — a prominent accent create button (admins only). Opens
+     the same Quick Add sheet Randy uses. Styled as a filled rounded-square
+     to match the app's radius language, so it reads as an action rather
+     than a destination tab. */
+  .bottom-nav__tab--add {
+    color: var(--color-primary);
+  }
+
+  .bottom-nav__tab--add .bottom-nav__icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--color-primary);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(47, 107, 255, 0.38);
+  }
+
+  .bottom-nav__tab--add .bottom-nav__icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .bottom-nav__tab--add:active .bottom-nav__icon {
+    background: var(--color-primary-light);
+  }
+
   /* Content must clear the fixed bar so nothing is trapped behind it —
      applies to the scroll area, so the last row always scrolls into view. */
   .app-shell--app .view-container {

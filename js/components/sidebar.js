@@ -5,6 +5,7 @@
 import { getCurrentUser, getUserInitials, logout } from '../auth.js';
 import { navigate, getCurrentPath } from '../router.js';
 import { el, $ } from '../utils/dom.js';
+import { toggleQuickForm } from './quick-form.js';
 
 const PARTNER_NAV = [
   { path: '/partner/opportunities', label: 'Opportunities', icon: 'dashboard', short: 'Deals' },
@@ -39,6 +40,7 @@ const ICONS = {
   comp: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7h2M5.5 10h2M5.5 13h2M10 7h4.5M10 10h4.5M10 13h2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   logout: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M7 16H4a2 2 0 01-2-2V4a2 2 0 012-2h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 13l4-4-4-4M7.5 9H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   more: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="4" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="16" cy="10" r="1.5" fill="currentColor"/></svg>',
+  add: '<svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
 };
 
 // The phone bottom tab bar shows this many primary destinations before an
@@ -146,6 +148,12 @@ export function renderSidebar() {
  * "More" tab opens the full drawer so every destination + account/logout
  * stays reachable. Rebuilt on each navigation (renderSidebar runs per
  * route), so the active tab is always correct.
+ *
+ * Admins additionally get a prominent center "Add" button that opens the
+ * SAME Quick Add sheet Randy uses (create/update an opportunity, partner,
+ * or event). It's admin-only because those writes require the admin Sheets
+ * token; partners have no write access, so surfacing it for them would
+ * only produce failed saves.
  */
 export function renderBottomNav() {
   const bottomNav = $('#bottom-nav');
@@ -163,33 +171,31 @@ export function renderBottomNav() {
   const primaryPaths = new Set(primary.map(item => item.path));
   const currentPath = getCurrentPath();
 
-  bottomNav.innerHTML = '';
-
-  primary.forEach(item => {
-    bottomNav.appendChild(
-      el('a', {
-        class: `bottom-nav__tab ${isTabActive(item.path, currentPath) ? 'bottom-nav__tab--active' : ''}`,
-        href: `#${item.path}`,
-        dataset: { path: item.path },
-        'aria-label': item.label,
-        onClick: (e) => {
-          e.preventDefault();
-          navigate(item.path);
-          closeMobileSidebar();
-        },
+  // Build the tabs as an ordered list so the Add button can be spliced into
+  // the visual center without disturbing the primary/More ordering.
+  const tabs = primary.map(item =>
+    el('a', {
+      class: `bottom-nav__tab ${isTabActive(item.path, currentPath) ? 'bottom-nav__tab--active' : ''}`,
+      href: `#${item.path}`,
+      dataset: { path: item.path },
+      'aria-label': item.label,
+      onClick: (e) => {
+        e.preventDefault();
+        navigate(item.path);
+        closeMobileSidebar();
       },
-        el('span', { class: 'bottom-nav__icon', html: ICONS[item.icon] }),
-        el('span', { class: 'bottom-nav__label' }, item.short || item.label),
-      )
-    );
-  });
+    },
+      el('span', { class: 'bottom-nav__icon', html: ICONS[item.icon] }),
+      el('span', { class: 'bottom-nav__label' }, item.short || item.label),
+    )
+  );
 
   // "More" — opens the existing drawer (all destinations + user/logout).
   // It reads as active whenever the current route isn't one of the visible
   // tabs, so an overflow screen (Setup, Comp, …) still shows a lit tab.
   const moreActive = !primaryPaths.has(currentPath)
     && currentPath !== '/admin/partner-detail'; // partner-detail lights Dashboard
-  bottomNav.appendChild(
+  tabs.push(
     el('button', {
       class: `bottom-nav__tab bottom-nav__tab--more ${moreActive ? 'bottom-nav__tab--active' : ''}`,
       type: 'button',
@@ -200,6 +206,26 @@ export function renderBottomNav() {
       el('span', { class: 'bottom-nav__label' }, 'More'),
     )
   );
+
+  // Center "Add" (admins only) — the same Quick Add sheet Randy exposes.
+  if (user.is_admin) {
+    const addTab = el('button', {
+      class: 'bottom-nav__tab bottom-nav__tab--add',
+      type: 'button',
+      'aria-label': 'Quick add — opportunity, partner, or event',
+      onClick: () => {
+        closeMobileSidebar();
+        toggleQuickForm();
+      },
+    },
+      el('span', { class: 'bottom-nav__icon', html: ICONS.add }),
+      el('span', { class: 'bottom-nav__label' }, 'Add'),
+    );
+    tabs.splice(Math.floor(tabs.length / 2), 0, addTab);
+  }
+
+  bottomNav.innerHTML = '';
+  tabs.forEach(tab => bottomNav.appendChild(tab));
 }
 
 /** A tab is active on its own path, or (Dashboard) on partner-detail. */
