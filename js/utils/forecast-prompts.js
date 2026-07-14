@@ -160,7 +160,7 @@ You may NOT treat an un-analyzed document's mere existence as evidence for any c
 Scoring guidance (subordinate to the Golden Rule):
 - For every criterion in every stage, choose one status: "met", "partial", "not_met", or "no_evidence".
 - "met" = a note clearly states the criterion is satisfied. "partial" = a note shows it is underway but not finished. "not_met" = a note shows it was attempted and did NOT happen (rare). "no_evidence" = the notes say nothing either way (the common case).
-- For "met" or "partial", fill "evidence" with a short quote/paraphrase from ONE note, and set "source_id" and "source_date" to that note's id and date. For "not_met" and "no_evidence", leave evidence and source fields as empty strings.
+- For "met" or "partial", fill "evidence" with a short quote/paraphrase from ONE note, and set "source_id" and "source_date" to that note's id and date. If a note is shown with id "(no id)" or date "Undated", leave that field empty rather than citing the placeholder — a claim you cannot tie to a real note id or date is "no_evidence". For "not_met" and "no_evidence", leave evidence and source fields as empty strings.
 - A stage's "status" is "complete" only if every criterion is "met"; "in_progress" if at least one criterion is met or partial but not all; otherwise "not_started".
 - "current_stage_id" is the id of the FURTHEST stage whose criteria are all met. If no stage is fully met, use the earliest stage or leave it as the best-supported stage; set "current_stage_confidence" to "low" when the notes are thin.
 - "forecast_bucket" and "probability" will be recomputed from "current_stage_id" — you may leave them approximate.

@@ -46,9 +46,11 @@ function makeTimeoutSignal(signal, ms) {
   return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, ts]) : signal;
 }
 
-// The set of description_ids the model is actually allowed to cite. Any
-// source_id outside this set is a fabrication and gets stripped by the
-// parser (and an otherwise-unanchored claim downgraded to no_evidence).
+// The ids and dates the model is actually allowed to cite. Anything the
+// model cites outside these sets is a fabrication the parser strips (and
+// an otherwise-unanchored claim gets downgraded to no_evidence). The date
+// set mirrors exactly what buildForecastPrompt shows the model per note
+// (description_date, falling back to created_at).
 function collectSourceIds(descriptions) {
   const ids = new Set();
   (descriptions || []).forEach(d => {
@@ -56,6 +58,15 @@ function collectSourceIds(descriptions) {
     if (id) ids.add(id);
   });
   return ids;
+}
+
+function collectSourceDates(descriptions) {
+  const dates = new Set();
+  (descriptions || []).forEach(d => {
+    const date = String(d?.description_date || d?.created_at || '').trim();
+    if (date) dates.add(date);
+  });
+  return dates;
 }
 
 /**
@@ -99,5 +110,8 @@ export async function requestForecastJson(opportunity, descriptions, documents, 
     .map(b => b.text)
     .join('\n');
 
-  return parseForecastJsonResponse(text, { validSourceIds: collectSourceIds(descriptions) });
+  return parseForecastJsonResponse(text, {
+    validSourceIds:   collectSourceIds(descriptions),
+    validSourceDates: collectSourceDates(descriptions),
+  });
 }

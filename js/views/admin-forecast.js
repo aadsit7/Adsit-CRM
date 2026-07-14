@@ -115,12 +115,15 @@ function buildIntroEmptyState() {
 }
 
 // ── The run ─────────────────────────────────────────────────────────
-async function runForecast() {
+// Pass an explicit opp to score that exact deal (used by the coverage
+// banner's re-run so it can't drift to whatever the dropdown now shows);
+// with no argument it scores the current dropdown selection.
+async function runForecast(explicitOpp = null) {
   const view = $('.forecast');
   if (!view || !view.__refs) return;
   const { resultSlot, analyzeBtn } = view.__refs;
 
-  const opp = allOpps.find(o => o.opportunity_id === selectedOppId);
+  const opp = explicitOpp || allOpps.find(o => o.opportunity_id === selectedOppId);
   if (!opp) { showToast('Pick an opportunity first', 'error'); return; }
 
   abortInflight();
@@ -167,7 +170,12 @@ async function runForecast() {
       el('div', { class: 'empty-state__description' }, err.message || 'Something went wrong. Try again.'),
     ));
   } finally {
-    analyzeBtn.disabled = !selectedOppId;
+    // Only restore the button if this run still owns it. A superseding run
+    // (or an explicit abort) takes over the button state, so a late-
+    // resolving aborted run must not re-enable it mid-flight.
+    if (currentController === controller || currentController === null) {
+      analyzeBtn.disabled = !selectedOppId;
+    }
   }
 }
 
@@ -389,8 +397,11 @@ function resolveSourceNote(criterion, descriptions) {
     if (byId) return byId;
   }
   if (criterion.source_date) {
-    const byDate = list.find(d => String(d.description_date || '') === String(criterion.source_date));
-    if (byDate) return byDate;
+    // Only follow a date to a note when it resolves unambiguously — if
+    // several notes share the date we can't know which the quote came
+    // from, and linking to the wrong one would break the evidence trail.
+    const byDate = list.filter(d => String(d.description_date || '') === String(criterion.source_date));
+    if (byDate.length === 1) return byDate[0];
   }
   return null;
 }
@@ -473,8 +484,10 @@ async function analyzeDocsThenRerun(unanalyzed, opp, btn) {
     markPillSuccess(pill, failed ? `Analyzed ${done - failed}/${unanalyzed.length}` : 'Documents analyzed');
   }
 
-  // Re-run the forecast now that the analyzed content is in the notes.
-  runForecast();
+  // Re-run the forecast for THIS deal now that the analyzed content is in
+  // the notes — pass the captured opp so the re-run can't drift to a
+  // different dropdown selection.
+  runForecast(opp);
 }
 
 // Replicates the existing analyzeDocument write from admin-opportunities.js

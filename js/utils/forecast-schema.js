@@ -11,10 +11,13 @@
 //   1. Unknown stage_id / criterion_id values are dropped — the model
 //      cannot invent a criterion that isn't in the stage definitions.
 //   2. A criterion cannot be "met" or "partial" without a real,
-//      traceable anchor: a non-empty evidence quote AND either a known
-//      source note id or a source date. Anything that fails that test is
-//      downgraded to "no_evidence" with its source fields cleared. An
-//      invented checkmark with no evidence never survives parsing.
+//      traceable anchor: a non-empty evidence quote AND either a source
+//      note id OR a source date that matches an actual note. A cited id
+//      or date that does not exist in the source notes is cleared; if a
+//      claim is left with no surviving anchor it is downgraded to
+//      "no_evidence" with its source fields cleared. An invented
+//      checkmark — including one pinned to a fabricated date — never
+//      survives parsing when the real note ids/dates are supplied.
 // ============================================================
 
 import {
@@ -78,10 +81,15 @@ function cleanStrArray(v) {
  * @param {object} [options]
  * @param {Set<string>|Array<string>} [options.validSourceIds]
  *   The description_ids actually present in the source notes. When
- *   supplied, a met/partial criterion whose evidence cannot be tied to a
- *   real note (no known source_id and no source_date) is downgraded to
- *   "no_evidence". Omit to skip source-id validation (parser stays usable
- *   with only static data, e.g. in tests).
+ *   supplied, a cited source_id outside this set is cleared as a
+ *   fabrication.
+ * @param {Set<string>|Array<string>} [options.validSourceDates]
+ *   The dates the model was shown for the source notes. When supplied, a
+ *   cited source_date outside this set is cleared as a fabrication — so a
+ *   met/partial claim cannot be anchored on an invented date. A criterion
+ *   left with no surviving anchor is downgraded to "no_evidence". Omit
+ *   either set to skip that validation (parser stays usable with only
+ *   static data, e.g. in tests).
  * @returns {object} normalized forecast JSON.
  */
 export function parseForecastJsonResponse(rawText, options = {}) {
@@ -117,11 +125,13 @@ export function parseForecastJsonResponse(rawText, options = {}) {
     throw err;
   }
 
-  const validSourceIds = options.validSourceIds instanceof Set
-    ? options.validSourceIds
-    : Array.isArray(options.validSourceIds)
-      ? new Set(options.validSourceIds.map(String))
-      : null;
+  const toSet = (v) => v instanceof Set
+    ? v
+    : Array.isArray(v) ? new Set(v.map(String)) : null;
+  const anchors = {
+    validSourceIds:   toSet(options.validSourceIds),
+    validSourceDates: toSet(options.validSourceDates),
+  };
 
   // ── Top-level scalars ────────────────────────────────────────────
   const out = {};
@@ -149,7 +159,7 @@ export function parseForecastJsonResponse(rawText, options = {}) {
   out.stages = Array.isArray(parsed.stages)
     ? parsed.stages
         .filter(s => s && typeof s === 'object')
-        .map(s => normalizeStage(s, validSourceIds))
+        .map(s => normalizeStage(s, anchors))
         .filter(s => s && s.stage_id && !seenStages.has(s.stage_id) && seenStages.add(s.stage_id))
     : [];
 
@@ -160,7 +170,7 @@ export function parseForecastJsonResponse(rawText, options = {}) {
   return out;
 }
 
-function normalizeStage(rawStage, validSourceIds) {
+function normalizeStage(rawStage, anchors) {
   const stageId = cleanStr(rawStage.stage_id);
   // Drop stages whose id isn't one of the seven — no inventing rows.
   if (!getStageById(stageId)) return null;
@@ -173,7 +183,7 @@ function normalizeStage(rawStage, validSourceIds) {
   const criteria = Array.isArray(rawStage.criteria)
     ? rawStage.criteria
         .filter(c => c && typeof c === 'object')
-        .map(c => normalizeCriterion(c, stageId, validSourceIds))
+        .map(c => normalizeCriterion(c, stageId, anchors))
         .filter(c => c && !seenCriteria.has(c.criterion_id) && seenCriteria.add(c.criterion_id))
     : [];
 
@@ -185,7 +195,7 @@ function normalizeStage(rawStage, validSourceIds) {
   };
 }
 
-function normalizeCriterion(rawCriterion, stageId, validSourceIds) {
+function normalizeCriterion(rawCriterion, stageId, anchors = {}) {
   const criterionId = cleanStr(rawCriterion.criterion_id);
 
   // Drop unknown criterion ids, and drop criteria filed under the wrong
@@ -201,16 +211,23 @@ function normalizeCriterion(rawCriterion, stageId, validSourceIds) {
   let sourceDate = cleanStr(rawCriterion.source_date);
   let sourceId   = cleanStr(rawCriterion.source_id);
 
-  // A cited source_id that doesn't correspond to a real note is a
-  // fabrication — clear it. (Only enforced when we know the real ids.)
+  const { validSourceIds, validSourceDates } = anchors;
+
+  // A cited source_id / source_date that doesn't correspond to a real note
+  // is a fabrication — clear it. (Only enforced when we know the real
+  // ids/dates.) Without validating the date too, a model could anchor a
+  // "met" on an invented date and slip past the guard below.
   if (sourceId && validSourceIds && !validSourceIds.has(sourceId)) {
     sourceId = '';
   }
+  if (sourceDate && validSourceDates && !validSourceDates.has(sourceDate)) {
+    sourceDate = '';
+  }
 
   // GOLDEN RULE enforcement: "met"/"partial" must be traceable. It needs a
-  // non-empty evidence quote AND at least one real anchor (a known source
-  // id or a source date). Otherwise it is an unsupported claim → downgrade
-  // to "no_evidence" and clear the source fields.
+  // non-empty evidence quote AND at least one SURVIVING anchor (a source
+  // id or date that matched a real note). Otherwise it is an unsupported
+  // claim → downgrade to "no_evidence" and clear the source fields.
   if (CLAIMED_STATUSES.has(status)) {
     const hasAnchor = !!sourceId || !!sourceDate;
     if (!evidence || !hasAnchor) {

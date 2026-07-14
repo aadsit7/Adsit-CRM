@@ -198,6 +198,40 @@ test('"no_evidence" carries no evidence payload', () => {
   assert.equal(out.stages[0].criteria[0].source_id, '');
 });
 
+test('a fabricated source_date is cleared when validSourceDates is supplied, and downgrades an otherwise-unanchored claim', () => {
+  const f = validForecast();
+  // Real quote, but pinned to a date no note has, and no id — the classic
+  // "invented checkmark with an invented date" bypass.
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'met', evidence: 'Acme is a perfect ICP match.', source_date: '1999-12-31', source_id: '' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), { validSourceDates: ['2026-03-01', '2026-03-20'] });
+  assert.equal(out.stages[0].criteria[0].source_date, '');
+  assert.equal(out.stages[0].criteria[0].status, 'no_evidence');
+});
+
+test('a real source_date passes validSourceDates and stays "met"', () => {
+  const f = validForecast();
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'met', evidence: 'ICP confirmed.', source_date: '2026-03-01', source_id: '' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), { validSourceDates: ['2026-03-01', '2026-03-20'] });
+  assert.equal(out.stages[0].criteria[0].source_date, '2026-03-01');
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('a valid source_id keeps "met" even if the date is fabricated (id is a sufficient anchor)', () => {
+  const f = validForecast();
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'met', evidence: 'ICP confirmed.', source_date: '1999-12-31', source_id: 'dsc_1' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), { validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'] });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+  assert.equal(out.stages[0].criteria[0].source_id, 'dsc_1');
+  assert.equal(out.stages[0].criteria[0].source_date, ''); // bogus date stripped, id anchors it
+});
+
+test('the placeholder "Undated" is rejected as an anchor when real dates are known', () => {
+  const f = validForecast();
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'met', evidence: 'Buyer confirmed.', source_date: 'Undated', source_id: '(no id)' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), { validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'] });
+  assert.equal(out.stages[0].criteria[0].status, 'no_evidence');
+});
+
 test('"not_met" preserves a cited note (it is a negative claim, not a false checkmark)', () => {
   const f = validForecast();
   f.stages[0].criteria = [

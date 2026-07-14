@@ -74,7 +74,9 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--color-warning-bg, #FDF3E3);
+  /* Warm warning tint derived from the token (no --color-warning-bg
+     exists in variables.css yet, and no raw hex allowed). */
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
   border: 1px solid var(--color-warning);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
@@ -191,11 +193,11 @@
 }
 .forecast-chevron--complete {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-surface); /* white-on-blue label (token, not raw hex) */
 }
 .forecast-chevron--in_progress {
   background: var(--color-primary-lighter);
-  color: #fff;
+  color: var(--color-surface);
 }
 .forecast-chevron--not_started {
   background: var(--color-surface-hover);
