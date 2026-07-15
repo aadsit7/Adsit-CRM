@@ -29,15 +29,93 @@ import { deriveForecastBoard } from '../utils/forecast-stages.js';
 import { buildForecastPdf, forecastFilename } from '../utils/forecast-pdf-builder.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
 
-// ── Module state (torn down in cleanup) ─────────────────────────────
+// ── Module state ─────────────────────────────────────────────────────
+// This state deliberately OUTLIVES the view. The analysis runs as a
+// background job (`activeJob`) so the user can switch tabs while Randy works;
+// when they return, render() repaints whatever the job is doing — live
+// progress, the finished board, or an error. Only an explicit new run
+// supersedes a job.
 let allOpps = [];
 let selectedOppId = '';
-let currentController = null;   // aborts an in-flight forecast request
-let currentPill = null;         // the active progress pill
+let activeJob = null;
+// activeJob shape:
+//   { oppId, label,
+//     status: 'running' | 'done' | 'error',
+//     controller: AbortController, pill,
+//     result: { forecast, board, opp, descriptions, documents } | null,
+//     error: string | null }
 
+// Abort and discard the run currently in flight (used when a new run
+// supersedes it). A job that has already FINISHED keeps its cached result so
+// returning to the tab still shows the board — it's replaced, not aborted,
+// when the next run starts.
 function abortInflight() {
-  if (currentController) { try { currentController.abort(); } catch { /* ignore */ } currentController = null; }
-  if (currentPill) { try { destroyPill(currentPill); } catch { /* ignore */ } currentPill = null; }
+  if (activeJob && activeJob.status === 'running') {
+    if (activeJob.controller) { try { activeJob.controller.abort(); } catch { /* ignore */ } }
+    if (activeJob.pill) { try { destroyPill(activeJob.pill); } catch { /* ignore */ } }
+    activeJob = null;
+  }
+}
+
+// ── Live DOM handles ─────────────────────────────────────────────────
+// The view is rebuilt on every visit, so a run started on one visit can't
+// hold references to elements from a torn-down visit. We look these up fresh
+// each time; a lookup returns null when the Analyzer isn't on screen, which
+// is exactly the "user switched tabs" signal the paint helpers key off.
+function liveResultSlot() { return $('.forecast .forecast__result'); }
+function liveAnalyzeBtn()  { return $('.forecast .forecast__analyze'); }
+function setAnalyzeDisabled(disabled) {
+  const btn = liveAnalyzeBtn();
+  if (btn) btn.disabled = disabled;
+}
+
+function paintRunning() {
+  const slot = liveResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'forecast__loading' },
+    el('div', { class: 'spinner' }),
+    el('span', {}, 'Randy is analyzing… you can switch tabs — this keeps running.'),
+  ));
+}
+function paintResult(job) {
+  const slot = liveResultSlot();
+  if (!slot || !job.result) return;
+  slot.replaceChildren(renderForecastBoard(job.result));
+}
+function paintError(job) {
+  const slot = liveResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'empty-state forecast__error' },
+    el('div', { class: 'empty-state__title' }, 'Randy could not build the board'),
+    el('div', { class: 'empty-state__description' }, job.error || 'Something went wrong. Try again.'),
+  ));
+}
+// When a run settles while the user is on another tab there is no slot to
+// paint into, so a toast tells them it's ready (or failed) — the board itself
+// is cached and shows the moment they open the Analyzer.
+function notifyIfAway(job) {
+  if (liveResultSlot()) return;
+  if (job.status === 'error') {
+    showToast(`Analysis failed for ${job.label}. Open the Analyzer to retry.`, 'error');
+  } else {
+    showToast(`Analysis ready for ${job.label}. Open the Analyzer to view it.`, 'success');
+  }
+}
+// On (re)mount, show whatever the background job is currently doing and pin
+// the dropdown to its deal.
+function restoreActiveJob() {
+  if (!activeJob) return;
+  if (activeJob.oppId) {
+    selectedOppId = activeJob.oppId;
+    const select = $('.forecast .forecast__select');
+    if (select) select.value = activeJob.oppId;
+  }
+  // Disabled while a run is still in flight (a click would supersede it),
+  // enabled once it has settled so the user can re-run.
+  setAnalyzeDisabled(activeJob.status === 'running');
+  if (activeJob.status === 'running') paintRunning();
+  else if (activeJob.status === 'done') paintResult(activeJob);
+  else if (activeJob.status === 'error') paintError(activeJob);
 }
 
 export async function render(container) {
@@ -63,11 +141,19 @@ export async function render(container) {
   }
 
   mount(container, buildView());
+  // Repaint whatever the background job is doing (live progress, finished
+  // board, or error) for a user returning to the tab mid-run or after it
+  // completed while they were away.
+  restoreActiveJob();
 }
 
 export function cleanup() {
-  abortInflight();
-  selectedOppId = '';
+  // Intentionally does NOT abort the analysis. The run is a background job
+  // that survives navigation — its progress stays visible in the global pill,
+  // so the user can switch tabs and come back to the finished board. The job
+  // lives in module state and is repainted by render(); only an explicit new
+  // run supersedes it. selectedOppId is preserved too, so the dropdown keeps
+  // the user's deal selected when they return.
 }
 
 // ── View shell ──────────────────────────────────────────────────────
@@ -102,8 +188,6 @@ function buildView() {
     resultSlot,
   );
 
-  // Stash references the async flow needs.
-  view.__refs = { select, analyzeBtn, resultSlot };
   return view;
 }
 
@@ -186,24 +270,20 @@ function collectUnreadDocuments(documents, descriptions) {
 // banner's re-run so it can't drift to whatever the dropdown now shows);
 // with no argument it scores the current dropdown selection.
 async function runForecast(explicitOpp = null) {
-  const view = $('.forecast');
-  if (!view || !view.__refs) return;
-  const { resultSlot, analyzeBtn } = view.__refs;
-
   const opp = explicitOpp || allOpps.find(o => o.opportunity_id === selectedOppId);
   if (!opp) { showToast('Pick an opportunity first', 'error'); return; }
 
+  // Supersede any run still in flight, then start a fresh background job. The
+  // job — not the view — owns the run, so navigating away won't cancel it.
   abortInflight();
-  analyzeBtn.disabled = true;
-  resultSlot.replaceChildren(el('div', { class: 'forecast__loading' },
-    el('div', { class: 'spinner' }),
-    el('span', {}, 'Reading the notes…'),
-  ));
-
   const controller = new AbortController();
-  currentController = controller;
-  const pill = createPill('Reading the notes…', { label: opp.customer_name || opp.deal_name || 'Analyzer' });
-  currentPill = pill;
+  const label = opp.customer_name || opp.deal_name || 'Analyzer';
+  const pill = createPill('Reading the notes…', { label });
+  const job = { oppId: opp.opportunity_id, label, status: 'running', controller, pill, result: null, error: null };
+  activeJob = job;
+
+  setAnalyzeDisabled(true);
+  paintRunning();
 
   try {
     // Load evidence base + document list in parallel.
@@ -255,30 +335,28 @@ async function runForecast(explicitOpp = null) {
 
     const forecast = await requestForecastJson(opp, descriptions, documents, controller.signal);
 
-    if (controller.signal.aborted) return;
-    markPillSuccess(pill, 'Forecast ready');
-    if (currentPill === pill) currentPill = null;
-    if (currentController === controller) currentController = null;
+    // A superseding run (or an abort) has taken over — a late-resolving stale
+    // run must not overwrite the newer job's result or paint over its board.
+    if (job !== activeJob || controller.signal.aborted) return;
 
     const board = deriveForecastBoard(forecast);
-    resultSlot.replaceChildren(renderForecastBoard({ forecast, board, opp, descriptions, documents }));
+    job.status = 'done';
+    job.result = { forecast, board, opp, descriptions, documents };
+    markPillSuccess(pill, 'Analysis ready');
+    paintResult(job);   // renders into the live slot if the Analyzer is open
+    notifyIfAway(job);  // otherwise toasts that it's ready
   } catch (err) {
-    if (controller.signal.aborted) return;
+    if (job !== activeJob || controller.signal.aborted) return;
     console.error('[Forecast] failed', err);
-    markPillFailure(pill, 'Forecast failed');
-    if (currentPill === pill) currentPill = null;
-    if (currentController === controller) currentController = null;
-    resultSlot.replaceChildren(el('div', { class: 'empty-state forecast__error' },
-      el('div', { class: 'empty-state__title' }, 'Randy could not build the board'),
-      el('div', { class: 'empty-state__description' }, err.message || 'Something went wrong. Try again.'),
-    ));
+    job.status = 'error';
+    job.error = err.message || 'Something went wrong. Try again.';
+    markPillFailure(pill, 'Analysis failed');
+    paintError(job);
+    notifyIfAway(job);
   } finally {
-    // Only restore the button if this run still owns it. A superseding run
-    // (or an explicit abort) takes over the button state, so a late-
-    // resolving aborted run must not re-enable it mid-flight.
-    if (currentController === controller || currentController === null) {
-      analyzeBtn.disabled = !selectedOppId;
-    }
+    // Only the still-current job touches the button; a superseded run leaves
+    // the live button to whatever the current job/selection dictates.
+    if (job === activeJob) setAnalyzeDisabled(!selectedOppId);
   }
 }
 
