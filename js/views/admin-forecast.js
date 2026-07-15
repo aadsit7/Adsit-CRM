@@ -25,7 +25,13 @@ import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
 import { requestForecastJson } from '../utils/forecast-client.js';
 import { stripHtml } from '../utils/forecast-prompts.js';
-import { deriveForecastBoard } from '../utils/forecast-stages.js';
+import {
+  deriveForecastBoard,
+  resolveForecastPosition,
+  compareToCrmStage,
+  FORECAST_STAGES,
+  getStageById,
+} from '../utils/forecast-stages.js';
 import { buildForecastPdf, forecastFilename } from '../utils/forecast-pdf-builder.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
 
@@ -364,14 +370,20 @@ async function runForecast(explicitOpp = null) {
 function renderForecastBoard({ forecast, board, opp, descriptions, documents }) {
   const frag = el('div', { class: 'forecast-board' });
 
+  // Shared, mutable forecast-position state: the manual stage override the
+  // user can set from the summary's "Adjust" control. It is view-only (it
+  // never re-runs the analysis or writes to the CRM) but the PDF export reads
+  // it too, so an exported board matches whatever the summary currently shows.
+  const positionState = { overrideStageId: '' };
+
   // Toolbar: export the board to a two-page, print-ready PDF.
-  frag.appendChild(buildBoardActions({ forecast, board, opp }));
+  frag.appendChild(buildBoardActions({ forecast, board, opp, positionState }));
 
   // Coverage banner (honesty pass): documents Randy could not read.
   const banner = buildCoverageBanner(documents, opp);
   if (banner) frag.appendChild(banner);
 
-  frag.appendChild(buildSummary(forecast, board));
+  frag.appendChild(buildSummary({ forecast, board, opp, positionState }));
 
   // The stage grid lives in a horizontal scroller so the chevrons keep
   // their width and the board scrolls on narrow screens.
@@ -391,25 +403,28 @@ function renderForecastBoard({ forecast, board, opp, descriptions, documents }) 
 // branded PDF (js/utils/forecast-pdf-builder.js) and downloads it. The
 // board passed here is the exact one the DOM was rendered from, so the
 // PDF can't drift from what's on screen.
-function buildBoardActions({ forecast, board, opp }) {
+function buildBoardActions({ forecast, board, opp, positionState }) {
   const btn = el('button', {
     class: 'btn btn--secondary btn--sm forecast-board__pdf-btn',
     type: 'button',
   }, el('span', { class: 'forecast-board__pdf-icon', html: pdfIcon() }), 'Create PDF');
 
-  btn.addEventListener('click', () => handleCreatePdf({ forecast, board, opp, btn }));
+  btn.addEventListener('click', () => handleCreatePdf({ forecast, board, opp, positionState, btn }));
 
   return el('div', { class: 'forecast-board__actions' }, btn);
 }
 
-async function handleCreatePdf({ forecast, board, opp, btn }) {
+async function handleCreatePdf({ forecast, board, opp, positionState, btn }) {
   if (btn.disabled) return;
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.textContent = 'Building PDF…';
 
   try {
-    const blob = await buildForecastPdf({ forecast, board, opp });
+    // Reflect the on-screen state: if the user has manually adjusted the
+    // stage, the PDF's "current position" follows the override.
+    const overrideStageId = positionState ? positionState.overrideStageId : '';
+    const blob = await buildForecastPdf({ forecast, board, opp, overrideStageId });
     const filename = forecastFilename(
       forecast.customer_name || opp?.customer_name || opp?.deal_name || 'Opportunity',
     );
@@ -443,45 +458,138 @@ function pdfIcon() {
     + '</svg>';
 }
 
-function buildSummary(forecast, board) {
-  const { stages, currentIndex, workingIndex } = board;
-  let headline;
-  let bucketProb;
-  let stateClass = 'forecast-summary--none';
+// The summary's "Current position" now reads from resolveForecastPosition —
+// the furthest stage the deal has SUBSTANTIALLY reached — so its probability
+// tracks real progress instead of pinning to the last fully-complete stage.
+// It also (a) flags when the analyzed stage differs from where the deal is
+// filed in the CRM, and (b) offers an inline "Adjust" picker to override the
+// stage (view-only). The chips + notes are repainted in place on override; the
+// eyebrow, picker, and summary paragraph are stable across repaints.
+function buildSummary({ forecast, board, opp, positionState }) {
+  const confidence = String(forecast.current_stage_confidence || 'low');
+  // The analysis's own read — computed once, so the "differs from CRM" note
+  // always compares the CRM stage against the ANALYSIS, not a later override.
+  const analyzed = resolveForecastPosition(board);
 
-  if (currentIndex >= 0) {
-    const s = stages[currentIndex];
-    headline = s.def.name;
-    bucketProb = `${s.def.bucket} · ${s.def.probability}%`;
-    stateClass = 'forecast-summary--complete';
-  } else if (workingIndex >= 0) {
-    const s = stages[workingIndex];
-    headline = `${s.def.name} (in progress)`;
-    bucketProb = `${s.def.bucket} · —`;
-    stateClass = 'forecast-summary--working';
-  } else {
-    headline = 'No stages cleared yet';
-    bucketProb = '0%';
+  const container = el('div', { class: 'forecast-summary' });
+
+  const head = el('div', { class: 'forecast-summary__head' });
+  const notes = el('div', { class: 'forecast-summary__notes' });
+
+  // ── Inline "Adjust stage" picker (stable across repaints) ──────────
+  const stageSelect = el('select', { class: 'form-select forecast-summary__stage-select' },
+    el('option', { value: '' }, 'Use analysis'),
+    ...FORECAST_STAGES.map(s =>
+      el('option', { value: s.id }, `${s.name} — ${s.bucket} · ${s.probability}%`)),
+  );
+  stageSelect.value = positionState.overrideStageId || '';
+  stageSelect.addEventListener('change', () => {
+    positionState.overrideStageId = stageSelect.value;
+    paint();
+  });
+
+  const picker = el('div', { class: 'forecast-summary__picker', hidden: true },
+    el('label', { class: 'forecast-summary__picker-label' },
+      el('span', {}, 'Set forecast stage'),
+      stageSelect,
+    ),
+  );
+
+  const adjustBtn = el('button', {
+    type: 'button',
+    class: 'forecast-summary__adjust',
+    'aria-expanded': 'false',
+  }, 'Adjust');
+  adjustBtn.addEventListener('click', () => {
+    const open = picker.hidden;
+    picker.hidden = !open;
+    adjustBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    adjustBtn.classList.toggle('forecast-summary__adjust--open', open);
+  });
+
+  // ── Repaint: chips + notes reflect the current (possibly overridden) pos ─
+  function paint() {
+    const pos = resolveForecastPosition(board, positionState.overrideStageId);
+
+    container.className = `forecast-summary ${summaryStateClass(pos)}`;
+    head.replaceChildren(buildSummaryChips(pos, confidence), adjustBtn);
+    notes.replaceChildren(...buildSummaryNotes({ analyzed, pos, opp }));
   }
 
-  const confidence = String(forecast.current_stage_confidence || 'low');
-
-  const chips = el('div', { class: 'forecast-summary__chips' },
-    el('span', { class: 'forecast-summary__stage-chip' }, headline),
-    el('span', { class: 'forecast-summary__bucket-chip' }, bucketProb),
-    el('span', { class: `forecast-summary__confidence forecast-summary__confidence--${confidence}` },
-      `Confidence: ${confidence}`),
-  );
+  paint();
 
   const children = [
     el('div', { class: 'forecast-summary__eyebrow' }, 'Current position'),
-    chips,
+    head,
+    picker,
+    notes,
   ];
   if (forecast.summary) {
     children.push(el('p', { class: 'forecast-summary__text' }, forecast.summary));
   }
 
-  return el('div', { class: `forecast-summary ${stateClass}` }, ...children);
+  container.replaceChildren(...children);
+  return container;
+}
+
+function summaryStateClass(pos) {
+  if (!pos.def) return 'forecast-summary--none';
+  if (pos.source === 'override') return 'forecast-summary--override';
+  return pos.complete ? 'forecast-summary--complete' : 'forecast-summary--working';
+}
+
+function buildSummaryChips(pos, confidence) {
+  const headline = pos.def
+    ? (pos.complete ? pos.def.name : `${pos.def.name} (in progress)`)
+    : 'No stages cleared yet';
+  const bucketProb = pos.def ? `${pos.bucket} · ${pos.probability}%` : '0%';
+
+  return el('div', { class: 'forecast-summary__chips' },
+    el('span', { class: 'forecast-summary__stage-chip' }, headline),
+    el('span', { class: 'forecast-summary__bucket-chip' }, bucketProb),
+    el('span', { class: `forecast-summary__confidence forecast-summary__confidence--${confidence}` },
+      `Confidence: ${confidence}`),
+    pos.source === 'override'
+      ? el('span', { class: 'forecast-summary__badge' }, 'Manually set')
+      : null,
+  );
+}
+
+// The two notes that make the forecast honest:
+//   1. "differs from CRM" — the analyzed stage vs. where the deal is filed.
+//   2. "manually set"     — shown only when the user has overridden the stage.
+function buildSummaryNotes({ analyzed, pos, opp }) {
+  const out = [];
+  const crmStage = String(opp?.stage || '').trim();
+  const cmp = compareToCrmStage(analyzed.index, crmStage);
+
+  if (cmp.differs && analyzed.def) {
+    const crmDef = getStageById(cmp.crmStageId);
+    const crmLabel = crmDef ? `${crmStage} · ${crmDef.bucket}` : crmStage;
+    const dir = cmp.direction === 'ahead' ? 'further along than' : 'earlier than';
+    out.push(el('div', { class: 'forecast-summary__note forecast-summary__note--diff' },
+      el('span', { class: 'forecast-summary__note-icon', html: infoIcon() }),
+      el('span', { class: 'forecast-summary__note-text' },
+        'Analysis places this deal at ',
+        el('strong', {}, `${analyzed.def.name} (${analyzed.bucket} · ${analyzed.probability}%)`),
+        ` — ${dir} where it’s filed in the CRM (`,
+        el('strong', {}, crmLabel),
+        '). Use “Adjust” to override, or update the CRM stage.',
+      ),
+    ));
+  }
+
+  if (pos.source === 'override' && pos.def && analyzed.def && pos.index !== analyzed.index) {
+    out.push(el('div', { class: 'forecast-summary__note forecast-summary__note--override' },
+      el('span', { class: 'forecast-summary__note-icon', html: infoIcon() }),
+      el('span', { class: 'forecast-summary__note-text' },
+        'Manually set to ', el('strong', {}, `${pos.def.name} (${pos.bucket} · ${pos.probability}%)`),
+        '. Analysis suggested ', el('strong', {}, analyzed.def.name), '.',
+      ),
+    ));
+  }
+
+  return out;
 }
 
 function buildBoardGrid({ board, opp, descriptions }) {
@@ -717,6 +825,10 @@ function statusIcon(status) {
 
 function warnIcon() {
   return '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2l9 16H1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="15" r="1" fill="currentColor"/></svg>';
+}
+
+function infoIcon() {
+  return '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6" r="1" fill="currentColor"/></svg>';
 }
 
 function escapeHtml(s) {

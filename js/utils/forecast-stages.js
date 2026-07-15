@@ -205,6 +205,32 @@ export function getProbabilityForStageId(stageId) {
   return stage ? stage.probability : null;
 }
 
+// ── Forecast position ───────────────────────────────────────────────
+// The fraction of a stage's exit criteria that must be MET before the deal
+// is considered to have "substantially reached" that stage for forecasting.
+// Deliberately generous (half): the forecast should track the real depth of
+// progress, not lag behind at the last stage whose every last checkbox was
+// ticked. This is what fixes a deal that has cleared most of Development
+// still reading as "Pipeline · 10%" just because one early checkbox is open.
+export const SUBSTANTIAL_STAGE_RATIO = 0.5;
+
+/**
+ * Has the deal SUBSTANTIALLY reached this stage? True when the stage is fully
+ * complete, or when at least SUBSTANTIAL_STAGE_RATIO of its exit criteria are
+ * met. A lone stray checkmark far ahead (e.g. 1 of 4) stays below the bar, so
+ * this reflects genuine depth of progress rather than over-forecasting.
+ *
+ * @param {{ criteria: Array, metCount: number, status: string }} stage
+ *   A derived stage entry from deriveForecastBoard().
+ */
+export function isStageSubstantial(stage) {
+  if (!stage) return false;
+  const total = (stage.criteria || []).length;
+  if (total === 0) return false;
+  if (stage.status === 'complete') return true;
+  return (stage.metCount || 0) / total >= SUBSTANTIAL_STAGE_RATIO;
+}
+
 // ── Board derivation ────────────────────────────────────────────────
 /**
  * Derive the visual stage board from a validated forecast object. This is
@@ -218,11 +244,13 @@ export function getProbabilityForStageId(stageId) {
  * criteria is "met".
  *
  * @param {object} forecast  Parsed forecast JSON (see forecast-schema.js).
- * @returns {{ stages: Array, currentIndex: number, workingIndex: number }}
+ * @returns {{ stages: Array, currentIndex: number, workingIndex: number, forecastIndex: number }}
  *   `stages` has one entry per FORECAST_STAGES definition, each shaped as
  *   `{ def, index, status, criteria, notes, metCount }`. `currentIndex` is
  *   the furthest fully-complete stage (-1 if none); `workingIndex` is the
- *   furthest stage with any progress (-1 if none).
+ *   furthest stage with any progress (-1 if none); `forecastIndex` is the
+ *   furthest stage the deal has SUBSTANTIALLY reached (-1 if none) — the one
+ *   the "current position" headline and probability are read from.
  */
 export function deriveForecastBoard(forecast) {
   const stageResults = new Map(((forecast && forecast.stages) || []).map(s => [s.stage_id, s]));
@@ -254,10 +282,95 @@ export function deriveForecastBoard(forecast) {
 
   let currentIndex = -1;
   let workingIndex = -1;
+  let forecastIndex = -1;
   stages.forEach((s, i) => {
     if (s.status === 'complete') currentIndex = i;
     if (s.status !== 'not_started') workingIndex = i;
+    if (isStageSubstantial(s)) forecastIndex = i;
   });
 
-  return { stages, currentIndex, workingIndex };
+  return { stages, currentIndex, workingIndex, forecastIndex };
+}
+
+/**
+ * Resolve the single "current position" line the Analyzer summary and the
+ * PDF both show, from a derived board and an optional manual stage override.
+ *
+ * The analyzed position is `forecastIndex` — the furthest stage the deal has
+ * substantially reached — falling back to `workingIndex` when nothing is
+ * substantial yet. Its probability is ALWAYS reported (an in-progress stage
+ * no longer collapses to "—"), so the forecast reflects the stage the deal is
+ * actively working, matching how the whiteboard buckets read. A manual
+ * override, when it names a real stage, wins over the analysis (view-only).
+ *
+ * @param {object} board  Result of deriveForecastBoard().
+ * @param {string} [overrideStageId]  A stage id the user picked manually.
+ * @returns {{
+ *   def: object|null, index: number, bucket: string, probability: number,
+ *   complete: boolean, inProgress: boolean, source: 'override'|'analyzed'|'none'
+ * }}
+ */
+export function resolveForecastPosition(board, overrideStageId = '') {
+  const stages = (board && board.stages) || [];
+
+  const at = (idx, source) => {
+    const stage = stages[idx];
+    if (!stage) return null;
+    const complete = stage.status === 'complete';
+    return {
+      def: stage.def,
+      index: idx,
+      bucket: stage.def.bucket,
+      probability: stage.def.probability,
+      complete,
+      inProgress: !complete,
+      source,
+    };
+  };
+
+  // A manual override wins, but only when it names a real stage on the board.
+  if (overrideStageId) {
+    const overrideIdx = getStageIndex(overrideStageId) - 1;
+    const pos = overrideIdx >= 0 ? at(overrideIdx, 'override') : null;
+    if (pos) return pos;
+  }
+
+  const analyzedIdx = (board && board.forecastIndex >= 0)
+    ? board.forecastIndex
+    : (board && board.workingIndex >= 0 ? board.workingIndex : -1);
+  if (analyzedIdx < 0) {
+    return { def: null, index: -1, bucket: '', probability: 0, complete: false, inProgress: false, source: 'none' };
+  }
+  return at(analyzedIdx, 'analyzed');
+}
+
+/**
+ * Compare the analyzed forecast position against the stage a human filed the
+ * deal in (the CRM "stage" field). The Analyzer surfaces a note when the two
+ * disagree, so a rep sees when the evidence says the deal is further along (or
+ * further back) than where it currently sits in the pipeline.
+ *
+ * @param {number} analyzedIndex  0-based index of the analyzed forecast stage (-1 if none).
+ * @param {string} crmStage       The opportunity's legacy CRM stage string.
+ * @returns {{ crmStageId: string, crmIndex: number, differs: boolean,
+ *             direction: 'ahead'|'behind'|'same'|'unknown' }}
+ *   `direction` is relative to the CRM stage: 'ahead' = analysis is further
+ *   along, 'behind' = analysis is earlier. 'unknown' when either side is
+ *   missing (blank CRM stage or no analyzed position).
+ */
+export function compareToCrmStage(analyzedIndex, crmStage) {
+  const crmStageId = mapLegacyStage(crmStage);
+  const crmIndex = crmStageId ? getStageIndex(crmStageId) - 1 : -1;
+  if (analyzedIndex < 0 || crmIndex < 0) {
+    return { crmStageId, crmIndex, differs: false, direction: 'unknown' };
+  }
+  if (analyzedIndex === crmIndex) {
+    return { crmStageId, crmIndex, differs: false, direction: 'same' };
+  }
+  return {
+    crmStageId,
+    crmIndex,
+    differs: true,
+    direction: analyzedIndex > crmIndex ? 'ahead' : 'behind',
+  };
 }

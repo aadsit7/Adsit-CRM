@@ -123,6 +123,7 @@
 }
 .forecast-summary--working { border-left-color: var(--color-primary-lighter); }
 .forecast-summary--none { border-left-color: var(--color-text-muted); }
+.forecast-summary--override { border-left-color: var(--color-warning); }
 
 .forecast-summary__eyebrow {
   font-size: var(--text-xs);
@@ -131,12 +132,112 @@
   letter-spacing: 0.12em;
   color: var(--color-text-muted);
 }
+
+/* Head row: chips on the left, the "Adjust" toggle pinned right. */
+.forecast-summary__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
 .forecast-summary__chips {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+
+/* "Manually set" pill next to the chips. */
+.forecast-summary__badge {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface));
+}
+
+/* Inline "Adjust" toggle button. */
+.forecast-summary__adjust {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 3px var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.forecast-summary__adjust:hover { background: var(--color-sidebar-active); }
+.forecast-summary__adjust--open {
+  background: var(--color-sidebar-active);
+  border-color: var(--color-primary);
+}
+
+/* The stage picker revealed by "Adjust". */
+.forecast-summary__picker[hidden] { display: none; }
+.forecast-summary__picker {
+  padding-top: var(--space-1);
+}
+.forecast-summary__picker-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+.forecast-summary__stage-select {
+  min-width: 260px;
+  max-width: 100%;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: var(--font-normal);
+}
+
+/* Difference / override notes. */
+.forecast-summary__notes:empty { display: none; }
+.forecast-summary__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.forecast-summary__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-primary);
+}
+.forecast-summary__note--diff {
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
+}
+.forecast-summary__note--override {
+  background: var(--color-sidebar-active);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+.forecast-summary__note-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+}
+.forecast-summary__note--diff .forecast-summary__note-icon { color: var(--color-warning); }
+.forecast-summary__note--override .forecast-summary__note-icon { color: var(--color-primary); }
+.forecast-summary__note-icon svg { width: 16px; height: 16px; }
+.forecast-summary__note-text { flex: 1 1 auto; }
 .forecast-summary__stage-chip {
   font-size: var(--text-lg);
   font-weight: var(--font-bold);

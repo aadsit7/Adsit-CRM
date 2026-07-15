@@ -37,7 +37,7 @@ import {
 export const FORECAST_SCHEMA_EXAMPLE = `{
   "opportunity_id": "string — echo back the ID given",
   "customer_name": "string",
-  "current_stage_id": "string — the id of the furthest stage whose criteria are all met",
+  "current_stage_id": "string — the id of the furthest stage the deal has substantially reached (fully complete, or at least half its criteria met)",
   "current_stage_confidence": "high | medium | low",
   "forecast_bucket": "string — derived from current_stage_id",
   "probability": "number — derived from current_stage_id",
