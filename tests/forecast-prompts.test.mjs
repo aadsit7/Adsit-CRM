@@ -106,6 +106,24 @@ test('legacy CRM stage is passed as a weak hint, not evidence', () => {
   assert.ok(prompt.includes('nearest forecast stage: proposal'));
 });
 
+test('prompt carries the note-weighting directives (recency + category)', () => {
+  const prompt = buildForecastPrompt(OPP, DESCRIPTIONS, DOCUMENTS);
+  assert.ok(prompt.includes('NOTE WEIGHTING'));
+  // Recency wins on conflict about the current state.
+  assert.ok(prompt.includes('the more recent note wins'));
+  // meeting_recap outranks opportunity_note.
+  assert.ok(prompt.includes('meeting_recap'));
+  assert.ok(prompt.includes('outranks'));
+  // A past accomplishment isn't downgraded just for being old.
+  assert.ok(prompt.includes('stays "met" unless a later note shows it regressed'));
+});
+
+test('note-weighting stays subordinate to the Golden Rule (never manufactures evidence)', () => {
+  const prompt = buildForecastPrompt(OPP, DESCRIPTIONS, DOCUMENTS);
+  assert.ok(prompt.includes('subordinate to the Golden Rule'));
+  assert.ok(prompt.includes('it only decides which real evidence wins'));
+});
+
 test('stripHtml helper decodes entities and drops tags', () => {
   const { stripHtml } = __forecastPromptInternals;
   assert.equal(stripHtml('<p>Hello&nbsp;&amp; welcome</p>'), 'Hello & welcome');

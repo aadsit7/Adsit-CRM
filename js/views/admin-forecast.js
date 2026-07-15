@@ -24,6 +24,7 @@ import { ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
 import { requestForecastJson } from '../utils/forecast-client.js';
+import { stripHtml } from '../utils/forecast-prompts.js';
 import { deriveForecastBoard } from '../utils/forecast-stages.js';
 import { buildForecastPdf, forecastFilename } from '../utils/forecast-pdf-builder.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
@@ -121,6 +122,65 @@ function byDescriptionDateAsc(a, b) {
   return new Date(a.description_date || a.created_at) - new Date(b.description_date || b.created_at);
 }
 
+// How many attachments to read at once. Small on purpose: each read runs a
+// server-side extraction, so this trades wall-clock for backend load.
+const DOC_READ_CONCURRENCY = 3;
+
+// Run an async worker over items with bounded concurrency. Execution order is
+// not guaranteed; the worker owns its error handling (a throwing worker
+// rejects the whole pool), so a caller that must finish the batch regardless
+// catches inside the worker.
+async function runPool(items, limit, worker) {
+  let idx = 0;
+  const size = Math.max(1, Math.min(limit, items.length));
+  const runners = Array.from({ length: size }, async () => {
+    while (idx < items.length) {
+      const i = idx++;
+      await worker(items[i], i);
+    }
+  });
+  await Promise.all(runners);
+}
+
+// The stable header every analyze-document note carries, e.g.
+// "📄 SOW draft.pdf — Analyzed Jul 15, 2026". Lets us recognize which
+// documents already have a note without a doc_id ↔ note link in the sheet.
+const ANALYZED_DOC_HEADER = /📄\s*(.+?)\s+—\s+Analyzed\b/g;
+
+// File names (lower-cased) that already have an analysis note in the notes.
+function collectAnalyzedDocNames(descriptions) {
+  const names = new Set();
+  (descriptions || []).forEach(d => {
+    const plain = stripHtml(d?.description_text || d?.text || '');
+    ANALYZED_DOC_HEADER.lastIndex = 0;
+    let m;
+    while ((m = ANALYZED_DOC_HEADER.exec(plain))) {
+      const name = m[1].trim().toLowerCase();
+      if (name) names.add(name);
+    }
+  });
+  return names;
+}
+
+// Documents that still need reading: not flagged analyzed AND without an
+// existing analysis note. The second test is a defensive idempotency guard —
+// if the backend ever fails to persist a document's analyzed flag, we still
+// won't re-extract it into a duplicate note on the next run. A document we
+// recognize as already-noted has its flag corrected in place so the coverage
+// banner stays honest.
+function collectUnreadDocuments(documents, descriptions) {
+  const analyzedNames = collectAnalyzedDocNames(descriptions);
+  return (documents || []).filter(d => {
+    if (String(d.analyzed || '').toUpperCase() === 'TRUE') return false;
+    const name = String(d.file_name || d.name || '').trim().toLowerCase();
+    if (name && analyzedNames.has(name)) {
+      d.analyzed = 'TRUE';
+      return false;
+    }
+    return true;
+  });
+}
+
 // ── The run ─────────────────────────────────────────────────────────
 // Pass an explicit opp to score that exact deal (used by the coverage
 // banner's re-run so it can't drift to whatever the dropdown now shows);
@@ -165,17 +225,29 @@ async function runForecast(explicitOpp = null) {
     // Failures are non-fatal: Randy still scores on whatever succeeded, and
     // the coverage banner is left to name only the documents that genuinely
     // could not be read (a failed doc keeps its .analyzed flag untouched).
-    const unread = documents.filter(d => String(d.analyzed || '').toUpperCase() !== 'TRUE');
-    for (let i = 0; i < unread.length; i++) {
+    const unread = collectUnreadDocuments(documents, descriptions);
+    if (unread.length) {
+      let completed = 0;
+      const freshNotes = [];
+      updatePillStage(pill, `Reading documents… 0 of ${unread.length}`);
+      // Bounded concurrency: analyze up to a few documents at once so a
+      // document-heavy deal doesn't wait on a serial chain, without flooding
+      // the Apps Script endpoint (each read runs an extraction server-side).
+      await runPool(unread, DOC_READ_CONCURRENCY, async (file) => {
+        if (controller.signal.aborted) return;
+        try {
+          freshNotes.push(await analyzeOneDocument(file, opp));
+        } catch (docErr) {
+          console.warn('[Forecast] document analysis failed', file?.file_name, docErr);
+        } finally {
+          completed += 1;
+          updatePillStage(pill, `Reading documents… ${completed} of ${unread.length}`);
+        }
+      });
       if (controller.signal.aborted) return;
-      updatePillStage(pill, `Reading document ${i + 1} of ${unread.length}…`);
-      try {
-        descriptions.push(await analyzeOneDocument(unread[i], opp));
-      } catch (docErr) {
-        console.warn('[Forecast] document analysis failed', unread[i]?.file_name, docErr);
-      }
+      descriptions.push(...freshNotes);
+      descriptions.sort(byDescriptionDateAsc);
     }
-    if (unread.length) descriptions.sort(byDescriptionDateAsc);
 
     if (controller.signal.aborted) return;
 

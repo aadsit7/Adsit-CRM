@@ -254,6 +254,95 @@ test('duplicate stage and criterion entries are de-duplicated (first wins)', () 
   assert.equal(out.stages[0].criteria[0].status, 'met');
 });
 
+// ── Guard #3: evidence grounding ─────────────────────────────────────
+// A real anchor (id/date) is necessary but not sufficient. When the cited
+// note's text is supplied, the quote must actually overlap that note's prose
+// — catching a quote invented on top of a real note id/date.
+const NOTE_TEXT = 'On the discovery call the buyer confirmed a 500 seat enterprise rollout; the IT director owns the decision.';
+
+function forecastWithEvidence(evidence) {
+  const f = validForecast();
+  f.stages[0].criteria[0] = {
+    criterion_id: 'icp_match', status: 'met', evidence, source_date: '2026-03-01', source_id: 'dsc_1',
+  };
+  return f;
+}
+
+test('grounding: a quote drawn from the cited note stays "met"', () => {
+  const f = forecastWithEvidence('Buyer confirmed a 500 seat enterprise; the IT director is the buyer.');
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'],
+    sourceTextById: { dsc_1: NOTE_TEXT },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('grounding: a fabricated quote pinned to a real note is downgraded to "no_evidence"', () => {
+  const f = forecastWithEvidence('Legal review is complete and the signed contract was returned by counsel.');
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'],
+    sourceTextById: { dsc_1: NOTE_TEXT },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'no_evidence');
+  assert.equal(out.stages[0].criteria[0].evidence, '');
+  assert.equal(out.stages[0].criteria[0].source_id, '');
+});
+
+test('grounding: a close paraphrase (majority of content words shared) survives', () => {
+  // Synonyms for buyer/confirmed/decision are dropped, but seat/enterprise/
+  // director/500 keep the overlap above threshold.
+  const f = forecastWithEvidence('Prospect verified a 500 seat enterprise; the director decides.');
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], sourceTextById: { dsc_1: NOTE_TEXT },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('grounding: skipped when no source text is supplied (stays "met" on a real anchor)', () => {
+  const f = forecastWithEvidence('Unverifiable without note text, but well-anchored.');
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'],
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('grounding: skipped when the cited anchor has no text entry (never a false rejection)', () => {
+  const f = forecastWithEvidence('Legal review is complete and signed.');
+  // Text map holds a different note; dsc_1 has no entry → grounding skipped.
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], sourceTextById: { dsc_2: 'unrelated text' },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('grounding via a date anchor: a fabricated quote on a real date is downgraded', () => {
+  const f = validForecast();
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'met', evidence: 'Security questionnaire returned and approved.', source_date: '2026-03-01', source_id: '' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceDates: ['2026-03-01'], sourceTextByDate: { '2026-03-01': NOTE_TEXT },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'no_evidence');
+});
+
+test('grounding prefers the id-anchored note text over the date bucket', () => {
+  const f = forecastWithEvidence('Buyer confirmed a 500 seat enterprise rollout.');
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], validSourceDates: ['2026-03-01'],
+    sourceTextById: { dsc_1: NOTE_TEXT },
+    sourceTextByDate: { '2026-03-01': 'completely unrelated legal contract text' },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'met');
+});
+
+test('grounding leaves "not_met" untouched (only met/partial are grounded)', () => {
+  const f = validForecast();
+  f.stages[0].criteria[0] = { criterion_id: 'icp_match', status: 'not_met', evidence: 'Totally unrelated wording here.', source_date: '2026-03-01', source_id: 'dsc_1' };
+  const out = parseForecastJsonResponse(JSON.stringify(f), {
+    validSourceIds: ['dsc_1'], sourceTextById: { dsc_1: NOTE_TEXT },
+  });
+  assert.equal(out.stages[0].criteria[0].status, 'not_met');
+});
+
 test('gaps and open_questions are string arrays with empties filtered out', () => {
   const out = parseForecastJsonResponse(JSON.stringify(validForecast()));
   assert.deepEqual(out.gaps, ['Need decision criteria']);

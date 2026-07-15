@@ -18,8 +18,10 @@ import { FORECAST_SCHEMA_EXAMPLE } from './forecast-schema.js';
 // Minimal HTML → text. Description notes written via the Quill editor (and
 // the analyze-document flow) are stored as HTML; the model should see clean
 // prose so its quotes match what a human reads. Kept dependency-free (no
-// DOM) so this module stays testable under Node.
-function stripHtml(html) {
+// DOM) so this module stays testable under Node. Exported so the client can
+// normalize note text the same way when it grounds the model's evidence
+// quotes against the exact prose the model was shown.
+export function stripHtml(html) {
   return String(html || '')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -154,6 +156,13 @@ ATTACHED DOCUMENTS (metadata only — this is NOT evidence):
 ${buildDocumentsBlock(documents)}
 
 You may NOT treat an un-analyzed document's mere existence as evidence for any criterion. If a document has not been analyzed, its contents are invisible to you — score as if it did not exist.
+
+---
+
+NOTE WEIGHTING (how to read the notes — still subordinate to the Golden Rule; this never manufactures evidence, it only decides which real evidence wins):
+- The notes are listed oldest first. When two notes disagree about the deal's CURRENT state, the more recent note wins; treat the older statement as historical context, not the present truth.
+- A note typed "meeting_recap" is first-hand, customer-facing evidence. It outranks a note typed "opportunity_note" (internal/asynchronous) or an uncategorized legacy note when they conflict about the same fact.
+- Recency decides the CURRENT stage, not whether a past step happened. A criterion a note shows was satisfied stays "met" unless a later note shows it regressed — do not downgrade a real, dated accomplishment just because it is old.
 
 ---
 

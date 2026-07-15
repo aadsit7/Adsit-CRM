@@ -7,7 +7,7 @@
 // bad values to safe defaults.
 //
 // The parser is where the GOLDEN RULE is *enforced* rather than merely
-// requested. Two guards matter most:
+// requested. Three guards matter most:
 //   1. Unknown stage_id / criterion_id values are dropped — the model
 //      cannot invent a criterion that isn't in the stage definitions.
 //   2. A criterion cannot be "met" or "partial" without a real,
@@ -18,6 +18,12 @@
 //      "no_evidence" with its source fields cleared. An invented
 //      checkmark — including one pinned to a fabricated date — never
 //      survives parsing when the real note ids/dates are supplied.
+//   3. Evidence grounding: even when the cited note id/date is real, the
+//      quote itself must actually come from that note. When the source
+//      note text is supplied, a "met"/"partial" whose evidence quote does
+//      not overlap the cited note's prose (a fabricated quote pinned to a
+//      real note) is downgraded to "no_evidence". Tolerant of close
+//      paraphrase, intolerant of invention.
 // ============================================================
 
 import {
@@ -64,6 +70,59 @@ const VALID_CONFIDENCE         = new Set(['high', 'medium', 'low']);
 // must be backed by real, traceable evidence.
 const CLAIMED_STATUSES = new Set(['met', 'partial']);
 
+// ── Evidence grounding (guard #3) ───────────────────────────────────
+// The model is instructed to "quote or closely paraphrase" one source
+// note. We verify that promise deterministically: the evidence must share
+// a strong majority of its content words with the cited note's prose. This
+// tolerates a close paraphrase (synonyms/reordering keep most content
+// words) while rejecting a quote invented on top of a real note id/date.
+const EVIDENCE_GROUNDING_MIN_OVERLAP = 0.5;
+
+// Words too common to carry meaning — excluded so overlap reflects the
+// substantive vocabulary (names, numbers, verbs) rather than filler.
+const GROUNDING_STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'was', 'were', 'been', 'being', 'has', 'have',
+  'had', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their',
+  'with', 'from', 'will', 'would', 'can', 'could', 'should', 'may', 'might',
+  'not', 'but', 'our', 'your', 'his', 'her', 'she', 'him', 'who', 'whom',
+  'which', 'what', 'when', 'where', 'into', 'onto', 'per', 'via', 'about',
+]);
+
+function groundingTokens(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ') // punctuation → space (keeps $150k → 150k)
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !GROUNDING_STOPWORDS.has(w));
+}
+
+/**
+ * Is `evidence` grounded in `noteText`? True when a strong majority of the
+ * evidence's distinct content words appear in the note. Returns true (skip
+ * the check) when there is nothing substantive to compare — an empty quote,
+ * or a note whose text we don't have — so grounding only ever downgrades a
+ * quote we can positively show is ungrounded; it never invents a rejection.
+ */
+function isEvidenceGrounded(evidence, noteText) {
+  const evWords = [...new Set(groundingTokens(evidence))];
+  if (evWords.length === 0) return true;
+  const noteSet = new Set(groundingTokens(noteText));
+  if (noteSet.size === 0) return true;
+  let hits = 0;
+  for (const w of evWords) if (noteSet.has(w)) hits += 1;
+  return (hits / evWords.length) >= EVIDENCE_GROUNDING_MIN_OVERLAP;
+}
+
+// Resolve the text of the note a surviving anchor points at, preferring the
+// precise id match over the (possibly many-to-one) date match. Returns null
+// when we have no text for either anchor — the signal to skip grounding.
+function resolveAnchorText(sourceId, sourceDate, texts) {
+  if (!texts) return null;
+  if (sourceId && texts.byId && texts.byId.has(sourceId)) return texts.byId.get(sourceId);
+  if (sourceDate && texts.byDate && texts.byDate.has(sourceDate)) return texts.byDate.get(sourceDate);
+  return null;
+}
+
 function cleanStr(v) {
   return typeof v === 'string' ? v.trim() : '';
 }
@@ -90,6 +149,13 @@ function cleanStrArray(v) {
  *   left with no surviving anchor is downgraded to "no_evidence". Omit
  *   either set to skip that validation (parser stays usable with only
  *   static data, e.g. in tests).
+ * @param {Object<string,string>|Map<string,string>} [options.sourceTextById]
+ *   description_id → the note's prose (HTML stripped). When supplied, a
+ *   met/partial quote that doesn't overlap the cited note's text is
+ *   downgraded (guard #3). Omit to skip grounding.
+ * @param {Object<string,string>|Map<string,string>} [options.sourceTextByDate]
+ *   description_date → the note prose for that date (notes sharing a date
+ *   concatenated). Used to ground a claim anchored only by date.
  * @returns {object} normalized forecast JSON.
  */
 export function parseForecastJsonResponse(rawText, options = {}) {
@@ -128,9 +194,18 @@ export function parseForecastJsonResponse(rawText, options = {}) {
   const toSet = (v) => v instanceof Set
     ? v
     : Array.isArray(v) ? new Set(v.map(String)) : null;
+  const toMap = (v) => {
+    if (v instanceof Map) return v;
+    if (v && typeof v === 'object') return new Map(Object.entries(v).map(([k, val]) => [String(k), String(val)]));
+    return null;
+  };
+  const sourceTexts = (toMap(options.sourceTextById) || toMap(options.sourceTextByDate))
+    ? { byId: toMap(options.sourceTextById), byDate: toMap(options.sourceTextByDate) }
+    : null;
   const anchors = {
     validSourceIds:   toSet(options.validSourceIds),
     validSourceDates: toSet(options.validSourceDates),
+    sourceTexts,
   };
 
   // ── Top-level scalars ────────────────────────────────────────────
@@ -211,7 +286,7 @@ function normalizeCriterion(rawCriterion, stageId, anchors = {}) {
   let sourceDate = cleanStr(rawCriterion.source_date);
   let sourceId   = cleanStr(rawCriterion.source_id);
 
-  const { validSourceIds, validSourceDates } = anchors;
+  const { validSourceIds, validSourceDates, sourceTexts } = anchors;
 
   // A cited source_id / source_date that doesn't correspond to a real note
   // is a fabrication — clear it. (Only enforced when we know the real
@@ -232,6 +307,15 @@ function normalizeCriterion(rawCriterion, stageId, anchors = {}) {
     const hasAnchor = !!sourceId || !!sourceDate;
     if (!evidence || !hasAnchor) {
       status = 'no_evidence';
+    } else {
+      // Guard #3 — evidence grounding: a real anchor isn't enough; the
+      // quote must actually come from that note. When we have the cited
+      // note's text and the quote doesn't overlap it, the quote was
+      // invented on top of a real note → downgrade.
+      const noteText = resolveAnchorText(sourceId, sourceDate, sourceTexts);
+      if (noteText != null && !isEvidenceGrounded(evidence, noteText)) {
+        status = 'no_evidence';
+      }
     }
   }
 
