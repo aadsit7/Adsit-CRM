@@ -19,7 +19,7 @@
 // so it has no plugin dependency.
 // ============================================================
 
-import { deriveForecastBoard } from './forecast-stages.js';
+import { deriveForecastBoard, resolveForecastPosition } from './forecast-stages.js';
 import { formatDate } from './date.js';
 
 // ── Palette (mirrors css/variables.css design tokens) ─────────
@@ -232,17 +232,15 @@ function isFull(doc, y, needed) {
 function drawCurrentPosition(doc, ctx, forecast, board, yStart) {
   let y = drawHeading(doc, 'Current Position', yStart) + 16;
 
-  const { stages, currentIndex, workingIndex } = board;
+  // Shared with the on-screen summary: the furthest SUBSTANTIALLY-reached
+  // stage (or a manual override), with its probability always shown.
+  const pos = resolveForecastPosition(board, ctx.overrideStageId);
   let headline;
   let bucketProb;
-  if (currentIndex >= 0) {
-    const s = stages[currentIndex];
-    headline = s.def.name;
-    bucketProb = `${s.def.bucket} · ${s.def.probability}%`;
-  } else if (workingIndex >= 0) {
-    const s = stages[workingIndex];
-    headline = `${s.def.name} (in progress)`;
-    bucketProb = `${s.def.bucket} · —`;
+  if (pos.def) {
+    headline = pos.complete ? pos.def.name : `${pos.def.name} (in progress)`;
+    bucketProb = `${pos.bucket} · ${pos.probability}%`;
+    if (pos.source === 'override') bucketProb += '    ·    Manually set';
   } else {
     headline = 'No stages cleared yet';
     bucketProb = '0%';
@@ -439,10 +437,13 @@ function drawFooters(doc, customer, genDate) {
  *                                    with the same shared function, so the
  *                                    PDF matches the on-screen board exactly.
  * @param {object}  [payload.opp]     Opportunity row ({ customer_name, deal_name }).
+ * @param {string}  [payload.overrideStageId]  Manual stage override from the
+ *                                    Analyzer summary; when set, the PDF's
+ *                                    current position follows it (view parity).
  * @param {object}  [options]         { timeoutMs } forwarded to waitForJsPdf.
  * @returns {Promise<Blob>}
  */
-export async function buildForecastPdf({ forecast, board, opp } = {}, options) {
+export async function buildForecastPdf({ forecast, board, opp, overrideStageId = '' } = {}, options) {
   if (!forecast || typeof forecast !== 'object') {
     throw new Error('buildForecastPdf: expected a parsed forecast object');
   }
@@ -455,7 +456,7 @@ export async function buildForecastPdf({ forecast, board, opp } = {}, options) {
   const deal = String(opp?.deal_name || '').trim();
   const genDate = formatGenDate();
 
-  const ctx = { customer };
+  const ctx = { customer, overrideStageId };
 
   // Page 1 header.
   drawHeaderBand(doc, customer, deal, genDate);
