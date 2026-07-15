@@ -41,6 +41,7 @@ ACCURACY IS NON-NEGOTIABLE: 100% accuracy is the absolute top priority — above
 - If a piece of information is not found in the DATA CONTEXT, say so clearly ("I don't see that in the data") rather than guessing or inferring.
 - Never fabricate names, dates, amounts, statuses, contacts, or action items.
 - If you are uncertain, say what you checked and what was or wasn't found.
+- A note ending in a "[truncated: … not shown here]" marker is only PARTIAL. Use what is shown, but never assume the hidden remainder confirms or contradicts anything; if the answer turns on the cut-off portion, say the note is truncated and offer to open the full record.
 
 ## ADVANCED REASONING PROTOCOL — MANDATORY ON EVERY REQUEST
 
@@ -579,7 +580,7 @@ export async function loadSheetData(forceRefresh = false) {
 export function buildStableContext(data) {
   const opps = data.opportunities.map(o => ({
     ...o,
-    description: stripHtml(o.description || '').substring(0, 1500),
+    description: clip(stripHtml(o.description || ''), 1500),
   }));
 
   return `DATA CONTEXT:
@@ -637,10 +638,69 @@ function findMentionedPartner(partners, userMessage) {
   return partners.find(p => fuzzyNameMatch(p.display_name, userMessage)) || null;
 }
 
-function findMentionedOpportunity(opportunities, userMessage) {
-  return opportunities.find(o =>
-    fuzzyNameMatch(o.deal_name, userMessage) || fuzzyNameMatch(o.customer_name, userMessage)
-  ) || null;
+// The most opportunities whose FULL note history we inline in one turn.
+// Covers "compare these three deals" comfortably while keeping a broad match
+// from ballooning the context; any beyond this are named, not expanded.
+const MAX_EXPANDED_OPPS = 4;
+
+// Truncate long text to a budget, but VISIBLY. Randy's answers are only as
+// trustworthy as its awareness of what it can and can't see, so a cut note
+// must announce that it was cut — otherwise the model reads a half-note as the
+// whole record and analyzes (or reassures) on incomplete data. Text within
+// budget is returned untouched.
+function clip(text, max) {
+  const s = String(text == null ? '' : text);
+  if (s.length <= max) return s;
+  return s.slice(0, max) + `…[truncated: ${s.length - max} more characters recorded in the sheet but not shown here]`;
+}
+
+// Find EVERY opportunity the message refers to — not just the first. A single
+// first-match miss is a grounding failure: "compare Fabrikam and Acme" or "all
+// three Nerdio deals" must expand each named deal's full note history, or Randy
+// analyzes one and guesses (or stays silent) on the rest.
+//
+// This unions three trusted passes and dedupes by opportunity_id, preserving
+// discovery order:
+//   1. findOpportunityMatches — the same punctuation-tolerant name-in-message
+//      resolver the MAP/Timeline PDF flow uses (exact → partial/reverse).
+//   2. fuzzyNameMatch — voice-tolerant ("Green Shield" → "Greenshield",
+//      token-order differences) on either name.
+//   3. A conservative acronym pass that fires ONLY on genuinely acronym-shaped
+//      input (all-caps/-digit tokens ≥3 chars in the RAW message), so ordinary
+//      prose can never drag in an unrelated deal. Catches "ANICO", "MHS", etc.
+function findMentionedOpportunities(opportunities, userMessage) {
+  const opps = opportunities || [];
+  const msg = String(userMessage || '');
+  if (!msg.trim() || opps.length === 0) return [];
+
+  const hits = new Map(); // opportunity_id → opp (dedupe, first-seen order)
+  const add = (o) => {
+    const key = String(o.opportunity_id || '');
+    if (key && !hits.has(key)) hits.set(key, o);
+  };
+
+  // Pass 1: robust name-in-message match (multi-match, punctuation-tolerant).
+  for (const o of findOpportunityMatches(opps, msg)) add(o);
+
+  // Pass 2: voice-tolerant fuzzy match on deal or customer name.
+  for (const o of opps) {
+    if (fuzzyNameMatch(o.deal_name, msg) || fuzzyNameMatch(o.customer_name, msg)) add(o);
+  }
+
+  // Pass 3: conservative acronym match on acronym-shaped tokens only.
+  const acrTokens = msg.match(/\b[A-Z0-9]{3,}\b/g) || [];
+  if (acrTokens.length) {
+    for (const o of opps) {
+      const names = [o.customer_name, o.deal_name].filter(Boolean);
+      const matched = names.some(n => {
+        const acr = acronymOf(n);
+        return acr.length >= 3 && acrTokens.some(t => sharesPrefix(t, acr, 3));
+      });
+      if (matched) add(o);
+    }
+  }
+
+  return [...hits.values()];
 }
 
 function buildFullDescriptionsFor(data, opportunityId) {
@@ -656,7 +716,7 @@ function buildFullDescriptionsFor(data, opportunityId) {
       deal_name: d.deal_name,
       description_date: d.description_date,
       created_at: d.created_at,
-      description_text: stripHtml(d.description_text || '').substring(0, 4000)
+      description_text: clip(stripHtml(d.description_text || ''), 4000)
     }));
   return list;
 }
@@ -674,22 +734,36 @@ export function buildQueryContext(data, userMessage) {
   const needsFullDescriptions = /tell me (all |everything |more )?about|deep dive|full (history|detail|picture|analysis)|analyze|walk me through|break down|everything about|what (happened|has been|have we|are we doing) with|all (notes|activity|meetings|descriptions|updates)|complete (history|picture|overview)|full context|bring me up to speed|catch me up|update me on|what'?s (the )?(latest|update|status|going on|happening|new) (with|on)|how (are|is) (things|it going) with|what have we (done|discussed|talked about)|fill me in/i.test(userMessage);
 
   const sections = [];
-  const mentionedOpp = findMentionedOpportunity(data.opportunities || [], userMessage);
 
-  // If the user named a specific opportunity, always pull ALL of its
+  // If the user named one or more opportunities, always pull ALL of each one's
   // description notes so Randy can analyze the full history (per the
-  // opportunity-analysis contract in RANDY_PERSONALITY).
-  if (mentionedOpp) {
-    const opp = {
-      ...mentionedOpp,
-      description: stripHtml(mentionedOpp.description || '').substring(0, 4000)
-    };
-    sections.push(`MENTIONED OPPORTUNITY (${mentionedOpp.deal_name}):\n${JSON.stringify(opp, null, 2)}`);
+  // opportunity-analysis contract in RANDY_PERSONALITY). Expanding EVERY
+  // mentioned deal — not just the first — is what lets Randy answer "compare X
+  // and Y" or "all our Nerdio deals" from the sheet instead of one deal plus a
+  // guess. Bounded so a broad match can't blow up the context.
+  const mentionedOpps = findMentionedOpportunities(data.opportunities || [], userMessage);
+  const expandedOpps = mentionedOpps.slice(0, MAX_EXPANDED_OPPS);
+  for (const m of expandedOpps) {
+    const label = m.deal_name || m.customer_name || m.opportunity_id;
+    const opp = { ...m, description: clip(stripHtml(m.description || ''), 4000) };
+    sections.push(`MENTIONED OPPORTUNITY (${label}):\n${JSON.stringify(opp, null, 2)}`);
 
-    const allDescriptions = buildFullDescriptionsFor(data, mentionedOpp.opportunity_id);
+    const allDescriptions = buildFullDescriptionsFor(data, m.opportunity_id);
     if (allDescriptions.length > 0) {
-      sections.push(`FULL DESCRIPTION HISTORY for opportunity "${mentionedOpp.deal_name}" (${allDescriptions.length} entries, newest first — analyze ALL of these unless user asks otherwise):\n${JSON.stringify(allDescriptions, null, 2)}`);
+      sections.push(`FULL DESCRIPTION HISTORY for opportunity "${label}" (${allDescriptions.length} entries, newest first — analyze ALL of these unless the user asks otherwise):\n${JSON.stringify(allDescriptions, null, 2)}`);
+    } else {
+      // State the absence explicitly so the model reports "no notes on file"
+      // rather than back-filling from the summary field or its own priors.
+      sections.push(`FULL DESCRIPTION HISTORY for opportunity "${label}": no description notes are recorded in the sheet for this opportunity. Do not invent any — say none are on file if the user asks.`);
     }
+  }
+  // If more deals matched than we expanded, name the rest so the model knows
+  // they exist (and can offer to detail them) instead of silently dropping them.
+  if (mentionedOpps.length > expandedOpps.length) {
+    const overflow = mentionedOpps.slice(MAX_EXPANDED_OPPS)
+      .map(o => o.deal_name || o.customer_name || o.opportunity_id)
+      .filter(Boolean);
+    sections.push(`NOTE: ${mentionedOpps.length} opportunities matched this message; full note history above covers the first ${expandedOpps.length}. Also matched — ask the user to name one for its full history: ${overflow.join(', ')}.`);
   }
 
   if (!needsTranscripts && !needsFullDescriptions) {
@@ -704,7 +778,7 @@ export function buildQueryContext(data, userMessage) {
   if (needsFullDescriptions) {
     const partnerOpps = data.opportunities
       .filter(o => String(o.partner_id) === String(partner.partner_id))
-      .map(o => ({ ...o, description: stripHtml(o.description || '').substring(0, 4000) }));
+      .map(o => ({ ...o, description: clip(stripHtml(o.description || ''), 4000) }));
     if (partnerOpps.length > 0) {
       sections.push(`FULL OPPORTUNITY DETAILS (for ${partner.display_name}):\n${JSON.stringify(partnerOpps, null, 2)}`);
     }
@@ -720,7 +794,7 @@ export function buildQueryContext(data, userMessage) {
         deal_name: d.deal_name,
         description_date: d.description_date,
         created_at: d.created_at,
-        description_text: stripHtml(d.description_text || '').substring(0, 4000)
+        description_text: clip(stripHtml(d.description_text || ''), 4000)
       }));
     if (partnerDescriptions.length > 0) {
       sections.push(`FULL DESCRIPTION HISTORY (for ${partner.display_name}'s opportunities — analyze ALL entries):\n${JSON.stringify(partnerDescriptions, null, 2)}`);
@@ -734,7 +808,7 @@ export function buildQueryContext(data, userMessage) {
         transcript_id: t.transcript_id,
         partner_name: t.partner_name,
         conversation_date: t.conversation_date,
-        transcript_text: (t.transcript_text || '').substring(0, 8000),
+        transcript_text: clip(t.transcript_text || '', 8000),
       }));
     if (partnerTranscripts.length > 0) {
       sections.push(`FULL TRANSCRIPTS (for ${partner.display_name}):\n${JSON.stringify(partnerTranscripts, null, 2)}`);
@@ -1195,6 +1269,8 @@ export const __mapPdfInternals = {
   findOpportunityMatches,
   acronymOf,
   sharesPrefix,
+  findMentionedOpportunities,
+  clip,
 };
 
 
