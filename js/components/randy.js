@@ -421,8 +421,12 @@ function onStateEnter(state, prevState) {
       stopAll();
       break;
     case STATES.PASSIVE:
-      if (isTypeModeActive) {
-        // In type mode: stop audio/recognition but preserve conversation history
+      // Quiet whenever voice is off — either the user is typing (type mode) or
+      // has toggled the Voice button off. Stop the mic and any speech but KEEP
+      // the conversation history so the chat can be resumed. The mic is never
+      // left running here: the browser's recording indicator must only be on
+      // while the voice feature is actively on.
+      if (isTypeModeActive || !voiceEnabled) {
         if (recognition) { try { recognition.abort(); } catch { /* ok */ } }
         if (synth.speaking) synth.cancel();
         speechChainCancelled = true;
@@ -646,6 +650,11 @@ function scheduleRestart() {
 
 function startRecognition() {
   if (currentState === STATES.OFF || currentState === STATES.PROCESSING) return;
+  // Never open the mic while voice is off. PASSIVE with voice disabled is the
+  // "paused" state reached by toggling the Voice button off — the mic (and the
+  // browser recording indicator) must stay closed until voice is turned back
+  // on. This also stops onend/onerror auto-restarts from resurrecting it.
+  if (currentState === STATES.PASSIVE && !voiceEnabled) return;
   if (isTypeModeActive) return;
   // Pause if the existing voice widget (chat mic) is active — only one SpeechRecognition at a time
   if (isVoiceModeActive()) return;
@@ -1098,7 +1107,10 @@ async function processUserInput(text) {
       if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
         conversationHistory.pop();
       }
-      transition(STATES.ACTIVE_LISTENING, true);
+      // A barge-in interrupt resumes listening, but if the abort came from a
+      // full reset (New Chat / Close set the state to OFF), stay off — don't
+      // force the mic back on.
+      if (currentState !== STATES.OFF) transition(STATES.ACTIVE_LISTENING, true);
       return;
     }
     // Remove orphaned user message on error too
@@ -2917,7 +2929,8 @@ function renderPresets() {
 
 // ── Widget DOM ────────────────────────────────────────────────────
 const MIC_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
-const PENCIL_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>`;
+// Chat bubble with a plus — starts a fresh conversation ("New Chat")
+const NEWCHAT_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="10" y1="10" x2="14" y2="10"/></svg>`;
 const SPEAKER_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
 const MUTED_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
 const FORM_SVG_SM = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
@@ -2992,11 +3005,11 @@ function createWidget() {
               <span class="randy-btn-label">Mute</span>
             </div>
             <div class="randy-btn-wrap">
-              <button class="randy-ctrl-btn" id="randy-edit-btn" aria-label="Type a message">${PENCIL_SVG}</button>
-              <span class="randy-btn-label">Type</span>
+              <button class="randy-ctrl-btn" id="randy-newchat-btn" title="New chat" aria-label="Start a new chat">${NEWCHAT_SVG}</button>
+              <span class="randy-btn-label">New Chat</span>
             </div>
           </div>
-          <div class="randy-input-row" id="randy-input-row" hidden>
+          <div class="randy-input-row" id="randy-input-row">
             <input type="text" class="randy-text-input" id="randy-text-input" placeholder="Type a message..." maxlength="500">
             <button class="randy-send-btn" id="randy-send-btn" title="Send">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -3103,27 +3116,28 @@ function createWidget() {
     }, true);
   }
 
-  // Edit/keyboard input toggle
-  const editBtn = document.getElementById('randy-edit-btn');
-  const inputRow = document.getElementById('randy-input-row');
+  // Text input — the message box is always visible, so there's no type toggle.
   const textInput = document.getElementById('randy-text-input');
   const sendBtn = document.getElementById('randy-send-btn');
 
-  editBtn.addEventListener('click', () => {
-    isTypeModeActive = !isTypeModeActive;
-    inputRow.hidden = !isTypeModeActive;
-    if (isTypeModeActive) {
-      textInput.focus();
-      // Stop all voice activity when entering type mode
-      if (autoSendTimer) { clearTimeout(autoSendTimer); autoSendTimer = null; }
-      removeInterimBubble();
-      voiceEnabled = false;
-      if (recognition) { try { recognition.abort(); } catch { /* ok */ } }
-      if (currentState === STATES.ACTIVE_LISTENING) {
-        transition(STATES.PASSIVE, true);
-      }
-    }
+  // New Chat — save the current conversation, then reset to a clean slate.
+  document.getElementById('randy-newchat-btn').addEventListener('click', () => {
+    hideError();
+    // Each turn already auto-saves; persist once more so the just-finished
+    // chat isn't lost, then wipe everything for a fresh start.
+    saveRandyConversation();
+    // Entering OFF runs stopAll(), which stops the mic and speech and clears
+    // history, pending actions, timers, and conversation ids.
+    transition(STATES.OFF, true);
+    // Clear the follow-up flows and type flag that stopAll() doesn't touch.
+    pendingMapIntent = null;
+    pendingTimelineIntent = null;
+    isTypeModeActive = false;
+    const chat = document.getElementById('randy-chat');
+    if (chat) chat.innerHTML = '';
+    showWelcome();
     updateVoiceButton();
+    textInput.focus();
   });
 
   // Mute toggle
@@ -3145,11 +3159,18 @@ function createWidget() {
     const text = textInput.value.trim();
     if (!text || isProcessing) return;
     textInput.value = '';
-    // Route yes/no typed replies to the confirmation handler
+    // Route yes/no typed replies to the confirmation handler. Keep whatever
+    // mode the pending flow is already in — don't switch voice/silent mid-confirm.
     if (currentState === STATES.CONFIRMING) {
       handleConfirmation(text.toLowerCase());
       return;
     }
+    // A fresh typed message speaks its reply only when the voice feature is
+    // currently on. Voice off → silent text chat (no TTS, mic stays shut);
+    // voice on → Randy speaks the reply and keeps listening. isTypeModeActive
+    // drives that split through the processing flow, so set it before handoff.
+    const voiceActive = voiceEnabled || (currentState !== STATES.OFF && currentState !== STATES.PASSIVE);
+    isTypeModeActive = !voiceActive;
     // Strip wake word prefix if present (e.g., "hey Randy, show me Nerdio" → "show me Nerdio")
     const lower = text.toLowerCase();
     const wakeMatch = lower.match(WAKE_PATTERN);
@@ -3163,7 +3184,7 @@ function createWidget() {
 
   textInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); sendTypedMessage(); }
-    if (e.key === 'Escape') { textInput.value = ''; inputRow.hidden = true; }
+    if (e.key === 'Escape') { textInput.value = ''; textInput.blur(); }
   });
   sendBtn.addEventListener('click', sendTypedMessage);
 
@@ -3180,12 +3201,8 @@ function createWidget() {
 
 // ── Single Voice Button Logic ─────────────────────────────────────
 function handleVoiceBtnClick() {
-  // Deactivate type mode when switching to voice
-  if (isTypeModeActive) {
-    isTypeModeActive = false;
-    const inputRow = document.getElementById('randy-input-row');
-    if (inputRow) inputRow.hidden = true;
-  }
+  // Switching to voice cancels silent-typing mode so replies are spoken again.
+  isTypeModeActive = false;
 
   switch (currentState) {
     case STATES.OFF:
@@ -3238,7 +3255,6 @@ function handleVoiceBtnClick() {
 
 function updateVoiceButton() {
   const btn = document.getElementById('randy-voice-btn');
-  const typeBtn = document.getElementById('randy-edit-btn');
   if (!btn) return;
 
   // Voice button: green fill when voice is selected mode (voiceEnabled or actively listening/speaking/processing/confirming)
@@ -3250,12 +3266,6 @@ function updateVoiceButton() {
     btn.classList.add('randy-ctrl-btn--voice-listening');
   } else if (voiceIsSelected && !isTypeModeActive) {
     btn.classList.add('randy-ctrl-btn--voice-active');
-  }
-
-  // Type button: blue fill when type mode active
-  if (typeBtn) {
-    typeBtn.className = 'randy-ctrl-btn';
-    if (isTypeModeActive) typeBtn.classList.add('randy-ctrl-btn--type-active');
   }
 
   updateStatusBar();
@@ -3506,10 +3516,12 @@ export function initRandy() {
 
   // Randy starts fully OFF — the microphone is NOT opened on load, so there
   // is no always-on recording indicator and no contention with the chat
-  // voice widget or field dictation. Randy only begins listening when the
-  // user explicitly activates it: the Voice button, the Alt+Z shortcut, or
-  // saying "Hey Randy" after voice has been turned on. Wake-word listening
-  // is therefore opt-in per session rather than a background default.
+  // voice widget or field dictation. The mic opens ONLY while the voice
+  // feature is actively on, and closes the moment the user toggles voice off
+  // (the browser recording indicator tracks it exactly). Randy begins
+  // listening only when the user explicitly activates it: the Voice button or
+  // the Alt+Z shortcut. There is no background wake-word listening — that
+  // would require keeping the mic open while voice is off.
   currentState = STATES.OFF;
   updateWidgetUI();
 
