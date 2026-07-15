@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import { __mapPdfInternals } from '../js/utils/ai.js';
 
-const { findOpportunityMatches, acronymOf, sharesPrefix } = __mapPdfInternals;
+const { findOpportunityMatches, acronymOf, sharesPrefix, findMentionedOpportunities, clip } = __mapPdfInternals;
 
 const OPPORTUNITIES = [
   { opportunity_id: 'opp_1', deal_name: 'MAP Renewal',                customer_name: 'American National Insurance Company' },
@@ -102,4 +102,62 @@ test('sharesPrefix requires the configured minimum overlap', () => {
   assert.equal(sharesPrefix('AN', 'ANIC', 3), false);     // only 2-char overlap
   assert.equal(sharesPrefix('', 'ABC'), false);
   assert.equal(sharesPrefix('ABC', 'XYZ'), false);
+});
+
+// ── findMentionedOpportunities: chat-grounding multi-match ────────────
+
+test('findMentionedOpportunities expands EVERY named deal, not just the first', () => {
+  const hits = findMentionedOpportunities(OPPORTUNITIES, 'compare Fabrikam Inc and Metro Health Systems for me');
+  const ids = hits.map(o => o.opportunity_id).sort();
+  assert.deepEqual(ids, ['opp_2', 'opp_3']);
+});
+
+test('findMentionedOpportunities returns both deals that share a customer', () => {
+  const opps = [
+    { opportunity_id: 'a', deal_name: 'Discovery', customer_name: 'Acme Corp' },
+    { opportunity_id: 'b', deal_name: 'Expansion', customer_name: 'Acme Corp' },
+    { opportunity_id: 'c', deal_name: 'Other',     customer_name: 'Zeta LLC' },
+  ];
+  const hits = findMentionedOpportunities(opps, "what's happening with Acme Corp?");
+  assert.deepEqual(hits.map(o => o.opportunity_id).sort(), ['a', 'b']);
+});
+
+test('findMentionedOpportunities is voice-tolerant (spaced/again name)', () => {
+  const opps = [{ opportunity_id: 'g', deal_name: 'Renewal', customer_name: 'Greenshield' }];
+  const hits = findMentionedOpportunities(opps, 'catch me up on Green Shield');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].opportunity_id, 'g');
+});
+
+test('findMentionedOpportunities matches a typed acronym (ANICO)', () => {
+  const hits = findMentionedOpportunities(OPPORTUNITIES, 'deep dive on ANICO please');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].opportunity_id, 'opp_1');
+});
+
+test('findMentionedOpportunities dedupes when multiple passes hit the same deal', () => {
+  // "Fabrikam Inc" matches by name; nothing else should double-count it.
+  const hits = findMentionedOpportunities(OPPORTUNITIES, 'Fabrikam Inc Fabrikam Inc');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].opportunity_id, 'opp_2');
+});
+
+test('findMentionedOpportunities does not drag in unrelated deals from plain prose', () => {
+  // Ordinary words must not acronym-match; no deal name appears here.
+  assert.deepEqual(findMentionedOpportunities(OPPORTUNITIES, 'how is the pipeline looking this quarter'), []);
+  assert.deepEqual(findMentionedOpportunities(OPPORTUNITIES, ''), []);
+});
+
+// ── clip: visible truncation ─────────────────────────────────────────
+
+test('clip leaves short text untouched and marks long text', () => {
+  assert.equal(clip('short', 100), 'short');
+  const out = clip('x'.repeat(50), 10);
+  assert.ok(out.startsWith('x'.repeat(10)));
+  assert.ok(/truncated: 40 more characters/.test(out));
+});
+
+test('clip handles null/undefined safely', () => {
+  assert.equal(clip(null, 10), '');
+  assert.equal(clip(undefined, 10), '');
 });
