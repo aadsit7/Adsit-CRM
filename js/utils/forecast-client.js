@@ -12,7 +12,7 @@
 // ============================================================
 
 import { getRuntimeConfig } from '../config.js';
-import { buildForecastPrompt } from './forecast-prompts.js';
+import { buildForecastPrompt, stripHtml } from './forecast-prompts.js';
 import { parseForecastJsonResponse } from './forecast-schema.js';
 
 const FORECAST_MODEL      = 'claude-opus-4-7';
@@ -69,6 +69,25 @@ function collectSourceDates(descriptions) {
   return dates;
 }
 
+// The note prose the model was shown, keyed by id and by date, so the parser
+// can ground each evidence quote against the exact text it quoted from
+// (guard #3). Text is stripped to plain prose the same way buildForecastPrompt
+// strips it, so a match reflects what the model actually read. Notes sharing a
+// date are concatenated — a quote grounded in ANY note on that date passes.
+function collectSourceTexts(descriptions) {
+  const byId = {};
+  const byDate = {};
+  (descriptions || []).forEach(d => {
+    const text = stripHtml(d?.description_text || d?.text || '');
+    if (!text) return;
+    const id = String(d?.description_id || '').trim();
+    const date = String(d?.description_date || d?.created_at || '').trim();
+    if (id) byId[id] = byId[id] ? `${byId[id]}\n${text}` : text;
+    if (date) byDate[date] = byDate[date] ? `${byDate[date]}\n${text}` : text;
+  });
+  return { byId, byDate };
+}
+
 /**
  * Ask Claude to score the forecast board for one opportunity.
  *
@@ -110,8 +129,11 @@ export async function requestForecastJson(opportunity, descriptions, documents, 
     .map(b => b.text)
     .join('\n');
 
+  const sourceTexts = collectSourceTexts(descriptions);
   return parseForecastJsonResponse(text, {
-    validSourceIds:   collectSourceIds(descriptions),
-    validSourceDates: collectSourceDates(descriptions),
+    validSourceIds:    collectSourceIds(descriptions),
+    validSourceDates:  collectSourceDates(descriptions),
+    sourceTextById:    sourceTexts.byId,
+    sourceTextByDate:  sourceTexts.byDate,
   });
 }
