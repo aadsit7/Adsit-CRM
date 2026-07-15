@@ -115,6 +115,12 @@ function buildIntroEmptyState() {
   );
 }
 
+// Oldest-note-first comparator, shared by the initial evidence sort and the
+// re-sort after freshly-analyzed document notes are folded into the list.
+function byDescriptionDateAsc(a, b) {
+  return new Date(a.description_date || a.created_at) - new Date(b.description_date || b.created_at);
+}
+
 // ── The run ─────────────────────────────────────────────────────────
 // Pass an explicit opp to score that exact deal (used by the coverage
 // banner's re-run so it can't drift to whatever the dropdown now shows);
@@ -147,7 +153,31 @@ async function runForecast(explicitOpp = null) {
     ]);
     const descriptions = descAll
       .filter(d => d.opportunity_id === opp.opportunity_id)
-      .sort((a, b) => new Date(a.description_date || a.created_at) - new Date(b.description_date || b.created_at));
+      .sort(byDescriptionDateAsc);
+
+    // Read the attachments BEFORE scoring. A document that hasn't been
+    // analyzed is invisible to Randy — only note text is scored — so we
+    // extract each un-analyzed document into a note first, then score with
+    // the complete evidence base. This enforces the "analyze the documents,
+    // then and only then follow the rest of the instructions" contract, so
+    // the very first board a rep sees already reflects every attachment.
+    //
+    // Failures are non-fatal: Randy still scores on whatever succeeded, and
+    // the coverage banner is left to name only the documents that genuinely
+    // could not be read (a failed doc keeps its .analyzed flag untouched).
+    const unread = documents.filter(d => String(d.analyzed || '').toUpperCase() !== 'TRUE');
+    for (let i = 0; i < unread.length; i++) {
+      if (controller.signal.aborted) return;
+      updatePillStage(pill, `Reading document ${i + 1} of ${unread.length}…`);
+      try {
+        descriptions.push(await analyzeOneDocument(unread[i], opp));
+      } catch (docErr) {
+        console.warn('[Forecast] document analysis failed', unread[i]?.file_name, docErr);
+      }
+    }
+    if (unread.length) descriptions.sort(byDescriptionDateAsc);
+
+    if (controller.signal.aborted) return;
 
     updatePillStage(pill, 'Randy is scoring the stages…');
 
@@ -456,53 +486,31 @@ function buildCheckItem(text) {
   return el('li', { class: 'forecast-checklist__row' }, label);
 }
 
-// ── Coverage banner + one-click analyze ─────────────────────────────
+// ── Coverage banner (honest-failure surface) ────────────────────────
+// runForecast() now reads every un-analyzed attachment BEFORE scoring, so
+// this banner appears only for documents that genuinely could not be read
+// (extraction error). It names them and offers a one-click retry, which
+// re-runs the whole flow — re-attempting the unread documents first.
 function buildCoverageBanner(documents, opp) {
-  const unanalyzed = (documents || []).filter(d => String(d.analyzed || '').toUpperCase() !== 'TRUE');
-  if (unanalyzed.length === 0) return null;
+  const unread = (documents || []).filter(d => String(d.analyzed || '').toUpperCase() !== 'TRUE');
+  if (unread.length === 0) return null;
 
-  const n = unanalyzed.length;
-  const btn = el('button', { class: 'btn btn--secondary btn--sm forecast-coverage__btn' }, 'Analyze them & re-run');
+  const n = unread.length;
+  const btn = el('button', { class: 'btn btn--secondary btn--sm forecast-coverage__btn' }, 'Retry & re-run');
 
   const banner = el('div', { class: 'forecast-coverage' },
     el('span', { class: 'forecast-coverage__icon', html: warnIcon() }),
     el('span', { class: 'forecast-coverage__text' },
-      `${n} ${n === 1 ? 'document is' : 'documents are'} attached to this deal but ${n === 1 ? 'hasn’t' : 'haven’t'} been analyzed yet — Randy can’t read ${n === 1 ? 'it' : 'them'}.`),
+      `${n} ${n === 1 ? 'document' : 'documents'} could not be read, so ${n === 1 ? 'it was' : 'they were'} left out of this analysis. The board reflects the deal’s notes and every document Randy could read.`),
     btn,
   );
 
-  btn.addEventListener('click', () => analyzeDocsThenRerun(unanalyzed, opp, btn));
+  // A plain re-run re-attempts the unread documents first (runForecast reads
+  // each un-analyzed attachment before scoring), then rebuilds the board.
+  // Passing the captured opp keeps the re-run pinned to THIS deal even if the
+  // dropdown selection has since changed.
+  btn.addEventListener('click', () => runForecast(opp));
   return banner;
-}
-
-async function analyzeDocsThenRerun(unanalyzed, opp, btn) {
-  btn.disabled = true;
-  const pill = createPill(`Analyzing 0/${unanalyzed.length}…`, { label: opp.customer_name || 'Documents' });
-  let done = 0;
-  let failed = 0;
-
-  for (const file of unanalyzed) {
-    updatePillStage(pill, `Analyzing ${done + 1}/${unanalyzed.length}…`);
-    try {
-      await analyzeOneDocument(file, opp);
-    } catch (err) {
-      failed += 1;
-      console.warn('[Forecast] analyzeDocument failed', file?.file_name, err);
-    }
-    done += 1;
-  }
-
-  if (failed === unanalyzed.length) {
-    markPillFailure(pill, 'Could not analyze documents');
-    showToast('Document analysis failed — Randy will run without them.', 'error');
-  } else {
-    markPillSuccess(pill, failed ? `Analyzed ${done - failed}/${unanalyzed.length}` : 'Documents analyzed');
-  }
-
-  // Re-run the forecast for THIS deal now that the analyzed content is in
-  // the notes — pass the captured opp so the re-run can't drift to a
-  // different dropdown selection.
-  runForecast(opp);
 }
 
 // Replicates the existing analyzeDocument write from admin-opportunities.js
@@ -529,6 +537,18 @@ async function analyzeOneDocument(file, opp) {
     addDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, values);
   }
   file.analyzed = 'TRUE';
+
+  // Return the new note in the same shape readSheetAsObjects yields, so the
+  // caller can fold it straight into the evidence base without re-reading
+  // the whole sheet (avoids an extra round-trip and any read-after-write lag).
+  return {
+    description_id: descriptionId,
+    opportunity_id: opp.opportunity_id,
+    deal_name: opp.deal_name || '',
+    description_date: dateISO,
+    description_text: descriptionHtml,
+    created_at: createdAt,
+  };
 }
 
 // ── Small SVG / helpers ─────────────────────────────────────────────
