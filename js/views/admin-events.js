@@ -26,6 +26,7 @@ import {
   listEntityDocuments,
 } from '../components/documents-panel.js';
 import { openOppModal } from './admin-opportunities.js';
+import { openPlaybookPanel, destroyPlaybookPanel } from '../components/playbook-panel.js';
 
 export const title = 'Events';
 
@@ -62,9 +63,14 @@ const TYPE_CHIP_COLORS = {
   'Other': '#4A5468',
 };
 
-export async function render(container) {
+export async function render(container, params) {
   setTopbarTitle('Events / JLG');
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
+
+  // Deep link: #/admin/events?playbook=1 opens the page with the
+  // playbook panel already up (the panel keeps this param in sync while
+  // open, so the URL survives refresh and can be shared with teammates).
+  if (params && params.playbook === '1') openPlaybookPanel();
 
   try {
     const [events, partners, opportunities] = await Promise.all([
@@ -383,11 +389,20 @@ function renderView(container, events, opportunities, filterBar) {
     'New Event',
   );
 
+  const playbookBtn = el('button', {
+    class: 'topbar__cta topbar__cta--ghost',
+    title: 'Open the Events Playbook without leaving this page',
+    onClick: () => openPlaybookPanel(),
+  },
+    el('span', { html: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3.5C8 2.7 6.5 2 4.5 2S1 2.7 1 3.5v9C1 13.3 2.5 14 4.5 14S8 13.3 8 12.5m0-9C8 2.7 9.5 2 11.5 2S15 2.7 15 3.5v9c0 .8-1.5 1.5-3.5 1.5S8 13.3 8 12.5m0-9v9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' }),
+    'Playbook',
+  );
+
   setTopbar({
     title: 'Events / JLG',
     meta,
     chips: filterBar,
-    actions: newEventBtn,
+    actions: [playbookBtn, newEventBtn],
   });
 
   const content = el('div', { class: 'events-page' },
@@ -1305,4 +1320,5 @@ async function handleDelete(event) {
 export function cleanup() {
   cachedPartners = null;
   cachedEvents = null;
+  destroyPlaybookPanel();
 }
