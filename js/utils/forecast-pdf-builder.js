@@ -2,10 +2,12 @@
 // Analyzer PDF Builder — browser-side (jsPDF)
 // ============================================================
 // Produces a Recast-branded, at-most-two-page PDF of the Analyzer tab's
-// forecast board: the current position, the seven-stage exit-criteria
+// forecast board: an overview paragraph, the seven-stage exit-criteria
 // board (with per-criterion status), and the Gaps / Open Questions
-// working lists. It is a print-friendly rendering of exactly what the
-// Analyzer view shows on screen.
+// working lists. It is a print-friendly rendering of what the Analyzer
+// view shows on screen, except the current-position headline (stage name
+// + pipeline % + confidence) is deliberately left out of the export —
+// the overview paragraph opens the document instead.
 //
 // The board is derived with deriveForecastBoard() — the SAME pure
 // function the on-screen view uses — so the PDF can never disagree with
@@ -19,7 +21,7 @@
 // so it has no plugin dependency.
 // ============================================================
 
-import { deriveForecastBoard, resolveForecastPosition } from './forecast-stages.js';
+import { deriveForecastBoard } from './forecast-stages.js';
 import { formatDate } from './date.js';
 
 // ── Palette (mirrors css/variables.css design tokens) ─────────
@@ -27,7 +29,6 @@ const PRIMARY_BLUE  = [47,  107, 255]; // --color-primary        #2F6BFF  (compl
 const PRIMARY_LIGHT = [107, 147, 255]; // --color-primary-lighter #6B93FF (in_progress)
 const INK           = [23,  29,  43];  // --color-text-primary   #171D2B
 const BODY_TEXT     = [51,  51,  51];  // #333333
-const SECONDARY     = [74,  84,  104]; // --color-text-secondary #4A5468
 const MUTED_TEXT    = [138, 147, 168]; // --color-text-muted     #8A93A8
 const SUCCESS       = [10,  143, 130]; // --color-success        #0A8F82  (met)
 const WARNING       = [185, 122, 26];  // --color-warning        #B97A1A  (partial)
@@ -228,36 +229,12 @@ function isFull(doc, y, needed) {
   return doc.internal.getNumberOfPages() >= MAX_PAGES && (y + needed > BOTTOM_LIMIT);
 }
 
-// ── Current Position ──────────────────────────────────────────
-function drawCurrentPosition(doc, ctx, forecast, board, yStart) {
-  let y = drawHeading(doc, 'Current Position', yStart) + 16;
-
-  // Shared with the on-screen summary: the furthest SUBSTANTIALLY-reached
-  // stage (or a manual override), with its probability always shown.
-  const pos = resolveForecastPosition(board, ctx.overrideStageId);
-  let headline;
-  let bucketProb;
-  if (pos.def) {
-    headline = pos.complete ? pos.def.name : `${pos.def.name} (in progress)`;
-    bucketProb = `${pos.bucket} · ${pos.probability}%`;
-    if (pos.source === 'override') bucketProb += '    ·    Manually set';
-  } else {
-    headline = 'No stages cleared yet';
-    bucketProb = '0%';
-  }
-  const confidence = String(forecast.current_stage_confidence || 'low');
-
-  setText(doc, INK);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(wrap(doc, headline, CONTENT_W)[0], MARGIN, y);
-  y += 16;
-
-  setText(doc, SECONDARY);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text(`${bucketProb}    ·    Confidence: ${confidence}`, MARGIN, y);
-  y += 16;
+// ── Overview ──────────────────────────────────────────────────
+// The on-screen view leads with the current-position headline (stage
+// name, pipeline % and confidence); the PDF intentionally omits that and
+// opens with the overview paragraph alone.
+function drawOverview(doc, ctx, forecast, yStart) {
+  let y = drawHeading(doc, 'Overview', yStart) + 16;
 
   const summary = String(forecast.summary || '').trim();
   if (summary) {
@@ -268,6 +245,12 @@ function drawCurrentPosition(doc, ctx, forecast, board, yStart) {
     const lines = wrap(doc, summary, CONTENT_W).slice(0, 6);
     doc.text(lines, MARGIN, y);
     y += lines.length * 12.5 + 4;
+  } else {
+    setText(doc, MUTED_TEXT);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('No summary available.', MARGIN, y);
+    y += 12;
   }
 
   return y + 8;
@@ -437,9 +420,11 @@ function drawFooters(doc, customer, genDate) {
  *                                    with the same shared function, so the
  *                                    PDF matches the on-screen board exactly.
  * @param {object}  [payload.opp]     Opportunity row ({ customer_name, deal_name }).
- * @param {string}  [payload.overrideStageId]  Manual stage override from the
- *                                    Analyzer summary; when set, the PDF's
- *                                    current position follows it (view parity).
+ * @param {string}  [payload.overrideStageId]  Accepted for call-site
+ *                                    compatibility but no longer rendered:
+ *                                    the export intentionally omits the
+ *                                    current-position headline (stage name,
+ *                                    pipeline % and confidence).
  * @param {object}  [options]         { timeoutMs } forwarded to waitForJsPdf.
  * @returns {Promise<Blob>}
  */
@@ -462,7 +447,7 @@ export async function buildForecastPdf({ forecast, board, opp, overrideStageId =
   drawHeaderBand(doc, customer, deal, genDate);
   let y = HEADER_H + 22;
 
-  y = drawCurrentPosition(doc, ctx, forecast, resolvedBoard, y);
+  y = drawOverview(doc, ctx, forecast, y);
   y = drawStageBoard(doc, ctx, resolvedBoard, y);
   y = drawList(doc, ctx, 'Gaps', 'What’s missing to advance', forecast.gaps, y);
   drawList(doc, ctx, 'Open Questions', 'What the notes leave unanswered', forecast.open_questions, y);
