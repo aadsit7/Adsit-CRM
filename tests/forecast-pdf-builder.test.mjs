@@ -160,16 +160,20 @@ test('buildForecastPdf returns an application/pdf blob', async () => {
   assert.ok(blob.size > 0);
 });
 
-test('buildForecastPdf renders the header, current position, board and lists', async () => {
+test('buildForecastPdf renders the header, overview, board and lists', async () => {
   const calls = installJsPdfShim();
   const blob = await buildForecastPdf({ forecast: sampleForecast(), opp: { customer_name: 'Acme Corporation', deal_name: 'VDI Modernization' } });
   const c = blob.__calls;
   assert.ok(hasText(c, /SALES FORECAST ANALYSIS/), 'header eyebrow must render');
   assert.ok(hasText(c, /Acme Corporation/), 'customer name must render');
   assert.ok(hasText(c, /VDI Modernization/), 'deal name must render');
-  assert.ok(hasText(c, /CURRENT POSITION/), 'current position heading must render');
-  // Stage 1 is fully met → it is the current-position headline AND a board row.
-  assert.ok(hasText(c, /Inside Sales Working/), 'furthest complete stage name must render');
+  assert.ok(hasText(c, /OVERVIEW/), 'overview heading must render');
+  assert.ok(hasText(c, /Discovery is complete/), 'summary paragraph must render');
+  // The current-position headline (stage name + pipeline % + confidence)
+  // is intentionally omitted from the export.
+  assert.ok(!hasText(c, /Confidence:/), 'confidence line must NOT render');
+  assert.ok(!hasText(c, /\(in progress\)$/), 'stage headline must NOT render');
+  assert.ok(hasText(c, /Inside Sales Working/), 'stage names still render on the board');
   assert.ok(hasText(c, /STAGE BOARD/), 'stage board heading must render');
   assert.ok(hasText(c, /Confirmed commitment to a meeting with sales/), 'criterion labels must render');
   assert.ok(hasText(c, /GAPS/), 'gaps heading must render');
@@ -181,7 +185,7 @@ test('buildForecastPdf renders the header, current position, board and lists', a
 test('buildForecastPdf derives the board when none is passed', async () => {
   const calls = installJsPdfShim();
   // No `board` key — the builder must derive it from `forecast` and still
-  // surface the furthest-complete stage in the Current Position block.
+  // render the stage rows on the Stage Board.
   const blob = await buildForecastPdf({ forecast: sampleForecast(), opp: { customer_name: 'Acme Corporation' } });
   assert.ok(hasText(blob.__calls, /Inside Sales Working/));
 });
