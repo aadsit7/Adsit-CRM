@@ -1006,6 +1006,7 @@ export async function openEventModal(event, container, onSaved) {
     },
     { name: 'location', label: 'Location', placeholder: 'e.g., Virtual (Zoom), San Francisco, CA' },
     { name: 'url', label: 'Event URL', type: 'url', placeholder: 'https://...' },
+    { name: 'event_password', label: 'Event Password', placeholder: 'Optional — set a password for this event' },
     {
       name: 'lead_count', label: 'Leads', type: 'number',
       min: 0, step: 1, placeholder: '0',
@@ -1021,6 +1022,7 @@ export async function openEventModal(event, container, onSaved) {
     partner_id: event.partner_id || '',
     location: event.location,
     url: event.url,
+    event_password: event.event_password || '',
     lead_count: event.lead_count || '',
   } : {};
 
@@ -1042,6 +1044,7 @@ export async function openEventModal(event, container, onSaved) {
         event.end_date || event.event_date, event.event_type, event.location,
         event.url, event.created_by, event.created_at, event.status || 'Upcoming',
         event.partner_id || '', checklistJson, event.lead_count || 0,
+        event.event_password || '',
       ];
       if (isConfigured()) {
         updateRow(CONFIG.SHEET_EVENTS, event._rowIndex, values).catch(() => {});
@@ -1082,6 +1085,7 @@ export async function openEventModal(event, container, onSaved) {
           data.end_date || data.event_date, data.event_type, data.location,
           data.url, event.created_by, createdAt, data.status || 'Upcoming',
           data.partner_id || '', checklistJson, leadCount,
+          data.event_password || '',
         ];
 
         if (isConfigured()) {
@@ -1098,6 +1102,7 @@ export async function openEventModal(event, container, onSaved) {
           data.end_date || data.event_date, data.event_type, data.location,
           data.url, user.partner_id, createdAt, data.status || 'Upcoming',
           data.partner_id || '', checklistJson, leadCount,
+          data.event_password || '',
         ];
 
         if (isConfigured()) {
