@@ -134,9 +134,9 @@ addRoute('/admin/leadcheck', {
 
 addRoute('/admin/events', {
   title: 'Events',
-  render: async (container) => {
+  render: async (container, params) => {
     setupAppShell();
-    await adminEvents.render(container);
+    await adminEvents.render(container, params);
   },
   cleanup: adminEvents.cleanup,
 });
