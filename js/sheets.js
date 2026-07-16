@@ -399,7 +399,7 @@ export async function deleteRow(sheetName, rowIndex) {
 const SHEET_HEADERS = {
   [CONFIG.SHEET_PARTNERS]: ['partner_id', 'username', 'display_name', 'partner_type', 'tier', 'region', 'created_at', 'is_admin', 'password_hash', 'status', 'hq_location'],
   [CONFIG.SHEET_OPPORTUNITIES]: ['opportunity_id', 'partner_id', 'deal_name', 'customer_name', 'deal_value', 'status', 'stage', 'expected_close', 'description', 'created_at', 'updated_at', 'notes', 'lead_source'],
-  [CONFIG.SHEET_EVENTS]: ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count'],
+  [CONFIG.SHEET_EVENTS]: ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count', 'event_password'],
   [CONFIG.SHEET_TRANSCRIPTS]: ['transcript_id', 'partner_id', 'partner_name', 'conversation_date', 'transcript_text', 'created_at'],
   [CONFIG.SHEET_OPP_DESCRIPTIONS]: ['description_id', 'opportunity_id', 'deal_name', 'description_date', 'description_text', 'created_at', 'category'],
   [CONFIG.SHEET_EVENT_DESCRIPTIONS]: ['description_id', 'event_id', 'title', 'description_date', 'description_text', 'created_at'],
@@ -630,7 +630,7 @@ let demoOpportunities = [
 ];
 
 let demoEvents = [
-  ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count'],
+  ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count', 'event_password'],
   ['evt_001', 'Q2 Partner Kickoff Webinar', 'Quarterly partner kickoff covering new products, incentive programs, and roadmap updates.', '2026-04-10', '2026-04-10', 'Webinar', 'Virtual (Zoom)', 'https://zoom.us/example', 'p_admin001', '2026-03-01', 'Upcoming', '', JSON.stringify([{text:"Confirm speakers",done:true},{text:"Create registration page",done:true},{text:"Send invitations",done:false},{text:"Prepare slides",done:false},{text:"Test tech setup",done:false},{text:"Send reminder email",done:false},{text:"Host event",done:false},{text:"Send follow-up",done:false}]), 0],
   ['evt_002', 'Cloud Security Workshop', 'Hands-on workshop covering cloud security best practices and our security suite.', '2026-04-22', '2026-04-23', 'Workshop', 'San Francisco, CA', '', 'p_admin001', '2026-03-01', 'Upcoming', 'p_nerdio1', JSON.stringify([{text:"Book venue",done:true},{text:"Prepare materials",done:false},{text:"Confirm attendees",done:false},{text:"Setup equipment",done:false},{text:"Run workshop",done:false},{text:"Collect feedback",done:false}]), 0],
   ['evt_003', 'Partner Summit 2026', 'Annual partner summit with keynotes, breakouts, and networking.', '2026-05-15', '2026-05-17', 'Conference', 'Las Vegas, NV', '', 'p_admin001', '2026-03-15', 'Upcoming', '', JSON.stringify([{text:"Register booth",done:false},{text:"Prepare collateral",done:false},{text:"Book travel",done:false},{text:"Staff booth",done:false},{text:"Collect leads",done:false},{text:"Follow up",done:false}]), 0],
@@ -661,7 +661,7 @@ let demoPartnerDocuments = [
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 15; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 16; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {
