@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO, parseDate, isDateInRange } from '../utils/date.js';
@@ -14,7 +14,8 @@ import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { parseChecklist, renderChecklist } from '../components/checklist.js';
 import { filterPartners, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
-import { stripHtml } from '../components/quill-editor.js';
+import { stripHtml, ensureHtml } from '../components/quill-editor.js';
+import { fileApiRequest } from '../utils/file-api.js';
 import {
   buildDescriptionsPanel,
   isDescriptionEmpty,
@@ -1170,7 +1171,7 @@ export async function openEventModal(event, container, onSaved) {
   }, initialValues);
 
   // Descriptions panel — versioned dated cards (Quill editor in edit mode)
-  const { panel: descriptionsPanel } = buildDescriptionsPanel(workingDescriptions, {
+  const { panel: descriptionsPanel, refresh: refreshDescriptions } = buildDescriptionsPanel(workingDescriptions, {
     placeholder: 'Write the description for this event...',
     entityLabel: 'event',
   });
@@ -1190,6 +1191,81 @@ export async function openEventModal(event, container, onSaved) {
     initialFiles: [],
     loading: isEdit,
     savePrompt: 'Save this event first to attach documents',
+    // Analyze runs the attendee-list extraction on the Apps Script side and
+    // drops the result into the descriptions panel as dated cards. Only
+    // available in edit mode — new events have no event_id to attach to.
+    onAnalyze: isEdit ? async (file) => {
+      const titleInput = form.querySelector('[name="title"]');
+      const eventTitle = (titleInput && titleInput.value) || event.title || '';
+      const data = await fileApiRequest({
+        action: 'analyzeDocument',
+        docId: file.doc_id,
+        driveUrl: file.drive_url,
+        analysisType: 'attendee_list',
+        entityType: 'event',
+        eventTitle,
+      });
+      const fileName = data.fileName || file.file_name || 'Document';
+      const dateISO = todayISO();
+      const dateLabel = formatDate(dateISO);
+      // Large attendee lists arrive split into htmlParts (Google Sheets
+      // cells cap at 50k chars); a single result arrives as html.
+      const htmlParts = Array.isArray(data.htmlParts) && data.htmlParts.length
+        ? data.htmlParts
+        : [data.html || ''];
+      for (let i = 0; i < htmlParts.length; i++) {
+        const partLabel = i > 0 ? ` (part ${i + 1} of ${htmlParts.length})` : '';
+        const descriptionHtml =
+          `<h4>📄 ${escapeHtml(fileName)} — Analyzed ${escapeHtml(dateLabel)}${escapeHtml(partLabel)}</h4>` +
+          ensureHtml(htmlParts[i]);
+        const descriptionId = uuid('dsc');
+        const createdAt = nowISO();
+        const values = [descriptionId, event.event_id, eventTitle, dateISO, descriptionHtml, createdAt];
+        if (isConfigured()) {
+          await appendRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, values);
+        } else {
+          addDemoRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, values);
+        }
+        workingDescriptions.push({
+          description_id: descriptionId,
+          event_id: event.event_id,
+          event_title: eventTitle,
+          description_date: dateISO,
+          description_text: descriptionHtml,
+          created_at: createdAt,
+        });
+      }
+      // Persist structured per-contact rows to the Event_Contacts tab.
+      // The Apps Script returns `contacts` alongside the HTML when the
+      // attendee-list analysis ran on a structured file. Batched into a
+      // single append call — attendee lists can run to hundreds of rows.
+      const contacts = Array.isArray(data.contacts) ? data.contacts : [];
+      if (contacts.length) {
+        const savedAt = nowISO();
+        const contactRows = contacts.map(c => [
+          event.event_id,
+          eventTitle,
+          uuid('ctc'),
+          c.name || 'Not specified',
+          c.role || 'Not specified',
+          c.company || 'Not specified',
+          c.email || 'Not specified',
+          '', // owner — unassigned until someone claims the contact
+          'New',
+          c.icp_role || '',
+          c.seniority_tier || '',
+          c.ai_confidence || '',
+          c.ai_rationale || '',
+          fileName,
+          savedAt,
+        ]);
+        await appendRows(CONFIG.SHEET_EVENT_CONTACTS, contactRows);
+      }
+      file.analyzed = 'TRUE';
+      refreshDescriptions();
+      const contactNote = contacts.length ? ` — ${contacts.length} contacts saved to Event Contacts` : '';
+      showToast(`Document analyzed and added to descriptions${contactNote}`, 'success');
+    } : undefined,
   });
 
   // Sourced opportunities summary — shown only for existing events. New
@@ -1320,6 +1396,15 @@ async function handleDelete(event) {
   } catch (err) {
     showToast(err.message || 'Failed to delete event', 'error');
   }
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export function cleanup() {

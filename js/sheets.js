@@ -312,6 +312,38 @@ export async function appendRow(sheetName, values) {
 }
 
 /**
+ * Append many rows in a single API call. Used by bulk flows (e.g. the
+ * event attendee-list analysis, which can produce hundreds of contact
+ * rows) where one appendRow call per row would be far too slow.
+ * @param {string} sheetName
+ * @param {Array<Array>} rows
+ */
+export async function appendRows(sheetName, rows) {
+  if (!rows || rows.length === 0) return { updates: { updatedRows: 0 } };
+
+  if (!isConfigured()) {
+    rows.forEach(r => addDemoRow(sheetName, r));
+    return { updates: { updatedRows: rows.length } };
+  }
+
+  const base = getBaseUrl();
+  const authParam = getAuthParam();
+  const url = `${base}/values/${encodeURIComponent(sheetName)}:append`
+    + `?valueInputOption=USER_ENTERED${authParam ? '&' + authParam : ''}`;
+
+  const res = await writeWithAuthRetry((token) => fetch(url, {
+    method: 'POST',
+    headers: writeHeaders(token),
+    body: JSON.stringify({ values: rows }),
+  }));
+
+  if (!res.ok) await throwWriteError(res, `Failed to append to ${sheetName}`);
+
+  invalidateSheetCache(sheetName);
+  return res.json();
+}
+
+/**
  * Update a specific row.
  * @param {string} sheetName
  * @param {number} rowIndex - 1-based row number
@@ -656,12 +688,16 @@ let demoPartnerDocuments = [
   ['document_id', 'partner_id', 'partner_name', 'title', 'doc_type', 'html_content', 'status', 'created_at', 'updated_at'],
 ];
 
+let demoEventContacts = [
+  ['event_id', 'event_title', 'contact_id', 'name', 'title', 'company', 'email', 'owner', 'status', 'icp_role', 'seniority_tier', 'ai_confidence', 'ai_rationale', 'source_file', 'saved_at'],
+];
+
 // ============================================
 // Demo data localStorage persistence
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 16; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 17; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {
@@ -674,6 +710,7 @@ function persistDemoData() {
       oppDescriptions: demoOppDescriptions,
       eventDescriptions: demoEventDescriptions,
       partnerDocuments: demoPartnerDocuments,
+      eventContacts: demoEventContacts,
     }));
   } catch { /* quota exceeded — silently ignore */ }
 }
@@ -695,6 +732,7 @@ function loadPersistedDemoData() {
     if (data.oppDescriptions) demoOppDescriptions = data.oppDescriptions;
     if (data.eventDescriptions) demoEventDescriptions = data.eventDescriptions;
     if (data.partnerDocuments) demoPartnerDocuments = data.partnerDocuments;
+    if (data.eventContacts) demoEventContacts = data.eventContacts;
     return true;
   } catch {
     return false;
@@ -721,6 +759,7 @@ function getDemoData(sheetName) {
     case CONFIG.SHEET_OPP_DESCRIPTIONS: return [...demoOppDescriptions.map(r => [...r])];
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: return [...demoEventDescriptions.map(r => [...r])];
     case CONFIG.SHEET_PARTNER_DOCUMENTS: return [...demoPartnerDocuments.map(r => [...r])];
+    case CONFIG.SHEET_EVENT_CONTACTS: return [...demoEventContacts.map(r => [...r])];
     default: return [];
   }
 }
@@ -737,6 +776,7 @@ export function addDemoRow(sheetName, values) {
     case CONFIG.SHEET_OPP_DESCRIPTIONS: demoOppDescriptions.push(values); break;
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: demoEventDescriptions.push(values); break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: demoPartnerDocuments.push(values); break;
+    case CONFIG.SHEET_EVENT_CONTACTS: demoEventContacts.push(values); break;
   }
   invalidateSheetCache(sheetName);
   persistDemoData();
@@ -755,6 +795,7 @@ export function updateDemoRow(sheetName, rowIndex, values) {
     case CONFIG.SHEET_OPP_DESCRIPTIONS: data = demoOppDescriptions; break;
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: data = demoEventDescriptions; break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
+    case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
     default: return;
   }
   if (data[rowIndex - 1]) {
@@ -777,6 +818,7 @@ export function deleteDemoRow(sheetName, rowIndex) {
     case CONFIG.SHEET_OPP_DESCRIPTIONS: data = demoOppDescriptions; break;
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: data = demoEventDescriptions; break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
+    case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
     default: return;
   }
   data.splice(rowIndex - 1, 1);

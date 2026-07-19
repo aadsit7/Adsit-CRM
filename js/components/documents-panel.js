@@ -20,7 +20,7 @@ import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 import { fileApiRequest } from '../utils/file-api.js';
 
-const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg'];
+const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.csv', '.pptx', '.png', '.jpg', '.jpeg'];
 
 /**
  * List documents stored in Drive for a given entity (opportunity or event).
@@ -207,7 +207,7 @@ export function buildDocumentsPanel({
     'Drag files here or click to browse'
   );
   const dropzoneHint = el('span', { class: 'document-dropzone__hint' },
-    'PDF, Word, Excel, PowerPoint, or images'
+    'PDF, Word, Excel, CSV, PowerPoint, or images'
   );
 
   const fileInput = el('input', {
