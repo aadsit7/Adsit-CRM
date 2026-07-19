@@ -20,13 +20,20 @@ before.
 ```json
 {
   "action": "analyzeDocument",
-  "docId": "<Drive file id>",
+  "docId": "<the document's doc_id from the tracking sheet>",
   "driveUrl": "<Drive url>",
   "analysisType": "attendee_list",
   "entityType": "event",
   "eventTitle": "<the event's title>"
 }
 ```
+
+Note that `docId` is the portal's `doc_id` for the document row, which is
+**not necessarily a Drive file ID** — depending on how the upload handler
+recorded it, it can be a portal-generated key. The handler therefore never
+feeds it straight to `DriveApp.getFileById`; it resolves the real Drive file
+via `resolveAttendeeDriveFile_` (below), which also falls back to the ID
+embedded in `driveUrl`.
 
 ## What the portal expects back
 
@@ -129,7 +136,7 @@ var WEB_ENRICH_BATCH_SIZE = 5;       // contacts per web-search API call
 var WEB_ENRICH_MAX_SEARCHES = 15;    // web_search max_uses per API call
 
 function handleAnalyzeAttendeeList(payload) {
-  var file = DriveApp.getFileById(payload.docId);
+  var file = resolveAttendeeDriveFile_(payload);
   var fileName = file.getName();
   var lower = fileName.toLowerCase();
 
@@ -169,6 +176,42 @@ function handleAnalyzeAttendeeList(payload) {
     result.html = parts[0] || '<p>No contacts found.</p>';
   }
   return result;
+}
+
+// Resolve the Drive file to analyze. The portal's `docId` is the doc_id
+// from the document-tracking sheet — depending on how uploads were
+// recorded, that may be the raw Drive file ID or a portal-generated key
+// (e.g. "doc_ab12cd34") that Drive knows nothing about. Passing a
+// non-Drive key to DriveApp.getFileById throws the notoriously cryptic
+// "Unexpected error while getting the method or property getFileById on
+// object DriveApp". So: try every plausible ID — the docId itself plus
+// the ID embedded in the driveUrl the portal also sends — and only fail
+// with a readable error if none of them opens.
+function resolveAttendeeDriveFile_(payload) {
+  var candidates = [];
+  if (payload.docId) candidates.push(String(payload.docId));
+  var url = String(payload.driveUrl || '');
+  // Handles .../file/d/<id>/view, .../d/<id>/edit, and ...?id=<id> forms.
+  var m = url.match(/\/d\/([-\w]{20,})/) || url.match(/[?&]id=([-\w]{20,})/);
+  if (m) candidates.push(m[1]);
+
+  var lastErr = null;
+  for (var i = 0; i < candidates.length; i++) {
+    var id = candidates[i];
+    // Drive file IDs are long [-_A-Za-z0-9] strings; skip obvious
+    // non-IDs (short portal keys) instead of letting getFileById throw.
+    if (!/^[-\w]{20,}$/.test(id)) continue;
+    try {
+      return DriveApp.getFileById(id);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error('Could not open the attached file in Drive '
+    + '(docId: ' + (payload.docId || 'none')
+    + ', driveUrl: ' + (url || 'none') + ')'
+    + (lastErr ? ' — last Drive error: ' + lastErr : '')
+    + '. Check that the document row has a valid drive_url.');
 }
 
 // ── Structured files: deterministic read + column-mapping call ─────────
@@ -683,6 +726,19 @@ Notes on the code:
   that came from the file or the title pass. Contacts it cannot verify
   keep empty ICP fields, which is the intended behavior: in this pipeline
   an empty cell means "not verifiable", never "the AI guessed".
+
+## Troubleshooting
+
+- **"Unexpected error while getting the method or property getFileById on
+  object DriveApp"** — this is Apps Script's (unhelpfully worded) error for
+  calling `DriveApp.getFileById` with a string that is not a valid Drive
+  file ID. It means the handler passed the portal's `doc_id` (a tracking-
+  sheet key) straight to Drive. Make sure you pasted the current version of
+  this code, which routes through `resolveAttendeeDriveFile_` — it tries
+  the `docId` only when it is Drive-ID-shaped and otherwise extracts the
+  real file ID from `driveUrl`, and redeploy a **new version** afterwards
+  (editing the code without redeploying leaves the web app running the old
+  copy).
 
 ## Step 4 — redeploy
 
