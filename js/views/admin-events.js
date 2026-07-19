@@ -961,10 +961,10 @@ export async function openEventModal(event, container, onSaved) {
   ];
 
   const fields = [
-    { name: 'title', label: 'Event Name', required: true, placeholder: 'e.g., Q2 Partner Kickoff Webinar' },
+    { name: 'title', label: 'Event name', required: true, placeholder: 'e.g., Q2 Partner Kickoff Webinar' },
     { type: 'row-start' },
-    { name: 'event_date', label: 'Start Date', type: 'date', required: true },
-    { name: 'end_date', label: 'End Date', type: 'date' },
+    { name: 'event_date', label: 'Start date', type: 'date', required: true },
+    { name: 'end_date', label: 'End date', type: 'date' },
     { type: 'row-end' },
     { type: 'row-start' },
     {
@@ -979,12 +979,12 @@ export async function openEventModal(event, container, onSaved) {
     },
     { type: 'row-end' },
     {
-      name: 'partner_id', label: 'Assigned Partner', type: 'select',
+      name: 'partner_id', label: 'Assigned partner', type: 'select',
       options: partnerOptions,
     },
     { name: 'location', label: 'Location', placeholder: 'e.g., Virtual (Zoom), San Francisco, CA' },
     { name: 'url', label: 'Event URL', type: 'url', placeholder: 'https://...' },
-    { name: 'event_password', label: 'Event Password', placeholder: 'Optional — set a password for this event' },
+    { name: 'event_password', label: 'Event password', placeholder: 'Optional — set a password for this event' },
     {
       name: 'lead_count', label: 'Leads', type: 'number',
       min: 0, step: 1, placeholder: '0',
@@ -1236,15 +1236,17 @@ export async function openEventModal(event, container, onSaved) {
   );
 
   openModal({
-    title: isEdit ? 'Edit Event' : 'New Demand Gen Event',
+    title: isEdit ? 'Edit event.' : 'New event.',
     content: modalContent,
-    className: 'modal--xwide',
+    // apple-scope loads the Apple design tokens (tokens.css);
+    // modal--apple applies the restyle (events-modal-apple.css).
+    className: 'modal--xwide apple-scope modal--apple',
     footer: [
       el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
       el('button', {
         class: 'btn btn--primary',
         onClick: () => form.dispatchEvent(new Event('submit', { cancelable: true })),
-      }, isEdit ? 'Save Changes' : 'Create Event'),
+      }, isEdit ? 'Save changes' : 'Create event'),
     ],
   });
 
@@ -1279,7 +1281,7 @@ function buildSourcedOppsSection(linkedOpps, totalPipeline, leadCount = 0) {
     ),
     el('div', { class: 'event-opps-stats__metric' },
       el('div', { class: 'event-opps-stats__value' }, formatCurrency(totalPipeline)),
-      el('div', { class: 'event-opps-stats__label' }, 'Total Pipeline'),
+      el('div', { class: 'event-opps-stats__label' }, 'Total pipeline'),
     ),
   );
 
@@ -1322,7 +1324,7 @@ function buildSourcedOppsSection(linkedOpps, totalPipeline, leadCount = 0) {
   }
 
   return el('div', { class: 'event-opps-section' },
-    el('h3', { class: 'event-opps-section__title' }, 'Sourced Opportunities'),
+    el('h3', { class: 'event-opps-section__title' }, 'Sourced opportunities'),
     stats,
     listEl,
   );

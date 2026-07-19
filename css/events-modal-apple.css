@@ -1,0 +1,443 @@
+/* ============================================
+   Event modal — Apple-inspired restyle
+   Visual only. Every selector is scoped under .modal--apple
+   (applied in admin-events.js openEventModal), so no other
+   modal or page is affected. Tokens come from tokens.css via
+   the .apple-scope class on the same element.
+
+   Accent for this view: --blue. Neutrals do everything else.
+   ============================================ */
+
+/* ---------- Backdrop (only when it contains this modal) ---------- */
+.modal-backdrop:has(.modal--apple) {
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: saturate(120%) blur(10px);
+  -webkit-backdrop-filter: saturate(120%) blur(10px);
+}
+
+/* ---------- Shell ---------- */
+.modal.modal--apple {
+  font-family: var(--font-apple);
+  background: var(--bg);
+  border-radius: var(--radius-card);
+  /* Overlay elevation — the flat no-shadow rule applies to cards,
+     not to the floating sheet itself. */
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.18);
+  color: var(--gray);
+}
+
+.modal--apple .modal__header {
+  padding: 28px var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal--apple .modal__title {
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.modal--apple .modal__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--gray);
+}
+
+.modal--apple .modal__close:hover {
+  background: var(--hairline);
+  color: var(--ink);
+}
+
+.modal--apple .modal__body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* ---------- Sourced opportunities card ---------- */
+.modal--apple .event-opps-section {
+  background: var(--card);
+  border: none;
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.modal--apple .event-opps-section__title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-light);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.modal--apple .event-opps-stats {
+  gap: var(--space-3);
+  padding: 0 0 var(--space-2);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal--apple .event-opps-stats__value {
+  font-family: inherit;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.modal--apple .event-opps-stats__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--gray-light);
+  margin-top: 6px;
+}
+
+/* Linked opportunities: hairline-separated rows, no boxes */
+.modal--apple .event-opps-list {
+  gap: 0;
+}
+
+.modal--apple .event-opp-row {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: var(--space-2) var(--space-1);
+  font-family: inherit;
+}
+
+.modal--apple .event-opp-row:last-child {
+  border-bottom: none;
+}
+
+.modal--apple .event-opp-row:hover {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: var(--hairline);
+}
+
+.modal--apple .event-opp-row__name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.modal--apple .event-opp-row__sub {
+  color: var(--gray-light);
+  font-size: 13px;
+}
+
+.modal--apple .event-opp-row__value {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.modal--apple .event-opp-row__chevron {
+  color: var(--gray-light);
+}
+
+/* Neutral pill badges — one accent per view, so status chips go quiet */
+.modal--apple .badge {
+  background: var(--bg);
+  color: var(--gray);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+}
+
+.modal--apple .event-opps-empty {
+  background: transparent;
+  border: none;
+  color: var(--gray-light);
+  font-size: 14px;
+  padding: var(--space-2) 0 var(--space-1);
+}
+
+/* ---------- Form ---------- */
+.modal--apple .form-group {
+  margin-bottom: var(--space-3);
+}
+
+.modal--apple .form-row {
+  gap: var(--space-2);
+}
+
+.modal--apple .form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray);
+  margin-bottom: var(--space-1);
+}
+
+.modal--apple .form-input,
+.modal--apple .form-select,
+.modal--apple .form-textarea {
+  height: 44px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+}
+
+.modal--apple .form-textarea {
+  height: auto;
+  min-height: 110px;
+}
+
+.modal--apple .form-input:focus,
+.modal--apple .form-select:focus,
+.modal--apple .form-textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+  outline: none;
+}
+
+.modal--apple .form-input::placeholder,
+.modal--apple .form-textarea::placeholder {
+  color: var(--gray-light);
+}
+
+.modal--apple .form-select {
+  padding-right: 40px;
+  /* The shared rule above uses the `background` shorthand, which resets
+     repeat/position — restate them or the chevron tiles across the control. */
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2386868B' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.modal--apple .form-input--error {
+  border-color: var(--pink);
+}
+
+.modal--apple .form-input--error:focus {
+  box-shadow: 0 0 0 3px rgba(255, 45, 85, 0.12);
+}
+
+.modal--apple .form-error {
+  color: var(--pink);
+  font-size: 12px;
+}
+
+/* ---------- Descriptions & documents panels ---------- */
+.modal--apple .descriptions-panel {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.modal--apple .descriptions-panel__title {
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.modal--apple .descriptions-panel__count {
+  background: var(--card);
+  color: var(--gray);
+}
+
+.modal--apple .transcript-card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-shadow: none;
+}
+
+.modal--apple .transcript-card:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.modal--apple .transcript-card__header:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.modal--apple .transcript-card__date {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.modal--apple .transcript-card__preview {
+  color: var(--gray-light);
+}
+
+.modal--apple .transcript-card__body {
+  border-top: 1px solid var(--hairline);
+}
+
+.modal--apple .transcript-card__text {
+  color: var(--gray);
+  font-size: 14px;
+}
+
+.modal--apple .transcript-card__text h1,
+.modal--apple .transcript-card__text h2,
+.modal--apple .transcript-card__text h3 {
+  color: var(--ink);
+}
+
+.modal--apple .transcript-card__text a {
+  color: var(--blue);
+}
+
+.modal--apple .transcript-card__actions {
+  border-top: 1px solid var(--hairline);
+}
+
+/* Quill editor chrome (description edit mode) */
+.modal--apple .ql-toolbar.ql-snow {
+  border: 1px solid var(--hairline);
+  border-radius: 12px 12px 0 0;
+}
+
+.modal--apple .ql-container.ql-snow {
+  border: 1px solid var(--hairline);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+/* Document rows: hairline list, no boxes */
+.modal--apple .document-row {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: 12px var(--space-1);
+}
+
+.modal--apple .document-row:last-child {
+  border-bottom: none;
+}
+
+.modal--apple .document-row__name {
+  color: var(--blue);
+}
+
+.modal--apple .document-dropzone {
+  background: var(--card);
+  border: 1.5px dashed var(--hairline);
+  border-radius: var(--radius-card);
+  color: var(--gray);
+}
+
+.modal--apple .document-dropzone:hover {
+  border-color: var(--gray-light);
+}
+
+.modal--apple .document-dropzone--dragover {
+  border-color: var(--blue);
+  background: rgba(0, 122, 255, 0.06);
+  color: var(--blue);
+}
+
+.modal--apple .document-dropzone__hint {
+  color: var(--gray-light);
+}
+
+/* ---------- Footer & buttons ---------- */
+.modal--apple .modal__footer {
+  border-top: 1px solid var(--hairline);
+  padding: var(--space-2) var(--space-4);
+  gap: var(--space-2);
+  background: var(--bg); /* keeps the mobile sticky footer opaque */
+}
+
+.modal--apple .btn {
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  height: auto;
+  padding: 10px 22px;
+  box-shadow: none;
+}
+
+.modal--apple .btn--primary {
+  background: var(--blue);
+  color: #FFFFFF;
+}
+
+.modal--apple .btn--primary:hover {
+  background: #0071EB; /* ~8% darker */
+  box-shadow: none;
+}
+
+.modal--apple .btn--secondary {
+  background: transparent;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+}
+
+.modal--apple .btn--secondary:hover {
+  background: rgba(0, 122, 255, 0.06);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.modal--apple .btn--sm {
+  font-size: 13px;
+  padding: 7px 16px;
+}
+
+.modal--apple .btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.3);
+}
+
+/* ---------- Small screens ---------- */
+@media (max-width: 640px) {
+  .modal--apple .modal__header {
+    padding: var(--space-2) var(--space-2) 12px;
+  }
+
+  .modal--apple .modal__title {
+    font-size: 22px;
+  }
+
+  .modal--apple .modal__body {
+    padding: var(--space-2) var(--space-2) var(--space-3);
+  }
+
+  .modal--apple .modal__footer {
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
+  }
+
+  .modal--apple .event-opps-section {
+    padding: var(--space-2);
+  }
+
+  /* Stack the metrics so the big numerals never clip */
+  .modal--apple .event-opps-stats {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .modal--apple .event-opps-stats__value {
+    font-size: 28px;
+  }
+
+  .modal--apple .event-opp-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .modal--apple .event-opp-row__main {
+    flex-basis: 100%;
+  }
+}
