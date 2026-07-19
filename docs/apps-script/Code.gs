@@ -385,12 +385,18 @@ function handleUpdateDescription(payload) {
 // ============================================================
 
 function extractFileId(url) {
-  // Handle various Google Drive URL formats
+  // Handle various Google Drive URL formats. Order matters: the path-based
+  // /d/<id> patterns cover drive.google.com/file/d/... AND
+  // docs.google.com/spreadsheets|document|presentation/d/... (the form Drive
+  // uses for Office files it opens in Sheets/Docs), and they must run BEFORE
+  // the query-param pattern. The id= pattern requires a ? or & directly
+  // before it — a bare /id=/ also matches inside "&ouid=1052781702..."
+  // (the viewer's ACCOUNT id that Drive appends to share links), which is
+  // exactly the wrong value to feed to getFileById.
   var patterns = [
     /\/file\/d\/([a-zA-Z0-9_-]+)/,
-    /id=([a-zA-Z0-9_-]+)/,
     /\/d\/([a-zA-Z0-9_-]+)/,
-    /open\?id=([a-zA-Z0-9_-]+)/
+    /[?&]id=([a-zA-Z0-9_-]+)/
   ];
   for (var i = 0; i < patterns.length; i++) {
     var match = url.match(patterns[i]);
@@ -418,9 +424,10 @@ function resolveDriveFile_(payload) {
   var lastErr = null;
   for (var i = 0; i < candidates.length; i++) {
     var id = candidates[i];
-    // Drive file IDs are long [-_A-Za-z0-9] strings; skip obvious
-    // non-IDs (short portal keys) instead of letting getFileById throw.
-    if (!/^[-\w]{20,}$/.test(id)) continue;
+    // Drive file IDs are long [-_A-Za-z0-9] strings that always contain
+    // letters; skip obvious non-IDs (short portal keys, all-digit account
+    // ids from &ouid= params) instead of letting getFileById throw.
+    if (!/^[-\w]{20,}$/.test(id) || /^\d+$/.test(id)) continue;
     try {
       return DriveApp.getFileById(id);
     } catch (err) {
