@@ -10,7 +10,6 @@ import { renderCalendar } from '../components/calendar.js';
 import { openModal, closeModal } from '../components/modal.js';
 import { setTopbarTitle } from '../components/sidebar.js';
 import { filterEvents } from '../utils/filters.js';
-import { parseChecklist } from '../components/checklist.js';
 
 let calendarInstance = null;
 
@@ -50,7 +49,6 @@ function renderBentoDashboard(events) {
     buildStatusBreakdown(events),
     buildNextEventCard(events),
     buildTypeDonut(events),
-    buildChecklistProgress(events),
   );
 }
 
@@ -168,36 +166,6 @@ function buildTypeDonut(events) {
   );
 }
 
-function buildChecklistProgress(events) {
-  let totalItems = 0, doneItems = 0;
-  events.forEach(e => {
-    const items = parseChecklist(e.checklist, e.event_type);
-    totalItems += items.length;
-    doneItems += items.filter(i => i.done).length;
-  });
-  const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
-  const deg = (pct / 100) * 360;
-
-  const ring = el('div', { class: 'bento-progress-ring', style: {
-    background: `conic-gradient(var(--color-accent) 0deg ${deg}deg, var(--color-border-light) ${deg}deg 360deg)`
-  }},
-    el('div', { class: 'bento-progress-ring__hole' },
-      el('div', { class: 'bento-progress-ring__value' }, pct + '%'),
-      el('div', { class: 'bento-progress-ring__label' }, 'Done')
-    )
-  );
-
-  return el('div', { class: 'bento-cell' },
-    el('div', { class: 'bento-cell__title' }, 'Checklist Completion'),
-    el('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' } },
-      ring,
-      el('div', { style: { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' } },
-        `${doneItems} of ${totalItems} tasks complete`
-      ),
-    ),
-  );
-}
-
 // ============================================
 // Main View
 // ============================================
@@ -214,20 +182,12 @@ function renderView(container, events) {
     // Bento dashboard (collapsible)
     (() => {
       const upcoming = events.filter(e => e.status === 'Upcoming').length;
-      let totalItems = 0, doneItems = 0;
-      events.forEach(e => {
-        const items = parseChecklist(e.checklist, e.event_type);
-        totalItems += items.length;
-        doneItems += items.filter(i => i.done).length;
-      });
-      const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
       return collapsibleSection({
         id: 'partner-events-bento',
         title: 'Events Dashboard',
         summaryItems: [
           { value: String(events.length), label: 'Events' },
           { value: String(upcoming), label: 'Upcoming' },
-          { value: pct + '%', label: 'Tasks Done' },
         ],
         content: renderBentoDashboard(events),
       });

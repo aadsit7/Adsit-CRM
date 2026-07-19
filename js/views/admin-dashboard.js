@@ -10,7 +10,6 @@ import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { tierSlug, TIER_COLORS, TIER_ICONS } from '../utils/tiers.js';
 import { formatDate } from '../utils/date.js';
 import { openEventModal } from './admin-events.js';
-import { parseChecklist } from '../components/checklist.js';
 import { filterPartners, filterOpportunities, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 
@@ -431,11 +430,6 @@ function buildActivityView(container, partnerStats, upcomingEvents, allEvents, o
   };
 
   const timelineCards = timelineEvents.map(evt => {
-    const checklistItems = parseChecklist(evt.checklist, evt.event_type);
-    const doneCount = checklistItems.filter(i => i.done).length;
-    const totalTasks = checklistItems.length;
-    const pct = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
-
     return el('div', {
       class: 'timeline-card',
       onClick: () => openEventModal(evt, viewContainer),
@@ -459,15 +453,7 @@ function buildActivityView(container, partnerStats, upcomingEvents, allEvents, o
           evt.location
             ? el('span', { class: 'timeline-card__location' }, evt.location)
             : null,
-        ),
-        totalTasks > 0
-          ? el('div', { class: 'timeline-card__checklist' },
-              el('div', { class: 'timeline-card__checklist-bar' },
-                el('div', { class: 'timeline-card__checklist-fill', style: { width: `${pct}%` } })
-              ),
-              el('span', { class: 'timeline-card__checklist-text' }, `${doneCount}/${totalTasks} tasks`)
-            )
-          : null
+        )
       )
     );
   });

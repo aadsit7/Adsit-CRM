@@ -638,35 +638,6 @@
   color: var(--color-text-muted);
 }
 
-.timeline-card__checklist {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  max-width: 240px;
-}
-
-.timeline-card__checklist-bar {
-  flex: 1;
-  height: 5px;
-  background: var(--color-border-light);
-  border-radius: 99px;
-  overflow: hidden;
-}
-
-.timeline-card__checklist-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-lighter) 100%);
-  border-radius: 99px;
-}
-
-.timeline-card__checklist-text {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 /* -----------------------------------------------
    Partners View — Type Distribution panel & cards
    ----------------------------------------------- */

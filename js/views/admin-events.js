@@ -11,7 +11,6 @@ import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { buildForm } from '../components/form.js';
 import { showToast } from '../components/toast.js';
 import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
-import { parseChecklist, renderChecklist } from '../components/checklist.js';
 import { filterPartners, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { stripHtml, ensureHtml } from '../components/quill-editor.js';
@@ -526,12 +525,6 @@ function renderBoard(events) {
 }
 
 function createEventCard(evt) {
-  // Checklist progress
-  const checklistItems = parseChecklist(evt.checklist, evt.event_type);
-  const doneCount = checklistItems.filter(i => i.done).length;
-  const totalTasks = checklistItems.length;
-  const pct = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
-
   const actions = el('div', { class: 'kanban__card-actions' },
     el('button', {
       class: 'kanban__card-action-btn',
@@ -565,16 +558,6 @@ function createEventCard(evt) {
     ),
     evt.location
       ? el('div', { style: { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' } }, evt.location)
-      : null,
-    // Checklist progress mini-bar
-    totalTasks > 0
-      ? el('div', { class: 'kanban__card-checklist', title: `${doneCount}/${totalTasks} tasks complete` },
-          el('svg', { width: '12', height: '12', viewBox: '0 0 12 12', html: '<path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' }),
-          el('span', { class: 'kanban__card-checklist-text' }, `${doneCount}/${totalTasks}`),
-          el('div', { class: 'kanban__card-checklist-bar' },
-            el('div', { class: 'kanban__card-checklist-fill', style: { width: `${pct}%` } })
-          )
-        )
       : null
   );
 
@@ -972,12 +955,6 @@ export async function openEventModal(event, container, onSaved) {
     }
   }
 
-  // Parse or initialize checklist
-  let checklistItems = parseChecklist(
-    isEdit ? event.checklist : null,
-    isEdit ? event.event_type : 'Other'
-  );
-
   const partnerOptions = [
     { value: '', label: 'All Partners (no specific partner)' },
     ...(cachedPartners || []).map(p => ({ value: p.partner_id, label: p.display_name })),
@@ -1027,35 +1004,6 @@ export async function openEventModal(event, container, onSaved) {
     lead_count: event.lead_count || '',
   } : {};
 
-  // Build the checklist UI
-  const checklistSection = el('div', { class: 'checklist-section' },
-    el('div', { class: 'checklist-section__header' },
-      el('h3', { class: 'checklist-section__title' }, 'Event Checklist'),
-      el('p', { class: 'checklist-section__subtitle' }, 'Track tasks for this event')
-    ),
-  );
-
-  const checklistWidget = renderChecklist(checklistItems, (updatedItems) => {
-    checklistItems = updatedItems;
-    // Auto-save checklist if editing existing event
-    if (isEdit) {
-      const checklistJson = JSON.stringify(checklistItems);
-      const values = [
-        event.event_id, event.title, event.description, event.event_date,
-        event.end_date || event.event_date, event.event_type, event.location,
-        event.url, event.created_by, event.created_at, event.status || 'Upcoming',
-        event.partner_id || '', checklistJson, event.lead_count || 0,
-        event.event_password || '',
-      ];
-      if (isConfigured()) {
-        updateRow(CONFIG.SHEET_EVENTS, event._rowIndex, values).catch(() => {});
-      } else {
-        updateDemoRow(CONFIG.SHEET_EVENTS, event._rowIndex, values);
-      }
-    }
-  });
-  checklistSection.appendChild(checklistWidget);
-
   // Guard against rapid double-clicks dispatching two submit events
   // before the first appendRow / updateRow resolves. Without this a fast
   // user could create the same event twice on a slow connection.
@@ -1065,7 +1013,10 @@ export async function openEventModal(event, container, onSaved) {
     saving = true;
     try {
       const user = getCurrentUser();
-      const checklistJson = JSON.stringify(checklistItems);
+      // The checklist column is retained in the sheet for backward
+      // compatibility; the UI no longer edits it, so pass through any
+      // existing value to keep column positions stable.
+      const checklistJson = isEdit ? (event.checklist || '') : '';
 
       // Denormalize the most recent description (plain text) onto the
       // event row so list-view previews and search keep working.
@@ -1282,7 +1233,6 @@ export async function openEventModal(event, container, onSaved) {
     form,
     descriptionsPanel,
     docsHandle.panel,
-    checklistSection,
   );
 
   openModal({

@@ -343,16 +343,6 @@ h1, h2, h3,
   background: rgba(47, 107, 255, 0.07);
 }
 
-/* Event checklist tasks — alternate the same band so each task reads
-   as its own strip instead of a run of identical lines. */
-.checklist__item:nth-child(odd):not(.checklist__item--dragging) {
-  background: rgba(47, 107, 255, 0.035);
-}
-
-.checklist__item:hover {
-  background: rgba(47, 107, 255, 0.08);
-}
-
 /* On phones the tables become stacked cards (see mobile.css) — cards
    are already separated, and hover tints read as misrenders on touch.
    Neutralize the banding + hover there. */
