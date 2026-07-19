@@ -1,5 +1,12 @@
 # Event attendee-list analysis — Apps Script update
 
+> **Looking for the complete, ready-to-paste script?** The full backend —
+> every action handler, including the attendee analysis, web-search
+> enrichment, and Drive-file resolver described below — lives at
+> [`docs/apps-script/Code.gs`](apps-script/Code.gs). Paste that entire file
+> over the Apps Script editor contents and redeploy; the sections below
+> explain the attendee-analysis design piece by piece.
+
 The Events view now has an **Analyze** action on attached documents (mirroring
 the one on Opportunities). For events, the portal sends an extra
 `analysisType: 'attendee_list'` so the Apps Script can extract a structured
