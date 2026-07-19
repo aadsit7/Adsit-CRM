@@ -1107,8 +1107,10 @@ function updateEventLeadCount(ss, eventKey, count) {
 // ============================================================
 // ATTENDEE-LIST ANALYSIS (portal event modal "Analyze")
 // Called via analyzeDocument + analysisType:'attendee_list'.
-// Spreadsheets are read deterministically — Claude only maps which
-// column is which, so names/emails can never be hallucinated. Job
+// Spreadsheets are read deterministically across EVERY tab of the
+// workbook — Claude only decides, per tab, whether it holds an
+// attendee table, where the header row sits, and which column is
+// which, so names/emails can never be hallucinated. Job
 // titles are classified with the SAME "Event Lead Categorizer"
 // persona the playbook uses, so both flows write identical
 // vocabulary into Event_Contacts. Contacts still missing fields the
@@ -1118,8 +1120,9 @@ function updateEventLeadCount(ss, eventKey, count) {
 // ============================================================
 // ============================================================
 
-var ATTENDEE_MAX_ROWS = 2000;         // hard cap on data rows read from a file
-var ATTENDEE_SAMPLE_ROWS = 15;        // data rows shown to Claude for mapping
+var ATTENDEE_MAX_ROWS = 2000;         // hard cap on contacts read from a file (all tabs combined)
+var ATTENDEE_MAX_TABS = 10;           // hard cap on workbook tabs analyzed per file
+var ATTENDEE_HEADER_SCAN_ROWS = 25;   // rows per tab shown to Claude to find the header + map columns
 var ATTENDEE_HTML_PART_LIMIT = 40000; // stay under the 50k Sheets cell cap
 var ATTENDEE_MAX_DOC_CHARS = 60000;   // cap on extracted text for PDFs/Word
 var ATTENDEE_TITLE_BATCH = 100;       // unique titles per classification call
@@ -1175,13 +1178,22 @@ function doAnalyzeAttendeeList(payload) {
 }
 
 // ── Structured files: deterministic read + column-mapping call ─────────
+//
+// EVERY tab of the workbook is analyzed — event lists routinely put the
+// real attendee table on a later tab behind an instructions/cover sheet
+// (e.g. "START HERE" / "1st Party" / "3rd Party"). For each tab, Claude
+// first decides whether the tab contains an attendee table at all and
+// where its header row sits (headers are often a few rows down, below
+// titles and instruction rows); tabs with no attendee data are skipped
+// and named in the summary note. Contacts from all tabs are combined,
+// with exact duplicate emails across tabs removed.
 
 function extractAttendeesFromSpreadsheet_(file, lowerName) {
-  var rows;
+  var tabs = [];
   if (/\.csv$/.test(lowerName)) {
-    rows = Utilities.parseCsv(file.getBlob().getDataAsString('UTF-8'));
+    tabs.push({ name: '', rows: Utilities.parseCsv(file.getBlob().getDataAsString('UTF-8')) });
   } else {
-    // .xlsx / .xlsm — convert to a temporary Google Sheet, read the first
+    // .xlsx / .xlsm — convert to a temporary Google Sheet, read EVERY
     // tab's values, then trash the temp copy (same pattern as the generic
     // analyze path).
     var tempSheet = Drive.Files.copy(
@@ -1189,48 +1201,137 @@ function extractAttendeesFromSpreadsheet_(file, lowerName) {
       file.getId()
     );
     try {
-      rows = SpreadsheetApp.openById(tempSheet.id).getSheets()[0].getDataRange().getValues();
+      var sheets = SpreadsheetApp.openById(tempSheet.id).getSheets();
+      for (var s = 0; s < sheets.length; s++) {
+        tabs.push({ name: sheets[s].getName(), rows: sheets[s].getDataRange().getValues() });
+      }
     } finally {
       DriveApp.getFileById(tempSheet.id).setTrashed(true);
     }
   }
 
-  if (!rows || rows.length < 2) {
-    return { contacts: [], note: 'File contained no data rows.' };
+  var allContacts = [];
+  var analyzed = [];
+  var skipped = [];
+  var emailSeen = {};
+  var dupes = 0;
+  var tabCount = Math.min(tabs.length, ATTENDEE_MAX_TABS);
+
+  for (var t = 0; t < tabCount; t++) {
+    if (allContacts.length >= ATTENDEE_MAX_ROWS) break;
+    var tab = tabs[t];
+    var label = tab.name ? '"' + tab.name + '"' : 'sheet';
+
+    var res;
+    try {
+      res = extractContactsFromTabRows_(tab.rows, tab.name);
+    } catch (e) {
+      skipped.push(label + ' (error: ' + e.message + ')');
+      continue;
+    }
+    if (!res.contacts.length) {
+      skipped.push(label + ' (' + (res.skipReason || 'no attendee table') + ')');
+      continue;
+    }
+
+    var added = 0;
+    for (var i = 0; i < res.contacts.length && allContacts.length < ATTENDEE_MAX_ROWS; i++) {
+      var c = res.contacts[i];
+      var ekey = (c.email && c.email !== 'Not specified') ? c.email.toLowerCase() : '';
+      if (ekey) {
+        if (emailSeen[ekey]) { dupes++; continue; }
+        emailSeen[ekey] = true;
+      }
+      allContacts.push(c);
+      added++;
+    }
+    analyzed.push(label + ': ' + added + ' contacts' + (res.note ? ' (' + res.note + ')' : ''));
   }
 
-  var header = rows[0];
-  var dataRows = rows.slice(1, 1 + ATTENDEE_MAX_ROWS);
-  var sample = dataRows.slice(0, ATTENDEE_SAMPLE_ROWS);
+  // The summary note names every tab and what happened to it, so a skipped
+  // tab is always visible instead of silently missing from the results.
+  var noteParts = [];
+  if (analyzed.length) noteParts.push('Tabs analyzed — ' + analyzed.join('; ') + '.');
+  if (skipped.length) noteParts.push('Tabs skipped — ' + skipped.join('; ') + '.');
+  if (dupes) noteParts.push(dupes + ' duplicate email' + (dupes === 1 ? '' : 's') + ' across tabs removed.');
+  if (tabs.length > tabCount) noteParts.push('Only the first ' + ATTENDEE_MAX_TABS + ' of ' + tabs.length + ' tabs were analyzed.');
+  if (allContacts.length >= ATTENDEE_MAX_ROWS) noteParts.push('Contact list capped at ' + ATTENDEE_MAX_ROWS + ' rows.');
+  if (!allContacts.length && !noteParts.length) noteParts.push('File contained no data rows.');
+
+  return { contacts: allContacts, note: noteParts.join(' ') };
+}
+
+/**
+ * extractContactsFromTabRows_
+ * Analyzes ONE tab's raw values. Claude looks at the first rows and
+ * decides (a) whether this tab holds an attendee/contact table at all,
+ * (b) which row is the header row (often not row 1 — event templates put
+ * titles and instructions above the table), and (c) which column is
+ * which. The contacts themselves are then built deterministically in
+ * code from ALL rows below the header, so names/emails can never be
+ * hallucinated. Tabs with no attendee table return an empty list with a
+ * skipReason instead of throwing, so one instructions tab never aborts
+ * the other tabs.
+ */
+function extractContactsFromTabRows_(rows, tabName) {
+  if (!rows || rows.length < 2) return { contacts: [], skipReason: 'empty tab' };
+
+  // Bound what we show Claude: enough rows to find a late header row,
+  // with wide/verbose cells trimmed so one instructions tab can't blow
+  // up the request. Column indexes stay true to the full row.
+  var scan = rows.slice(0, ATTENDEE_HEADER_SCAN_ROWS).map(function (row) {
+    return row.slice(0, 60).map(function (cell) {
+      var v = (cell === null || cell === undefined) ? '' : String(cell);
+      return v.length > 200 ? v.substring(0, 200) : v;
+    });
+  });
 
   var prompt =
     'You are mapping spreadsheet columns for a CRM import. Below are the ' +
-    'header row and the first few data rows of an event attendee spreadsheet.\n\n' +
-    'Identify which column (by zero-based index) contains each of the ' +
-    'following. Use null when no column matches.\n\n' +
-    '- company: the attendee\'s company or organization\n' +
-    '- contact_name: the attendee\'s full name in a single column\n' +
-    '- first_name / last_name: separate name columns, if the sheet splits them ' +
-    '(when a full-name column exists, prefer contact_name and set these to null)\n' +
-    '- email: the attendee\'s email address\n' +
-    '- role_title: the attendee\'s job title or role\n\n' +
+    'first rows of one tab' + (tabName ? ' (named "' + tabName + '")' : '') +
+    ' of an event attendee workbook.\n\n' +
+    'This tab may be an attendee/lead/contact table, OR it may be an ' +
+    'instructions, cover, notes, or configuration tab with no attendee data.\n\n' +
+    'Step 1 — decide whether this tab contains a table of people (event ' +
+    'attendees, leads, or contacts). If it does NOT, return null for ' +
+    'header_row and every column.\n\n' +
+    'Step 2 — if it does, identify:\n' +
+    '- header_row: the ZERO-BASED index, within the rows shown, of the row ' +
+    'containing the column headers. Tables often start a few rows down, ' +
+    'below a title row and instruction rows.\n' +
+    '- The ZERO-BASED column index for each of the following (null when no ' +
+    'column matches):\n' +
+    '  - company: the attendee\'s company or organization\n' +
+    '  - contact_name: the attendee\'s full name in a single column\n' +
+    '  - first_name / last_name: separate name columns, if the sheet splits ' +
+    'them (when a full-name column exists, prefer contact_name and set ' +
+    'these to null)\n' +
+    '  - email: the attendee\'s email address\n' +
+    '  - role_title: the attendee\'s job title or role\n\n' +
     'Rules:\n' +
-    '- Be concise. Base the mapping only on what is present in the data shown.\n' +
-    '- Never guess or fabricate: if you are not confident a column matches, use null.\n' +
+    '- Be concise. Base everything only on what is present in the rows shown.\n' +
+    '- Never guess or fabricate: if you are not confident, use null.\n' +
     '- Respond in strict JSON only — no prose, no markdown fences.\n\n' +
     'Respond with exactly this JSON shape:\n' +
-    '{"company": <index|null>, "contact_name": <index|null>, ' +
-    '"first_name": <index|null>, "last_name": <index|null>, ' +
-    '"email": <index|null>, "role_title": <index|null>, ' +
+    '{"header_row": <index|null>, "company": <index|null>, ' +
+    '"contact_name": <index|null>, "first_name": <index|null>, ' +
+    '"last_name": <index|null>, "email": <index|null>, ' +
+    '"role_title": <index|null>, ' +
     '"data_quality_note": "<one short sentence about data quality, or an empty string>"}\n\n' +
-    'HEADER:\n' + JSON.stringify(header) + '\n\n' +
-    'SAMPLE ROWS:\n' + JSON.stringify(sample);
+    'ROWS (first ' + scan.length + ' rows of this tab):\n' + JSON.stringify(scan);
 
   var mapping = parseJsonLoose_(callClaudeText_(prompt, 1024, 'claude-opus-4-8'));
   if (!mapping || typeof mapping !== 'object') {
-    throw new Error('Could not determine the column mapping for this file');
+    return { contacts: [], skipReason: 'could not map columns' };
   }
 
+  var headerRow = mapping.header_row;
+  var hasNameCol = mapping.contact_name != null || mapping.first_name != null || mapping.last_name != null;
+  if (typeof headerRow !== 'number' || headerRow < 0 || (!hasNameCol && mapping.email == null)) {
+    return { contacts: [], skipReason: 'no attendee table' };
+  }
+
+  var dataRows = rows.slice(headerRow + 1, headerRow + 1 + ATTENDEE_MAX_ROWS);
   var contacts = [];
   for (var i = 0; i < dataRows.length; i++) {
     var row = dataRows[i];
@@ -1254,11 +1355,7 @@ function extractAttendeesFromSpreadsheet_(file, lowerName) {
     });
   }
 
-  var note = String(mapping.data_quality_note || '');
-  if (rows.length - 1 > ATTENDEE_MAX_ROWS) {
-    note += (note ? ' ' : '') + 'Note: file truncated to first ' + ATTENDEE_MAX_ROWS + ' rows.';
-  }
-  return { contacts: contacts, note: note };
+  return { contacts: contacts, note: String(mapping.data_quality_note || '') };
 }
 
 function pickAttendeeCell_(row, index) {
