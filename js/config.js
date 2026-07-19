@@ -86,6 +86,7 @@ export const CONFIG = {
   SHEET_TRANSCRIPTS: 'Transcripts',
   SHEET_OPP_DESCRIPTIONS: 'Opportunity_Descriptions',
   SHEET_EVENT_DESCRIPTIONS: 'Event_Descriptions',
+  SHEET_EVENT_CONTACTS: 'Event_Contacts',
   SHEET_MEETING_INDEX: 'Meeting_Index',
   SHEET_AI_CONVERSATIONS: 'AI_Conversations',
   SHEET_PARTNER_DOCUMENTS: 'Partner_Documents',
