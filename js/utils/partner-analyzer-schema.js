@@ -1,0 +1,380 @@
+// ============================================================
+// Partner analysis JSON schema — shared between prompt builder and parser
+// ============================================================
+// Parallels event-analyzer-schema.js: one example string shown to the model,
+// plus a STRICT parser that strips fences, extracts the JSON, validates every
+// field, drops anything malformed, and coerces bad values to safe defaults.
+// The parser — NOT the model — enforces correctness.
+//
+// The Partner framework has two families of evidence source, validated
+// differently:
+//   • NARRATIVE  (transcript, meeting_index, partner_document,
+//     opportunity_description, event_description) — held to the full GOLDEN
+//     RULE bar: a met/partial needs a non-empty quote AND a real anchor (a
+//     source id or date that matches a supplied source) AND the quote must
+//     overlap the cited source's prose (grounding). A fabricated quote — even
+//     one pinned to a real source — is downgraded to no_evidence.
+//   • STRUCTURED (partner_profile, opportunity, event, event_contacts,
+//     saved_event_playbook) — DETERMINISTIC facts. The model is never trusted
+//     to interpret a count: a structured claim survives only if a supplied
+//     fact supports it, and hard facts (a real won opportunity, active
+//     pipeline, linked opps, a scheduled event) are OVERLAID after parsing so
+//     they are always reflected regardless of what the model said.
+//
+// Stage status, the operational + furthest-demonstrated stages and the
+// completion percentage are ALWAYS recomputed from the validated criteria —
+// the model can never self-award its stage, its CRM metrics, its health label,
+// its tier or its status.
+// ============================================================
+
+import {
+  PARTNER_STAGES,
+  CRITERION_IDS,
+  CRITERION_TO_STAGE,
+  getPartnerStageById,
+  stageStatusFromCriteria,
+} from './partner-analyzer-stages.js';
+
+export const PARTNER_ANALYZER_SCHEMA_EXAMPLE = `{
+  "partner_id": "string — echo back the ID given",
+  "partner_name": "string",
+  "operational_stage_id": "string — the first stage NOT complete (the app recomputes this; you may estimate)",
+  "furthest_demonstrated_stage_id": "string — the furthest stage with at least one met criterion (the app recomputes this)",
+  "confidence": "high | medium | low",
+  "summary": "string — 2-3 sentences on where this partnership actually stands",
+  "stages": [
+    {
+      "stage_id": "string — must exactly match a stage id from the definitions",
+      "status": "complete | in_progress | not_started",
+      "notes": "string — 1-3 sentences on this stage. Empty string if no evidence.",
+      "criteria": [
+        {
+          "criterion_id": "string — must exactly match a criterion id from the definitions",
+          "status": "met | partial | not_met | no_evidence",
+          "evidence": "string — a short quote or close paraphrase from ONE supplied source. Empty string if no_evidence or a structured fact.",
+          "source_type": "partner_profile | transcript | meeting_index | partner_document | opportunity | opportunity_description | event | event_description | event_contacts | saved_event_playbook | none",
+          "source_id": "string — the id of the cited source (transcript_id / meeting_id / document_id / description_id / opportunity_id / event_id / partner_id). Empty string if none.",
+          "source_date": "string — the date of the cited source. Empty string if none.",
+          "related_entity_id": "string — the opportunity_id or event_id a link should open, or the partner_id. Empty string if none."
+        }
+      ]
+    }
+  ],
+  "next_actions": ["string — the most useful next best actions"],
+  "gaps": ["string — maturity gaps blocking the current stage"],
+  "open_questions": ["string — questions the evidence leaves unanswered"],
+  "risks": ["string — relationship risks"],
+  "momentum": ["string — positive momentum"]
+}`;
+
+const VALID_STAGE_STATUSES = new Set(['complete', 'in_progress', 'not_started']);
+const VALID_CRITERION_STATUSES = new Set(['met', 'partial', 'not_met', 'no_evidence']);
+const VALID_CONFIDENCE = new Set(['high', 'medium', 'low']);
+
+export const VALID_SOURCE_TYPES = new Set([
+  'partner_profile', 'transcript', 'meeting_index', 'partner_document',
+  'opportunity', 'opportunity_description', 'event', 'event_description',
+  'event_contacts', 'saved_event_playbook', 'none',
+]);
+
+// Narrative sources are held to the grounding bar; structured sources need a
+// supplied deterministic/structured fact to stand.
+const NARRATIVE_SOURCE_TYPES = new Set([
+  'transcript', 'meeting_index', 'partner_document', 'opportunity_description', 'event_description',
+]);
+const STRUCTURED_SOURCE_TYPES = new Set([
+  'partner_profile', 'opportunity', 'event', 'event_contacts', 'saved_event_playbook',
+]);
+
+// Statuses that assert a criterion is (at least partly) satisfied and so must
+// be backed by a real, validated source.
+const CLAIMED_STATUSES = new Set(['met', 'partial']);
+
+// ── Evidence grounding (narrative guard) ────────────────────────────
+const EVIDENCE_GROUNDING_MIN_OVERLAP = 0.5;
+const GROUNDING_STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'was', 'were', 'been', 'being', 'has', 'have',
+  'had', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their',
+  'with', 'from', 'will', 'would', 'can', 'could', 'should', 'may', 'might',
+  'not', 'but', 'our', 'your', 'his', 'her', 'she', 'him', 'who', 'whom',
+  'which', 'what', 'when', 'where', 'into', 'onto', 'per', 'via', 'about',
+]);
+
+function groundingTokens(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !GROUNDING_STOPWORDS.has(w));
+}
+
+function isEvidenceGrounded(evidence, sourceText) {
+  const evWords = [...new Set(groundingTokens(evidence))];
+  if (evWords.length === 0) return true;
+  const noteSet = new Set(groundingTokens(sourceText));
+  if (noteSet.size === 0) return true;
+  let hits = 0;
+  for (const w of evWords) if (noteSet.has(w)) hits += 1;
+  return (hits / evWords.length) >= EVIDENCE_GROUNDING_MIN_OVERLAP;
+}
+
+function resolveAnchorText(sourceId, sourceDate, anchors) {
+  if (!anchors) return null;
+  if (sourceId && anchors.textById && anchors.textById.has(sourceId)) return anchors.textById.get(sourceId);
+  if (sourceDate && anchors.textByDate && anchors.textByDate.has(sourceDate)) return anchors.textByDate.get(sourceDate);
+  return null;
+}
+
+// ── Small coercers ──────────────────────────────────────────────────
+function cleanStr(v) { return typeof v === 'string' ? v.trim() : ''; }
+function cleanStrArray(v) {
+  return Array.isArray(v) ? v.map(x => String(x == null ? '' : x).trim()).filter(Boolean) : [];
+}
+function toSet(v) {
+  if (v instanceof Set) return v;
+  return Array.isArray(v) ? new Set(v.map(String)) : null;
+}
+function toMap(v) {
+  if (v instanceof Map) return v;
+  if (v && typeof v === 'object') return new Map(Object.entries(v).map(([k, val]) => [String(k), String(val)]));
+  return null;
+}
+
+function emptyCriterion(criterionId) {
+  return {
+    criterion_id: criterionId,
+    status: 'no_evidence',
+    evidence: '',
+    source_type: 'none',
+    source_id: '',
+    source_date: '',
+    related_entity_id: '',
+  };
+}
+
+// Normalize whatever anchor shape the caller passes into one object.
+function normalizeAnchors(options) {
+  const a = options.anchors || options;
+  return {
+    narrativeIds: toSet(a.narrativeIds) || toSet(options.validSourceIds),
+    narrativeDates: toSet(a.narrativeDates) || toSet(options.validSourceDates),
+    textById: toMap(a.textById) || toMap(options.sourceTextById),
+    textByDate: toMap(a.textByDate) || toMap(options.sourceTextByDate),
+    structuredIds: toSet(a.structuredIds) || new Set(),
+    relatedById: toMap(a.relatedById) || new Map(),
+    partnerId: cleanStr(a.partnerId) || cleanStr(options.partnerId),
+  };
+}
+
+/**
+ * Parse and validate Claude's raw text into a normalized partner-analysis
+ * object (canonical 7×3 board).
+ *
+ * @param {string} rawText  The model's message text.
+ * @param {object} [options]
+ * @param {string} [options.partnerId]    Echoed into partner_id when omitted.
+ * @param {string} [options.partnerName]  Echoed into partner_name when omitted.
+ * @param {object} [options.anchors]      collectPartnerAnchors() result.
+ * @param {object} [options.facts]        { deterministic, structuredSupport }.
+ * @returns {object} normalized partner-analysis JSON.
+ */
+export function parsePartnerAnalysisResponse(rawText, options = {}) {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    const err = new Error('Claude returned an empty partner-analysis response.');
+    err.code = 'PARTNER_JSON_EMPTY';
+    throw err;
+  }
+
+  let body = rawText.trim();
+  const fenceMatch = body.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) body = fenceMatch[1].trim();
+  const first = body.indexOf('{');
+  const last = body.lastIndexOf('}');
+  if (first >= 0 && last > first) body = body.slice(first, last + 1);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    const err = new Error(`Partner-analysis JSON parse failed: ${e.message}`);
+    err.code = 'PARTNER_JSON_INVALID';
+    throw err;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const err = new Error('Partner-analysis response is not a JSON object.');
+    err.code = 'PARTNER_JSON_SCHEMA';
+    throw err;
+  }
+
+  const anchors = normalizeAnchors(options);
+  const facts = options.facts || {};
+  const deterministic = (facts.deterministic && typeof facts.deterministic === 'object') ? facts.deterministic : {};
+  const structuredSupport = (facts.structuredSupport && typeof facts.structuredSupport === 'object') ? facts.structuredSupport : {};
+
+  // ── Validate model criteria into a working map ─────────────────────
+  // criterionId → validated result. Unknown ids, wrong-stage placements and
+  // duplicates never enter the map (first valid claim wins).
+  const validated = new Map();
+  const seenStages = new Set();
+  const stageNotes = new Map();
+
+  if (Array.isArray(parsed.stages)) {
+    for (const rawStage of parsed.stages) {
+      if (!rawStage || typeof rawStage !== 'object') continue;
+      const stageId = cleanStr(rawStage.stage_id);
+      if (!getPartnerStageById(stageId)) continue;   // drop unknown stages
+      if (seenStages.has(stageId)) continue;          // dedupe stages (first wins)
+      seenStages.add(stageId);
+      stageNotes.set(stageId, cleanStr(rawStage.notes));
+
+      const crits = Array.isArray(rawStage.criteria) ? rawStage.criteria : [];
+      for (const rawCrit of crits) {
+        if (!rawCrit || typeof rawCrit !== 'object') continue;
+        const criterionId = cleanStr(rawCrit.criterion_id);
+        if (!CRITERION_IDS.has(criterionId)) continue;              // unknown criterion
+        if (CRITERION_TO_STAGE[criterionId] !== stageId) continue;  // wrong-stage placement
+        if (validated.has(criterionId)) continue;                   // dedupe (first wins)
+        validated.set(criterionId, validateCriterion(criterionId, rawCrit, anchors, structuredSupport));
+      }
+    }
+  }
+
+  // ── Overlay deterministic CRM facts (authoritative) ────────────────
+  // Hard facts override any model interpretation — a real won opportunity
+  // beats a narrative note claiming there are no wins.
+  for (const criterionId of Object.keys(deterministic)) {
+    if (!CRITERION_IDS.has(criterionId)) continue;
+    const fact = deterministic[criterionId] || {};
+    const status = VALID_CRITERION_STATUSES.has(String(fact.status)) ? String(fact.status) : 'met';
+    validated.set(criterionId, {
+      criterion_id: criterionId,
+      status,
+      evidence: cleanStr(fact.evidence),
+      source_type: VALID_SOURCE_TYPES.has(String(fact.source_type)) ? String(fact.source_type) : 'none',
+      source_id: cleanStr(fact.source_id),
+      source_date: cleanStr(fact.source_date),
+      related_entity_id: cleanStr(fact.related_entity_id),
+    });
+  }
+
+  // ── Build the canonical 7×3 board with recomputed stage statuses ───
+  const stages = PARTNER_STAGES.map(stageDef => {
+    const criteria = stageDef.criteria.map(cd => validated.get(cd.id) || emptyCriterion(cd.id));
+    return {
+      stage_id: stageDef.id,
+      status: stageStatusFromCriteria(criteria),
+      notes: stageNotes.get(stageDef.id) || '',
+      criteria,
+    };
+  });
+
+  // ── Recompute operational + furthest-demonstrated + completion ─────
+  let operationalStageId = '';
+  let complete = true;
+  for (const s of stages) {
+    if (s.status !== 'complete') { operationalStageId = s.stage_id; complete = false; break; }
+  }
+  let furthestDemonstratedStageId = '';
+  for (const s of stages) {
+    if (s.criteria.some(c => c.status === 'met')) furthestDemonstratedStageId = s.stage_id;
+  }
+  const metCount = stages.reduce((n, s) => n + s.criteria.filter(c => c.status === 'met').length, 0);
+  const total = stages.reduce((n, s) => n + s.criteria.length, 0);
+
+  return {
+    partner_id: cleanStr(parsed.partner_id) || cleanStr(options.partnerId),
+    partner_name: cleanStr(parsed.partner_name) || cleanStr(options.partnerName),
+    operational_stage_id: operationalStageId || (complete ? 'revenue_growth' : ''),
+    furthest_demonstrated_stage_id: furthestDemonstratedStageId,
+    maturity_complete: complete,
+    confidence: VALID_CONFIDENCE.has(cleanStr(parsed.confidence).toLowerCase())
+      ? cleanStr(parsed.confidence).toLowerCase()
+      : 'low',
+    summary: cleanStr(parsed.summary),
+    stages,
+    next_actions: cleanStrArray(parsed.next_actions),
+    gaps: cleanStrArray(parsed.gaps),
+    open_questions: cleanStrArray(parsed.open_questions),
+    risks: cleanStrArray(parsed.risks),
+    momentum: cleanStrArray(parsed.momentum),
+    completion: { met: metCount, total, pct: total > 0 ? Math.round((metCount / total) * 100) : 0 },
+  };
+}
+
+// Validate one model criterion claim into a normalized result, enforcing the
+// per-source-type rules.
+function validateCriterion(criterionId, rawCrit, anchors, structuredSupport) {
+  let status = VALID_CRITERION_STATUSES.has(cleanStr(rawCrit.status).toLowerCase())
+    ? cleanStr(rawCrit.status).toLowerCase()
+    : 'no_evidence';
+
+  let evidence = cleanStr(rawCrit.evidence);
+  let sourceType = VALID_SOURCE_TYPES.has(cleanStr(rawCrit.source_type).toLowerCase())
+    ? cleanStr(rawCrit.source_type).toLowerCase()
+    : 'none';
+  let sourceId = cleanStr(rawCrit.source_id);
+  let sourceDate = cleanStr(rawCrit.source_date);
+  let relatedRaw = cleanStr(rawCrit.related_entity_id);
+
+  const downgrade = () => {
+    status = 'no_evidence'; evidence = ''; sourceType = 'none'; sourceId = ''; sourceDate = '';
+  };
+
+  if (CLAIMED_STATUSES.has(status)) {
+    if (NARRATIVE_SOURCE_TYPES.has(sourceType)) {
+      // GOLDEN RULE — narrative evidence must be traceable + grounded.
+      if (sourceId && anchors.narrativeIds && !anchors.narrativeIds.has(sourceId)) sourceId = '';
+      if (sourceDate && anchors.narrativeDates && !anchors.narrativeDates.has(sourceDate)) sourceDate = '';
+      const hasAnchor = !!sourceId || !!sourceDate;
+      if (!evidence || !hasAnchor) {
+        downgrade();
+      } else {
+        const noteText = resolveAnchorText(sourceId, sourceDate, anchors);
+        if (noteText != null && !isEvidenceGrounded(evidence, noteText)) downgrade();
+      }
+    } else if (STRUCTURED_SOURCE_TYPES.has(sourceType)) {
+      // Structured claim — trusted only if a supplied fact supports it.
+      // (Hard facts are also overlaid separately after parsing.)
+      if (!structuredSupport[criterionId]) {
+        downgrade();
+      } else if (sourceId && anchors.structuredIds && anchors.structuredIds.size && !anchors.structuredIds.has(sourceId)) {
+        // A fabricated structured source id is cleared, but an aggregate-backed
+        // claim (no id) still stands on the supporting fact.
+        sourceId = '';
+      }
+    } else {
+      // sourceType 'none' (or unresolved) can never back a claim.
+      downgrade();
+    }
+  }
+
+  // not_met keeps its (negative) citation; no_evidence carries no payload.
+  if (status === 'no_evidence') {
+    evidence = ''; sourceType = 'none'; sourceId = ''; sourceDate = '';
+  }
+
+  const related = (status === 'no_evidence')
+    ? ''
+    : resolveRelated(sourceId, relatedRaw, anchors);
+
+  return {
+    criterion_id: criterionId,
+    status,
+    evidence,
+    source_type: sourceType,
+    source_id: sourceId,
+    source_date: sourceDate,
+    related_entity_id: related,
+  };
+}
+
+// Resolve the entity a source link should open. Prefers the parent entity of a
+// specific narrative source (an opp/event/partner), then a model-supplied
+// related id that names a real structured entity, then a structured source id
+// that names one, and finally the partner detail page as a safe fallback.
+function resolveRelated(sourceId, relatedRaw, anchors) {
+  if (sourceId && anchors.relatedById && anchors.relatedById.has(sourceId)) return anchors.relatedById.get(sourceId);
+  if (relatedRaw && anchors.structuredIds && anchors.structuredIds.has(relatedRaw)) return relatedRaw;
+  if (sourceId && anchors.structuredIds && anchors.structuredIds.has(sourceId)) return sourceId;
+  return anchors.partnerId || '';
+}
