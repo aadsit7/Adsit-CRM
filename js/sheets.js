@@ -435,6 +435,13 @@ const SHEET_HEADERS = {
   [CONFIG.SHEET_TRANSCRIPTS]: ['transcript_id', 'partner_id', 'partner_name', 'conversation_date', 'transcript_text', 'created_at'],
   [CONFIG.SHEET_OPP_DESCRIPTIONS]: ['description_id', 'opportunity_id', 'deal_name', 'description_date', 'description_text', 'created_at', 'category'],
   [CONFIG.SHEET_EVENT_DESCRIPTIONS]: ['description_id', 'event_id', 'title', 'description_date', 'description_text', 'created_at'],
+  // Event_Playbook: one row per event. `stages_json` holds the serialized
+  // playbook state — a JSON array of { key, gate, note, acts:[{ x, o, dt, d }] }
+  // — exactly as the standalone Event Workspace's pbSerialize() produces it.
+  // Managed by the Apps Script savePlaybook/loadPlaybook handlers (like
+  // Event_Contacts); the Event Analyzer reads it as an optional evidence
+  // source via readSheetAsObjects and degrades gracefully when it is absent.
+  [CONFIG.SHEET_EVENT_PLAYBOOK]: ['event_id', 'event_title', 'stages_json', 'updated_at'],
   [CONFIG.SHEET_PARTNER_DOCUMENTS]: ['document_id', 'partner_id', 'partner_name', 'title', 'doc_type', 'html_content', 'status', 'created_at', 'updated_at'],
   [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at'],
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],

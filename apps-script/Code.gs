@@ -15,7 +15,7 @@
  *     updateDescription / getConfig
  *   Playbook (Event Workspace):
  *     categorizeLeads / listEvents / openEvent / saveEventContacts /
- *     listEventContacts
+ *     listEventContacts / savePlaybook / loadPlaybook / analyzePlaybookNotes
  *   Portal (event modal "Analyze" on attached documents):
  *     analyzeDocument with analysisType:'attendee_list' — extracts the
  *     attendee list deterministically, classifies titles with the SAME
@@ -84,6 +84,26 @@ function doPost(e) {
     // workspace can prepopulate itself when the event is reopened.
     if (payload.action === 'listEventContacts') {
       return doListEventContacts(payload);
+    }
+
+    // Persist the per-event playbook state (7 stages × 3 activities) to the
+    // Event_Playbook tab. Written by the standalone Event Workspace's
+    // debounced save; read back by loadPlaybook and by the CRM Event Analyzer.
+    if (payload.action === 'savePlaybook') {
+      return doSavePlaybook(payload);
+    }
+
+    // Read one event's saved playbook state back as the keyed shape the
+    // standalone's pbMergeSaved expects.
+    if (payload.action === 'loadPlaybook') {
+      return doLoadPlaybook(payload);
+    }
+
+    // AI pass: given this event's saved description notes, return which
+    // playbook activities those notes show as ALREADY COMPLETED. Only ever
+    // suggests checks — never unchecks.
+    if (payload.action === 'analyzePlaybookNotes') {
+      return doAnalyzePlaybookNotes(payload);
     }
 
     if (payload.action === 'getConfig') {
@@ -1001,6 +1021,303 @@ function updateEventLeadCount(ss, eventKey, count) {
       return;
     }
   }
+}
+
+// ============================================================
+// ============================================================
+// EVENT PLAYBOOK (Event Workspace 7-stage partner playbook)
+// ------------------------------------------------------------
+// The standalone Event Workspace persists each event's playbook state to the
+// Event_Playbook tab and reads it back on open. One row per event:
+//
+//   event_id | event_title | stages_json | updated_at
+//
+// `stages_json` is the serialized playbook — a JSON array of
+//   { key, gate, note, acts:[{ x, o, dt, d }] }
+// exactly as the workspace's pbSerialize() produces it. Storing the whole
+// board as one JSON cell (rather than a row per activity) keeps the tab small
+// and makes the save an atomic upsert, mirroring how Event_Contacts is owned
+// entirely by this backend. The CRM Event Analyzer reads the same tab via the
+// authenticated Sheets client as an OPTIONAL evidence source.
+// ============================================================
+// ============================================================
+
+var EVENT_PLAYBOOK_TAB = 'Event_Playbook';
+var EVENT_PLAYBOOK_HEADERS = ['event_id', 'event_title', 'stages_json', 'updated_at'];
+
+/**
+ * getEventPlaybookSheet
+ * Returns the Event_Playbook sheet, creating it with the header row on first
+ * use. Missing columns on an older tab are appended so name-based indexing
+ * always works.
+ */
+function getEventPlaybookSheet(ss) {
+  var sheet = ss.getSheetByName(EVENT_PLAYBOOK_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(EVENT_PLAYBOOK_TAB);
+    sheet.getRange(1, 1, 1, EVENT_PLAYBOOK_HEADERS.length).setValues([EVENT_PLAYBOOK_HEADERS]);
+    return sheet;
+  }
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  var missing = EVENT_PLAYBOOK_HEADERS.filter(function (h) { return headers.indexOf(h) === -1; });
+  if (missing.length) {
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  }
+  return sheet;
+}
+
+/**
+ * doSavePlaybook
+ * Input payload: { action:'savePlaybook', eventKey, eventTitle,
+ *                  stages:[{ key, gate, note, acts:[{ x, o, dt, d }] }] }
+ *
+ * Upsert-by-event: the event's existing Event_Playbook row is replaced with a
+ * fresh one carrying the serialized board. Rows for OTHER events are left
+ * untouched. A script lock guards the read-clear-rewrite so two saves can't
+ * interleave. Output: { ok:true, event_id:<key> }
+ */
+function doSavePlaybook(payload) {
+  var key = String(payload.eventKey == null ? '' : payload.eventKey).trim();
+  if (!key) return jsonOut({ ok: false, code: 'bad_request', error: 'No event specified' });
+
+  var stages = (payload.stages && payload.stages.length) ? payload.stages : [];
+  var stagesJson = JSON.stringify(stages);
+  // Safety cap: keep a single cell well under the 50k Sheets limit.
+  if (stagesJson.length > 45000) {
+    return jsonOut({ ok: false, code: 'too_large', error: 'Playbook state is too large to save' });
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = getEventPlaybookSheet(ss);
+    var numCols = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, numCols).getValues()[0].map(function (h) { return String(h || '').trim(); });
+    var idIdx = headers.indexOf('event_id');
+    if (idIdx === -1) throw new Error('Event_Playbook is missing its event_id column');
+
+    var map = {
+      event_id: key,
+      event_title: String(payload.eventTitle == null ? '' : payload.eventTitle),
+      stages_json: stagesJson,
+      updated_at: new Date().toISOString()
+    };
+    var freshRow = headers.map(function (h) {
+      return Object.prototype.hasOwnProperty.call(map, h) ? map[h] : '';
+    });
+
+    // Find an existing row for this event and overwrite it in place; otherwise
+    // append. Keeps every other event's row exactly where it was.
+    var existingRow = -1;
+    if (sheet.getLastRow() > 1) {
+      var existing = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+      for (var i = 0; i < existing.length; i++) {
+        if (String(existing[i][idIdx] == null ? '' : existing[i][idIdx]).trim() === key) { existingRow = i + 2; break; }
+      }
+    }
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, 1, 1, numCols).setValues([freshRow]);
+    } else {
+      sheet.appendRow(freshRow);
+    }
+
+    return jsonOut({ ok: true, event_id: key });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * doLoadPlaybook
+ * Input payload: { action:'loadPlaybook', eventKey }
+ * Returns the saved board as the keyed shape the workspace's pbMergeSaved
+ * expects: { ok:true, stages:{ <stageKey>:{ note, acts:[{ i, o, dt, d }] } } }.
+ * Missing tab / no row → { ok:true, stages:{} } (never an error).
+ */
+function doLoadPlaybook(payload) {
+  var key = String(payload.eventKey == null ? '' : payload.eventKey).trim();
+  if (!key) return jsonOut({ ok: true, stages: {} });
+
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(EVENT_PLAYBOOK_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return jsonOut({ ok: true, stages: {} });
+
+  var numCols = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, numCols).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  var idIdx = headers.indexOf('event_id');
+  var jsonIdx = headers.indexOf('stages_json');
+  if (idIdx === -1 || jsonIdx === -1) return jsonOut({ ok: true, stages: {} });
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][idIdx] == null ? '' : data[i][idIdx]).trim() !== key) continue;
+    var arr = parseJsonLoose_(String(data[i][jsonIdx] == null ? '' : data[i][jsonIdx]));
+    if (!arr || !arr.length) return jsonOut({ ok: true, stages: {} });
+    var stages = {};
+    for (var s = 0; s < arr.length; s++) {
+      var st = arr[s] || {};
+      var sk = String(st.key == null ? '' : st.key).trim();
+      if (!sk) continue;
+      var acts = (st.acts || []).map(function (a, j) {
+        a = a || {};
+        return { i: j, o: a.o || '', dt: String(a.dt || ''), d: !!a.d };
+      });
+      stages[sk] = { note: String(st.note || ''), acts: acts };
+    }
+    return jsonOut({ ok: true, stages: stages });
+  }
+  return jsonOut({ ok: true, stages: {} });
+}
+
+/**
+ * doAnalyzePlaybookNotes
+ * Input payload: { action:'analyzePlaybookNotes', eventKey,
+ *                  stages:[{ key, name, acts:[{ i, x, d }] }] }
+ *
+ * Reads every saved Event_Descriptions note for the event, then asks Claude
+ * which of the still-UNCHECKED activities those notes clearly show as ALREADY
+ * COMPLETED — returning the evidencing note's date when it can. Accuracy-first:
+ * it only ever suggests CHECKS, and only for activities a note genuinely
+ * supports. Missing key / no notes / no API key → { ok:true, checks:[] }.
+ *
+ * Output: { ok:true, checks:[{ stage:<key>, i:<index>, date:'YYYY-MM-DD' }] }
+ */
+function doAnalyzePlaybookNotes(payload) {
+  var key = String(payload.eventKey == null ? '' : payload.eventKey).trim();
+  if (!key) return jsonOut({ ok: true, checks: [] });
+
+  var stages = (payload.stages && payload.stages.length) ? payload.stages : [];
+  if (!stages.length) return jsonOut({ ok: true, checks: [] });
+  if (!ANTHROPIC_API_KEY) return jsonOut({ ok: true, checks: [] });
+
+  var notes = readEventDescriptionNotes_(key);
+  if (!notes.length) return jsonOut({ ok: true, checks: [] });
+
+  // Only ask about activities that are not already checked — the analysis
+  // never unchecks, so a checked activity needs no re-evaluation.
+  var openActs = [];
+  for (var i = 0; i < stages.length; i++) {
+    var st = stages[i] || {};
+    var acts = st.acts || [];
+    for (var j = 0; j < acts.length; j++) {
+      if (acts[j] && !acts[j].d) {
+        openActs.push({ stage: String(st.key || ''), i: Number(acts[j].i != null ? acts[j].i : j), x: String(acts[j].x || '') });
+      }
+    }
+  }
+  if (!openActs.length) return jsonOut({ ok: true, checks: [] });
+
+  var notesBlock = notes.map(function (n) {
+    return '--- NOTE date: ' + (n.date || 'Undated') + ' ---\n' + n.text;
+  }).join('\n\n');
+
+  var actsBlock = openActs.map(function (a) {
+    return '- stage "' + a.stage + '" activity ' + a.i + ': ' + a.x;
+  }).join('\n');
+
+  var prompt = 'You are auditing an EVENT execution playbook against the event\'s saved notes.\n\n'
+    + 'GOLDEN RULE: only mark an activity complete when a specific sentence in the NOTES clearly shows it was DONE. '
+    + 'Never infer completion from timing, the event date, or because other activities are done. When in doubt, leave it out.\n\n'
+    + 'NOTES (the ONLY evidence — oldest first):\n\n' + notesBlock + '\n\n'
+    + 'CANDIDATE ACTIVITIES (only these; each is currently unchecked):\n' + actsBlock + '\n\n'
+    + 'Return ONLY a JSON array of the activities the notes show as ALREADY COMPLETED, each as '
+    + '{"stage":"<stage key>","i":<activity index>,"date":"YYYY-MM-DD"} where date is the date of the note that '
+    + 'evidences completion (omit or use "" if unknown). Return [] if none. No prose, no code fences.';
+
+  var text = '';
+  try {
+    text = callClaudeText_(prompt, 2000, 'claude-opus-4-7');
+  } catch (e) {
+    return jsonOut({ ok: true, checks: [] }); // silent — checking stays manual until the next run
+  }
+
+  var parsed = parseJsonLoose_(text);
+  if (!parsed || !parsed.length) return jsonOut({ ok: true, checks: [] });
+
+  // Validate every suggestion against the candidate set — the model can only
+  // check an activity we actually asked about, in a stage/index that exists.
+  var allowed = {};
+  openActs.forEach(function (a) { allowed[a.stage + '|' + a.i] = true; });
+  var checks = [];
+  for (var k = 0; k < parsed.length; k++) {
+    var c = parsed[k] || {};
+    var stage = String(c.stage == null ? '' : c.stage).trim();
+    var idx = Number(c.i);
+    if (isNaN(idx)) continue;
+    if (!allowed[stage + '|' + idx]) continue;
+    var date = String(c.date == null ? '' : c.date).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = '';
+    checks.push({ stage: stage, i: idx, date: date });
+  }
+  return jsonOut({ ok: true, checks: checks });
+}
+
+/**
+ * readEventDescriptionNotes_
+ * Reads the Event_Descriptions rows for one event, strips HTML to plain prose,
+ * drops empties and sorts OLDEST FIRST. Returns [{ date, text }].
+ */
+function readEventDescriptionNotes_(eventKey) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName('Event_Descriptions');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  var numCols = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, numCols).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  var idIdx = headers.indexOf('event_id');
+  var textIdx = headers.indexOf('description_text');
+  var dateIdx = headers.indexOf('description_date');
+  var createdIdx = headers.indexOf('created_at');
+  if (idIdx === -1 || textIdx === -1) return [];
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+  var out = [];
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][idIdx] == null ? '' : data[i][idIdx]).trim() !== eventKey) continue;
+    var text = stripHtmlToText_(data[i][textIdx]);
+    if (!text) continue;
+    var date = '';
+    if (dateIdx !== -1 && data[i][dateIdx]) date = normalizeDateCell_(data[i][dateIdx]);
+    if (!date && createdIdx !== -1 && data[i][createdIdx]) date = normalizeDateCell_(data[i][createdIdx]);
+    out.push({ date: date, text: text });
+  }
+  out.sort(function (a, b) {
+    return (Date.parse(a.date) || 0) - (Date.parse(b.date) || 0);
+  });
+  return out;
+}
+
+// A Sheets cell may hold a real Date or a text date; normalize to YYYY-MM-DD.
+function normalizeDateCell_(v) {
+  if (v instanceof Date) {
+    return Utilities.formatDate(v, 'UTC', 'yyyy-MM-dd');
+  }
+  var s = String(v == null ? '' : v).trim();
+  var m = s.match(/^\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : s;
+}
+
+// Minimal HTML → text for note prose (Quill markup) — mirrors the client's
+// stripHtml so the model sees the same clean prose a human reads.
+function stripHtmlToText_(html) {
+  return String(html == null ? '' : html)
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s+|\s+$/g, '');
 }
 
 // ============================================================
