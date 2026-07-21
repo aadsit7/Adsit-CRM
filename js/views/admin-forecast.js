@@ -34,6 +34,19 @@ import {
 } from '../utils/forecast-stages.js';
 import { buildForecastPdf, forecastFilename } from '../utils/forecast-pdf-builder.js';
 import { openOppDetailsModal } from './admin-opportunities.js';
+// ── Event Analyzer (parallel pipeline: prompt → client → schema) ──────
+import { requestEventAnalysisJson } from '../utils/event-analyzer-client.js';
+import {
+  deriveEventBoard,
+  resolveEventPosition,
+  ownerLabel,
+  EVENT_STAGES,
+} from '../utils/event-analyzer-stages.js';
+import { computeEventTiming } from '../utils/event-analyzer-prompts.js';
+import { selectEventDescriptions, selectEventContacts } from '../utils/event-analyzer-evidence.js';
+import { buildEventAnalysisPdf, eventAnalysisFilename } from '../utils/event-analyzer-pdf-builder.js';
+// openEventModal is imported lazily inside the click handler (see openEventSource)
+// to avoid a static import cycle with admin-events.js.
 
 // ── Module state ─────────────────────────────────────────────────────
 // This state deliberately OUTLIVES the view. The analysis runs as a
@@ -51,6 +64,27 @@ let activeJob = null;
 //     result: { forecast, board, opp, descriptions, documents } | null,
 //     error: string | null }
 
+// ── Analyzer mode ────────────────────────────────────────────────────
+// The Analyzer supports two independent boards — Opportunity (unchanged)
+// and Event. `mode` persists across navigation so returning to the tab
+// restores the last-used board. Each mode owns its OWN selection and
+// background job; nothing about the event flow can touch `activeJob` /
+// `selectedOppId`, and vice-versa, so one mode's result can never land on
+// the other's board.
+let mode = 'opportunity'; // 'opportunity' | 'event'
+let modeSlotEl = null;    // the container the active mode panel renders into
+
+// ── Event Analyzer state (parallel to the opportunity state above) ────
+let allEvents = [];
+let selectedEventId = '';
+let eventJob = null;
+// eventJob shape:
+//   { eventId, label,
+//     status: 'running' | 'done' | 'error',
+//     controller: AbortController, pill,
+//     result: { analysis, board, event, descriptions, timing, coverageWarnings } | null,
+//     error: string | null }
+
 // Abort and discard the run currently in flight (used when a new run
 // supersedes it). A job that has already FINISHED keeps its cached result so
 // returning to the tab still shows the board — it's replaced, not aborted,
@@ -60,6 +94,15 @@ function abortInflight() {
     if (activeJob.controller) { try { activeJob.controller.abort(); } catch { /* ignore */ } }
     if (activeJob.pill) { try { destroyPill(activeJob.pill); } catch { /* ignore */ } }
     activeJob = null;
+  }
+}
+
+// Event-mode twin of abortInflight — supersedes only the event run.
+function abortEventInflight() {
+  if (eventJob && eventJob.status === 'running') {
+    if (eventJob.controller) { try { eventJob.controller.abort(); } catch { /* ignore */ } }
+    if (eventJob.pill) { try { destroyPill(eventJob.pill); } catch { /* ignore */ } }
+    eventJob = null;
   }
 }
 
@@ -129,7 +172,13 @@ export async function render(container) {
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
-    const opportunities = await readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES);
+    // Load both boards' source lists in parallel. Opportunities are
+    // required (a failure is fatal, as before); events are optional — an
+    // Events read failure just leaves the Event picker empty.
+    const [opportunities, events] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+      readSheetAsObjects(CONFIG.SHEET_EVENTS).catch(() => []),
+    ]);
     allOpps = filterOpportunities(opportunities)
       .filter(o => o.opportunity_id)
       .sort((a, b) => {
@@ -138,6 +187,9 @@ export async function render(container) {
         if (ca !== cb) return ca < cb ? -1 : 1;
         return String(a.deal_name || '').toLowerCase() < String(b.deal_name || '').toLowerCase() ? -1 : 1;
       });
+    allEvents = (events || [])
+      .filter(e => e && e.event_id && String(e.title || '').trim())
+      .sort((a, b) => (Date.parse(b.event_date) || 0) - (Date.parse(a.event_date) || 0)); // newest first
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Could not load opportunities'),
@@ -147,23 +199,79 @@ export async function render(container) {
   }
 
   mount(container, buildView());
-  // Repaint whatever the background job is doing (live progress, finished
-  // board, or error) for a user returning to the tab mid-run or after it
-  // completed while they were away.
-  restoreActiveJob();
+  // Repaint whatever the active mode's background job is doing (live
+  // progress, finished board, or error) for a user returning to the tab
+  // mid-run or after it completed while they were away.
+  restoreForMode();
 }
 
 export function cleanup() {
-  // Intentionally does NOT abort the analysis. The run is a background job
-  // that survives navigation — its progress stays visible in the global pill,
-  // so the user can switch tabs and come back to the finished board. The job
-  // lives in module state and is repainted by render(); only an explicit new
-  // run supersedes it. selectedOppId is preserved too, so the dropdown keeps
-  // the user's deal selected when they return.
+  // Intentionally does NOT abort either analysis. Each run is a background
+  // job that survives navigation — its progress stays visible in the global
+  // pill, so the user can switch tabs and come back to the finished board.
+  // Both jobs (activeJob / eventJob) live in module state and are repainted
+  // by render(); only an explicit new run supersedes the matching one. The
+  // active `mode`, `selectedOppId` and `selectedEventId` are preserved too, so
+  // returning to the Analyzer restores the last board, selection and result.
 }
 
 // ── View shell ──────────────────────────────────────────────────────
+// The shell is a segmented Opportunity/Event control above a single mode
+// slot. Only the active mode's panel is ever in the DOM, so the two boards
+// physically cannot render at the same time — switching modes can never
+// show the other entity's analysis.
 function buildView() {
+  modeSlotEl = el('div', { class: 'analyzer-mode-slot' });
+  fillModeSlot();
+  return el('div', { class: 'forecast' },
+    buildModeBar(),
+    modeSlotEl,
+  );
+}
+
+function buildModeBar() {
+  const mk = (key, label) => el('button', {
+    type: 'button',
+    class: `analyzer-modebar__tab ${mode === key ? 'analyzer-modebar__tab--active' : ''}`,
+    role: 'tab',
+    'aria-selected': mode === key ? 'true' : 'false',
+    onClick: () => switchMode(key),
+  }, label);
+  return el('div', { class: 'analyzer-modebar', role: 'tablist', 'aria-label': 'Analyzer mode' },
+    mk('opportunity', 'Opportunity'),
+    mk('event', 'Event'),
+  );
+}
+
+// Repaint the mode slot with the active mode's panel. Does NOT restore the
+// job (the panel must be in the DOM first) — callers restore afterwards.
+function fillModeSlot() {
+  if (!modeSlotEl) return;
+  modeSlotEl.replaceChildren(mode === 'event' ? buildEventPanel() : buildOppPanel());
+}
+
+// Restore the active mode's background job into its (now-mounted) panel.
+function restoreForMode() {
+  if (mode === 'event') restoreEventJob();
+  else restoreActiveJob();
+}
+
+function switchMode(next) {
+  if (next === mode || (next !== 'opportunity' && next !== 'event')) return;
+  mode = next;
+  // Repaint the segmented control's active state.
+  const tabs = document.querySelectorAll('.forecast .analyzer-modebar__tab');
+  tabs.forEach((t, i) => {
+    const isActive = (i === 0 && mode === 'opportunity') || (i === 1 && mode === 'event');
+    t.classList.toggle('analyzer-modebar__tab--active', isActive);
+    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  fillModeSlot();
+  restoreForMode();
+}
+
+// ── Opportunity panel (unchanged behavior) ──────────────────────────
+function buildOppPanel() {
   const select = el('select', {
     class: 'form-select forecast__select',
     onChange: (e) => { selectedOppId = e.target.value; analyzeBtn.disabled = !selectedOppId; },
@@ -183,7 +291,7 @@ function buildView() {
 
   const resultSlot = el('div', { class: 'forecast__result' }, buildIntroEmptyState());
 
-  const view = el('div', { class: 'forecast' },
+  return el('div', { class: 'forecast__panel' },
     el('div', { class: 'forecast__controls' },
       el('label', { class: 'forecast__control' },
         el('span', { class: 'forecast__control-label' }, 'Opportunity'),
@@ -193,8 +301,6 @@ function buildView() {
     ),
     resultSlot,
   );
-
-  return view;
 }
 
 function buildIntroEmptyState() {
@@ -835,4 +941,491 @@ function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// ============================================================
+// EVENT ANALYZER
+// ============================================================
+// The event twin of the opportunity flow above. It reuses the same
+// background-job pattern (a run survives navigation; a new run supersedes
+// the stale one; a late stale response never overwrites a newer result)
+// but keeps its OWN state (eventJob / selectedEventId) and its OWN DOM
+// handles (.event-analyzer__*), so nothing here can touch the opportunity
+// board and vice-versa.
+// ============================================================
+
+// ── Event panel + empty state ───────────────────────────────────────
+function buildEventPanel() {
+  const select = el('select', {
+    class: 'form-select event-analyzer__select',
+    onChange: (e) => { selectedEventId = e.target.value; analyzeBtn.disabled = !selectedEventId; },
+  },
+    el('option', { value: '' }, 'Select an event…'),
+    ...allEvents.map(ev => el('option', { value: ev.event_id }, eventOptionLabel(ev))),
+  );
+  if (selectedEventId) select.value = selectedEventId;
+
+  const analyzeBtn = el('button', {
+    class: 'btn btn--primary event-analyzer__analyze',
+    disabled: !selectedEventId,
+    onClick: () => runEventAnalysis(),
+  }, 'Analyze with Randy');
+
+  const resultSlot = el('div', { class: 'event-analyzer__result' }, buildEventIntroEmptyState());
+
+  return el('div', { class: 'event-analyzer__panel' },
+    el('div', { class: 'forecast__controls' },
+      el('label', { class: 'forecast__control' },
+        el('span', { class: 'forecast__control-label' }, 'Event'),
+        select,
+      ),
+      analyzeBtn,
+    ),
+    resultSlot,
+  );
+}
+
+// A human-readable option: "Title — Date · Type".
+function eventOptionLabel(ev) {
+  const bits = [String(ev.title || 'Untitled event').trim()];
+  const date = ev.event_date ? (formatDate(ev.event_date) || ev.event_date) : '';
+  const tail = [date, String(ev.event_type || '').trim()].filter(Boolean).join(' · ');
+  return tail ? `${bits[0]} — ${tail}` : bits[0];
+}
+
+function buildEventIntroEmptyState() {
+  return el('div', { class: 'empty-state event-analyzer__intro' },
+    el('div', { class: 'empty-state__title' }, 'Analyze an event lifecycle'),
+    el('div', { class: 'empty-state__description' },
+      'Pick an event and Randy will score its event lifecycle from saved notes and CRM evidence—'
+      + 'showing completed activities, gaps, and the evidence behind each result.'),
+  );
+}
+
+// ── Event live DOM handles + paint helpers ──────────────────────────
+function liveEventResultSlot() { return $('.forecast .event-analyzer__result'); }
+function liveEventAnalyzeBtn() { return $('.forecast .event-analyzer__analyze'); }
+function setEventAnalyzeDisabled(disabled) {
+  const btn = liveEventAnalyzeBtn();
+  if (btn) btn.disabled = disabled;
+}
+
+function paintEventRunning() {
+  const slot = liveEventResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'forecast__loading' },
+    el('div', { class: 'spinner' }),
+    el('span', {}, 'Randy is analyzing the event lifecycle… you can switch tabs — this keeps running.'),
+  ));
+}
+function paintEventResult(job) {
+  const slot = liveEventResultSlot();
+  if (!slot || !job.result) return;
+  slot.replaceChildren(renderEventBoard(job.result));
+}
+function paintEventError(job) {
+  const slot = liveEventResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'empty-state forecast__error' },
+    el('div', { class: 'empty-state__title' }, 'Randy could not build the lifecycle'),
+    el('div', { class: 'empty-state__description' }, job.error || 'Something went wrong. Try again.'),
+  ));
+}
+function notifyEventIfAway(job) {
+  if (liveEventResultSlot()) return;
+  if (job.status === 'error') {
+    showToast(`Event analysis failed for ${job.label}. Open the Analyzer to retry.`, 'error');
+  } else {
+    showToast(`Event analysis ready for ${job.label}. Open the Analyzer to view it.`, 'success');
+  }
+}
+function restoreEventJob() {
+  if (!eventJob) return;
+  if (eventJob.eventId) {
+    selectedEventId = eventJob.eventId;
+    const select = $('.forecast .event-analyzer__select');
+    if (select) select.value = eventJob.eventId;
+  }
+  setEventAnalyzeDisabled(eventJob.status === 'running');
+  if (eventJob.status === 'running') paintEventRunning();
+  else if (eventJob.status === 'done') paintEventResult(eventJob);
+  else if (eventJob.status === 'error') paintEventError(eventJob);
+}
+
+// Load one event's saved playbook state (optional evidence source). A read
+// failure — most commonly a not-yet-created Event_Playbook tab — is NON-FATAL:
+// we return a coverage warning and let the analysis proceed on the rest of
+// the evidence. A successful read that simply has no row for this event is
+// not a warning (there just isn't any saved state yet).
+async function loadSavedPlaybookRaw(eventId) {
+  try {
+    const rows = await readSheetAsObjects(CONFIG.SHEET_EVENT_PLAYBOOK);
+    const row = (rows || []).find(r => String(r.event_id || '').trim() === eventId);
+    return { raw: row ? (row.stages_json || '') : null, warning: null };
+  } catch {
+    return {
+      raw: null,
+      warning: 'Saved playbook state couldn’t be loaded, so any manually-checked activities aren’t reflected. '
+        + 'The board still reflects this event’s notes and CRM facts.',
+    };
+  }
+}
+
+// ── The event run ───────────────────────────────────────────────────
+// Pass an explicit event to score that exact event (used by a re-run so it
+// can't drift to whatever the dropdown now shows); with no argument it
+// scores the current dropdown selection.
+async function runEventAnalysis(explicitEvent = null) {
+  const event = explicitEvent || allEvents.find(e => e.event_id === selectedEventId);
+  if (!event) { showToast('Pick an event first', 'error'); return; }
+
+  abortEventInflight();
+  const controller = new AbortController();
+  const label = event.title || 'Event';
+  const pill = createPill('Reading the event notes…', { label });
+  const job = { eventId: event.event_id, label, status: 'running', controller, pill, result: null, error: null };
+  eventJob = job;
+
+  setEventAnalyzeDisabled(true);
+  paintEventRunning();
+
+  try {
+    // Load every evidence source in parallel. Contacts/opps/playbook are all
+    // tolerated on failure — the analysis still runs on whatever succeeded.
+    const [descAll, contactsAll, opportunities, savedResult] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_EVENT_DESCRIPTIONS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_EVENT_CONTACTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES).catch(() => []),
+      loadSavedPlaybookRaw(event.event_id),
+    ]);
+
+    if (controller.signal.aborted || job !== eventJob) return;
+
+    // Strict event_id filtering (shared, tested helpers) — one event's
+    // analysis can never pull in another event's notes or contacts.
+    const descriptions = selectEventDescriptions(descAll, event.event_id);
+    const contacts = selectEventContacts(contactsAll, event.event_id);
+
+    const coverageWarnings = [];
+    if (savedResult.warning) coverageWarnings.push(savedResult.warning);
+
+    updatePillStage(pill, 'Randy is scoring the lifecycle…');
+
+    const analysis = await requestEventAnalysisJson(
+      event, descriptions, contacts, opportunities, savedResult.raw, controller.signal,
+    );
+
+    // A superseding run (or abort) took over — a late stale response must
+    // never overwrite the newer job's result or paint over its board.
+    if (job !== eventJob || controller.signal.aborted) return;
+
+    const board = deriveEventBoard(analysis);
+    const timing = computeEventTiming(event);
+    job.status = 'done';
+    job.result = { analysis, board, event, descriptions, timing, coverageWarnings };
+    markPillSuccess(pill, 'Analysis ready');
+    paintEventResult(job);
+    notifyEventIfAway(job);
+  } catch (err) {
+    if (job !== eventJob || controller.signal.aborted) return;
+    console.error('[Event Analyzer] failed', err);
+    job.status = 'error';
+    job.error = err.message || 'Something went wrong. Try again.';
+    markPillFailure(pill, 'Analysis failed');
+    paintEventError(job);
+    notifyEventIfAway(job);
+  } finally {
+    if (job === eventJob) setEventAnalyzeDisabled(!selectedEventId);
+  }
+}
+
+// ── Event board render ──────────────────────────────────────────────
+function renderEventBoard({ analysis, board, event, descriptions, timing, coverageWarnings }) {
+  const frag = el('div', { class: 'event-board' });
+
+  frag.appendChild(buildEventBoardActions({ analysis, board, event, timing, coverageWarnings }));
+
+  const banner = buildEventCoverage(coverageWarnings);
+  if (banner) frag.appendChild(banner);
+
+  frag.appendChild(buildEventSummary({ analysis, board, event, timing }));
+  frag.appendChild(buildEventLegend());
+
+  frag.appendChild(el('div', { class: 'event-board__scroll' },
+    buildEventGrid({ board, event, descriptions }),
+  ));
+
+  frag.appendChild(buildEventLists(analysis));
+
+  return frag;
+}
+
+// ── PDF export toolbar ──────────────────────────────────────────────
+function buildEventBoardActions({ analysis, board, event, timing, coverageWarnings }) {
+  const btn = el('button', {
+    class: 'btn btn--secondary btn--sm event-board__pdf-btn',
+    type: 'button',
+  }, el('span', { class: 'forecast-board__pdf-icon', html: pdfIcon() }), 'Create PDF');
+
+  btn.addEventListener('click', () => handleCreateEventPdf({ analysis, board, event, timing, coverageWarnings, btn }));
+  return el('div', { class: 'forecast-board__actions' }, btn);
+}
+
+async function handleCreateEventPdf({ analysis, board, event, timing, coverageWarnings, btn }) {
+  if (btn.disabled) return;
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Building PDF…';
+  try {
+    const blob = await buildEventAnalysisPdf({
+      analysis, board, event,
+      timingLine: timing ? timing.daysLabel : '',
+      coverageWarnings,
+    });
+    const filename = eventAnalysisFilename(analysis.event_title || event?.title || 'Event');
+    downloadBlob(blob, filename);
+    showToast('Event analysis PDF downloaded', 'success');
+  } catch (err) {
+    console.error('[Event Analyzer] PDF export failed', err);
+    showToast(err.message || 'Could not create the PDF', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+// ── Coverage banner (non-fatal notices) ─────────────────────────────
+function buildEventCoverage(coverageWarnings) {
+  const list = (coverageWarnings || []).filter(Boolean);
+  if (!list.length) return null;
+  return el('div', { class: 'forecast-coverage event-coverage' },
+    el('span', { class: 'forecast-coverage__icon', html: warnIcon() }),
+    el('span', { class: 'forecast-coverage__text' }, list.join(' ')),
+  );
+}
+
+// ── Summary ─────────────────────────────────────────────────────────
+// Event execution has NO forecast bucket and NO win probability. The
+// summary shows lifecycle position, completed-stage count, completion %,
+// confidence, days until/since the event, and the event's status + type.
+function buildEventSummary({ analysis, board, event, timing }) {
+  const confidence = String(analysis.current_stage_confidence || 'low');
+  const pos = resolveEventPosition(board);
+  const completedStages = board.stages.filter(s => s.status === 'complete').length;
+
+  const headline = pos.def
+    ? (pos.complete ? `${pos.def.name} — lifecycle complete` : `${pos.def.name} (in progress)`)
+    : 'Not started';
+
+  const chips = el('div', { class: 'event-summary__chips' },
+    el('span', { class: 'event-summary__stage-chip' }, headline),
+    el('span', { class: 'event-summary__pct-chip' }, `${board.completionPct}% complete`),
+    el('span', { class: `event-summary__confidence event-summary__confidence--${confidence}` },
+      `Confidence: ${confidence}`),
+  );
+
+  const facts = el('div', { class: 'event-summary__facts' },
+    summaryFact('Completed stages', `${completedStages} of ${EVENT_STAGES.length}`),
+    summaryFact('Activities met', `${board.metCount} of ${board.totalActivities}`),
+    summaryFact('Timing', timing ? timing.daysLabel : '—'),
+    summaryFact('Status', String(event?.status || '—').trim() || '—'),
+    summaryFact('Type', String(event?.event_type || '—').trim() || '—'),
+  );
+
+  const children = [
+    el('div', { class: 'event-summary__eyebrow' }, 'Lifecycle position'),
+    chips,
+    facts,
+  ];
+  if (analysis.summary) {
+    children.push(el('p', { class: 'event-summary__text' }, analysis.summary));
+  }
+
+  const stateClass = pos.complete ? 'event-summary--complete'
+    : (pos.started ? 'event-summary--working' : 'event-summary--none');
+  return el('div', { class: `event-summary ${stateClass}` }, ...children);
+}
+
+function summaryFact(label, value) {
+  return el('div', { class: 'event-summary__fact' },
+    el('span', { class: 'event-summary__fact-label' }, label),
+    el('span', { class: 'event-summary__fact-value' }, value),
+  );
+}
+
+// A status legend so completion is never conveyed by colour alone.
+function buildEventLegend() {
+  const item = (status, label) => el('span', { class: 'event-legend__item' },
+    el('span', { class: `event-activity__icon event-activity__icon--${status}`, html: statusIcon(status) }),
+    el('span', {}, label),
+  );
+  return el('div', { class: 'event-legend', role: 'note', 'aria-label': 'Status key' },
+    item('met', 'Met'),
+    item('partial', 'Partial'),
+    item('not_met', 'Not met'),
+    item('no_evidence', 'No evidence'),
+    el('span', { class: 'event-legend__item' },
+      el('span', { class: 'event-legend__manual-dot' }, '✓'),
+      el('span', {}, 'Saved playbook (manual)'),
+    ),
+  );
+}
+
+// ── Stage grid ──────────────────────────────────────────────────────
+function buildEventGrid({ board, event, descriptions }) {
+  const grid = el('div', { class: 'event-grid' });
+  board.stages.forEach((stage) => {
+    grid.appendChild(buildEventStageColumn({ stage, event, descriptions }));
+  });
+  return grid;
+}
+
+function buildEventStageColumn({ stage, event, descriptions }) {
+  const chevron = el('div', { class: `event-chevron event-chevron--${stage.status}` },
+    el('span', { class: 'event-chevron__num' }, String(stage.index + 1)),
+    el('span', { class: 'event-chevron__name' }, stage.def.name),
+    el('span', { class: 'event-chevron__meta' }, stage.def.timing),
+  );
+
+  const list = el('ul', { class: 'event-activities' },
+    ...stage.activities.map(a => buildEventActivityItem({ activity: a, event, descriptions })),
+  );
+
+  const notes = stage.notes
+    ? el('p', { class: 'event-stage__notes' }, stage.notes)
+    : null;
+
+  return el('div', { class: `event-stage event-stage--${stage.status}` }, chevron, list, notes);
+}
+
+function buildEventActivityItem({ activity, event, descriptions }) {
+  const hasDetail = !!activity.evidence || activity.manual || activity.status === 'not_met';
+
+  const head = el('button', {
+    type: 'button',
+    class: `event-activity__head ${hasDetail ? '' : 'event-activity__head--flat'}`,
+    'aria-expanded': 'false',
+    disabled: !hasDetail,
+  },
+    el('span', { class: `event-activity__icon event-activity__icon--${activity.status}`, html: statusIcon(activity.status) }),
+    el('span', { class: 'event-activity__label' }, activity.label),
+    el('span', { class: 'event-activity__meta' },
+      el('span', { class: 'event-owner' }, ownerLabel(activity.owner)),
+      el('span', { class: `event-activity__status event-activity__status--${activity.status}` }, eventStatusLabel(activity.status)),
+      activity.manual ? el('span', { class: 'event-activity__manual' }, 'Saved playbook') : null,
+    ),
+  );
+
+  const item = el('li', { class: `event-activity event-activity--${activity.status}` }, head);
+
+  if (hasDetail) {
+    const detail = buildEventActivityDetail({ activity, event, descriptions });
+    detail.hidden = true;
+    head.addEventListener('click', () => {
+      const open = detail.hidden;
+      detail.hidden = !open;
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      item.classList.toggle('event-activity--open', open);
+    });
+    item.appendChild(detail);
+  }
+  return item;
+}
+
+function buildEventActivityDetail({ activity, event, descriptions }) {
+  const rows = [];
+
+  if (activity.manual) {
+    rows.push(el('p', { class: 'event-evidence__manual' },
+      'Manually confirmed in the saved playbook'
+      + (activity.source_date ? ` on ${formatDate(activity.source_date) || activity.source_date}` : '') + '.'));
+  } else if (activity.evidence) {
+    rows.push(el('blockquote', { class: 'event-evidence__quote' }, activity.evidence));
+  } else if (activity.status === 'not_met') {
+    rows.push(el('p', { class: 'event-evidence__none' }, 'A source indicates this has not happened.'));
+  }
+
+  const meta = [];
+  if (activity.source_type && activity.source_type !== 'none') {
+    meta.push(el('span', { class: 'event-evidence__type' }, sourceTypeLabel(activity.source_type)));
+  }
+  if (activity.source_date) {
+    meta.push(el('span', { class: 'event-evidence__date' }, formatDate(activity.source_date) || activity.source_date));
+  }
+
+  // "Open event" opens the correct event record (which lists its notes and
+  // sourced opportunities) — the relevant source for any evidence type.
+  if (event && (activity.evidence || activity.manual || activity.source_type !== 'none')) {
+    meta.push(el('button', {
+      type: 'button',
+      class: 'event-evidence__link',
+      onClick: () => openEventSource(event, activity),
+    }, 'Open event →'));
+  }
+
+  if (meta.length) rows.push(el('div', { class: 'event-evidence__meta' }, ...meta));
+  return el('div', { class: 'event-evidence' }, ...rows);
+}
+
+// Lazy import avoids a static import cycle with admin-events.js.
+async function openEventSource(event, activity) {
+  try {
+    const { openEventModal } = await import('./admin-events.js');
+    const container = document.getElementById('view-container') || document.body;
+    await openEventModal(event, container);
+  } catch (err) {
+    console.error('[Event Analyzer] could not open event', err);
+    showToast('Could not open the event record', 'error');
+  }
+}
+
+function buildEventLists(analysis) {
+  return el('div', { class: 'event-lists' },
+    buildEventListCard('What to do next', 'The most useful next steps', analysis.next_actions),
+    buildEventListCard('Gaps', 'What’s missing to finish the current stage', analysis.gaps),
+    buildEventListCard('Open questions', 'What the evidence leaves unanswered', analysis.open_questions),
+  );
+}
+
+function buildEventListCard(title, subtitle, items) {
+  const body = (items && items.length)
+    ? el('ul', { class: 'forecast-checklist' }, ...items.map(t => buildEventCheckItem(t)))
+    : el('p', { class: 'forecast-list__empty' }, 'Nothing flagged from the evidence.');
+  return el('div', { class: 'forecast-list-card' },
+    el('div', { class: 'forecast-list-card__title' }, title),
+    el('div', { class: 'forecast-list-card__subtitle' }, subtitle),
+    body,
+  );
+}
+
+function buildEventCheckItem(text) {
+  const checkbox = el('input', { type: 'checkbox', class: 'forecast-checklist__box' });
+  const label = el('label', { class: 'forecast-checklist__item' },
+    checkbox,
+    el('span', { class: 'forecast-checklist__text' }, text),
+  );
+  checkbox.addEventListener('change', () => {
+    label.classList.toggle('forecast-checklist__item--done', checkbox.checked);
+  });
+  return el('li', { class: 'forecast-checklist__row' }, label);
+}
+
+function eventStatusLabel(status) {
+  switch (status) {
+    case 'met': return 'Met';
+    case 'partial': return 'Partial';
+    case 'not_met': return 'Not met';
+    default: return 'No evidence';
+  }
+}
+
+function sourceTypeLabel(sourceType) {
+  switch (sourceType) {
+    case 'event_description': return 'Event note';
+    case 'event_metadata': return 'Event details';
+    case 'event_contacts': return 'Saved contacts';
+    case 'linked_opportunities': return 'Linked opportunity';
+    case 'saved_playbook': return 'Saved playbook';
+    default: return 'Source';
+  }
 }
