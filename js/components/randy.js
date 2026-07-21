@@ -2719,8 +2719,8 @@ function setWindowState(state) {
   updateWindowUI();
 
   // Lazy-load presets the first time the window opens
-  if (state === 'open' && loadedPresets.length === 0) {
-    loadCustomPrompts().then(p => { loadedPresets = p; renderPresets(); }).catch(() => {});
+  if (state === 'open') {
+    loadPresetsOnce();
   }
 
   // Save to localStorage
@@ -2817,6 +2817,57 @@ function updateWidgetUI() {
 // ── Assistant Mode Selector ───────────────────────────────────────
 const PRESET_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2'];
 
+// Shared with the dedicated Randy page's preset menu so the swatch shown
+// there matches the colored dot in the widget's own Mode dropdown.
+export const RANDY_PRESET_COLORS = PRESET_COLORS;
+
+// De-duplicated preset loader. Both the widget (when its window first opens)
+// and the dedicated Randy page ask for presets; sharing one in-flight promise
+// means the Custom_Prompts sheet is read once, not once per caller.
+let presetsLoadPromise = null;
+function loadPresetsOnce() {
+  if (loadedPresets.length > 0) return Promise.resolve(loadedPresets);
+  if (presetsLoadPromise) return presetsLoadPromise;
+  presetsLoadPromise = loadCustomPrompts()
+    .then(p => {
+      loadedPresets = Array.isArray(p) ? p : [];
+      presetsLoadPromise = null;
+      renderPresets();
+      notifyPresetChange();
+      return loadedPresets;
+    })
+    .catch(() => {
+      presetsLoadPromise = null;
+      return loadedPresets;
+    });
+  return presetsLoadPromise;
+}
+
+// Let external preset menus (the dedicated Randy page) know the preset list or
+// the active preset changed, so they can re-sync their own controls.
+function notifyPresetChange() {
+  try {
+    window.dispatchEvent(new CustomEvent('randy-preset-changed'));
+  } catch { /* ok */ }
+}
+
+// ── Public preset API (used by the dedicated Randy page) ──────────
+// The Randy page renders its own <select> preset menu, but it drives the SAME
+// activePresetId the widget's built-in Mode dropdown uses. Selecting a preset
+// from either place changes how Randy responds and keeps both controls synced.
+export function getRandyPresets() {
+  return loadedPresets.slice();
+}
+export function getActiveRandyPresetId() {
+  return activePresetId;
+}
+export function setActiveRandyPreset(promptId) {
+  selectPreset(promptId || null);
+}
+export function ensureRandyPresetsLoaded() {
+  return loadPresetsOnce();
+}
+
 function setPresetMenuOpen(open) {
   const menu = document.getElementById('randy-mode-menu');
   const btn = document.getElementById('randy-mode-btn');
@@ -2851,6 +2902,7 @@ function selectPreset(promptId) {
   }
 
   renderPresets();
+  notifyPresetChange();
 }
 
 function buildModeItem({ label, color, active }) {
@@ -3556,7 +3608,11 @@ export function initRandy() {
 
   // Reload presets whenever they are saved from the Setup page
   window.addEventListener('custom-prompts-changed', () => {
-    loadCustomPrompts().then(p => { loadedPresets = p; if (windowState === 'open') renderPresets(); }).catch(() => {});
+    loadCustomPrompts().then(p => {
+      loadedPresets = Array.isArray(p) ? p : [];
+      if (windowState === 'open') renderPresets();
+      notifyPresetChange();
+    }).catch(() => {});
   });
 
   // Allow voice-widget (which cannot import us without creating a cycle) to

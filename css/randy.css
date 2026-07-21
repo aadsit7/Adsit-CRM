@@ -1553,3 +1553,88 @@
 .randy-btn-wrap--hidden {
   display: none !important;
 }
+
+/* ============================================================
+   Dedicated Randy page — preset selection menu
+   ------------------------------------------------------------
+   The page adds a preset <select> as a static header above the
+   docked chat. The chat pane stacks that header over a host that
+   the shared widget fills (position: relative so the docked
+   widget's inset-0 layout anchors to it, not the whole pane).
+   ============================================================ */
+.randy-page__pane--chat {
+  flex-direction: column;
+}
+
+.randy-page__widget-host {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+
+.randy-preset-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px clamp(14px, 3vw, 40px);
+  border-bottom: 1px solid var(--color-border-light, #e5e7eb);
+  background: #f9fafb;
+}
+
+.randy-preset-bar__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  flex-shrink: 0;
+}
+
+.randy-preset-bar__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1.5px solid #9ca3af;
+}
+.randy-preset-bar__dot--default {
+  background: transparent;
+  border: 1.5px solid #9ca3af;
+}
+
+.randy-preset-bar__select {
+  flex: 0 1 240px;
+  min-width: 0;
+  padding: 7px 30px 7px 10px;
+  font-size: 13px;
+  color: #1f2937;
+  background-color: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.randy-preset-bar__select:hover { border-color: #9ca3af; }
+.randy-preset-bar__select:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: 1px;
+  border-color: #2F6BFF;
+}
+
+.randy-preset-bar__hint {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+.randy-preset-bar__hint[hidden] { display: none; }
+
+/* On the dedicated page the prominent preset menu above replaces the small
+   Mode pill in the control row, so hide the redundant one while docked. */
+.randy--docked .randy-btn-wrap--mode {
+  display: none !important;
+}
