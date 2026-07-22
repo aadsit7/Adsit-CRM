@@ -78,12 +78,24 @@ Health is derived **deterministically** (never by the model) in
   a concrete active signal (active opportunity, upcoming partner event, recent
   meeting/next step).
 - **Watch** — no meaningful activity for 46–90 days, or relationship evidence
-  with no concrete next step / active motion.
+  with no concrete next step / active motion, **or** a brand-new partnership
+  whose early conversation contains cautionary language (see below).
 - **At Risk** — no meaningful activity for >90 days, or a **recent** source that
-  explicitly documents disengagement / blocked progress / cancellation.
+  explicitly documents disengagement / blocked progress / cancellation — **but
+  only once the partnership is past the new-partner grace window**.
 - **Insufficient history** — a new partner (created within
   `NEW_PARTNER_GRACE_DAYS`, 90) with little/no activity is treated fairly, not
   automatically At Risk.
+
+**Partnership age is a first-class input.** Health factors in *how long the
+partnership has existed*, measured from the Partners row `created_at`; when that
+is missing it falls back to the **earliest known interaction** (`firstActivityDate`
+— "when we first engaged"). A relationship that has only just begun **cannot be
+At Risk** — it has not had time to deteriorate. So if the very first call happens
+to use words like "blocked", "on hold" or "not interested" (usually describing
+the *prospect's* situation, not the partnership), a partnership inside the grace
+window is surfaced as **Watch**, not At Risk. This is why the create date is
+recorded for partners, opportunities and events.
 
 An inactive CRM `status` is shown separately; it never silently becomes a health
 label. Boundary dates (exactly 45 / 90) are tested exactly.

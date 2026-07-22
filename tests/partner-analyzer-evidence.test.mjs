@@ -178,6 +178,9 @@ test('buildPartnerKpis computes won/active/pipeline/revenue deterministically', 
   assert.equal(k.nearestExpectedClose, '2026-09-15');
   // Most recent PAST activity (<= today): opp o1 updated 2026-06-25.
   assert.equal(k.mostRecentActivityDate, '2026-06-25');
+  // Earliest PAST activity (<= today): opp o3 updated 2026-04-01 — the fallback
+  // for partnership age when the Partners row has no created_at.
+  assert.equal(k.firstActivityDate, '2026-04-01');
 });
 
 test('KPIs never leak passwords / usernames / admin flags', () => {
@@ -307,6 +310,7 @@ test('computeHealthSignals derives lastActivity, active signal, evidence count',
   const sig = computeHealthSignals({ partner: P1, kpis, ...scoped, today: TODAY });
   assert.equal(sig.hasActiveSignal, true, 'active opp + upcoming event');
   assert.equal(sig.createdAt, '2026-01-15');
+  assert.equal(sig.firstActivityDate, '2026-04-01', 'earliest touchpoint exposed for age fallback');
   assert.ok(sig.evidenceCount > 0);
   assert.equal(sig.recentRiskEvidence, false);
 });

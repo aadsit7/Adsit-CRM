@@ -100,7 +100,13 @@ function wholeDaysBetween(fromMs, toMs) {
  *   MEANINGFUL activity (recent transcript/meeting, a dated note, a completed
  *   or upcoming event, a recent opportunity update). Empty/invalid → treated
  *   as "no meaningful activity".
- * @param {string} [signals.createdAt]  ISO date the partner row was created.
+ * @param {string} [signals.createdAt]  ISO date the partner row was created —
+ *   the PRIMARY signal for how long the partnership has existed.
+ * @param {string} [signals.firstActivityDate]  ISO date of the EARLIEST known
+ *   interaction (first transcript/meeting/note/completed event). Used as a
+ *   fallback for partnership age when `createdAt` is missing — i.e. "when we
+ *   first engaged" — so a relationship's age is still known even if the row
+ *   was never stamped with a created date.
  * @param {boolean} [signals.hasActiveSignal]  Is there at least one CONCRETE
  *   active signal — an active opportunity, an upcoming partner-specific event,
  *   a documented next step, or a recent meeting?
@@ -118,21 +124,39 @@ export function derivePartnerHealth(signals = {}, options = {}) {
   const todayMs = parseDay(options.today) ?? Date.now();
   const lastMs = parseDay(signals.lastActivityDate);
   const createdMs = parseDay(signals.createdAt);
+  const firstSeenMs = parseDay(signals.firstActivityDate);
   const hasActiveSignal = !!signals.hasActiveSignal;
   const recentRisk = !!signals.recentRiskEvidence;
   const evidenceCount = Number(signals.evidenceCount) || 0;
 
   const daysSinceActivity = lastMs != null ? wholeDaysBetween(lastMs, todayMs) : null;
 
-  // 1. Explicit, recent risk language always wins → At Risk (task rule).
+  // Partnership age. Prefer the explicit created date; when it is missing, fall
+  // back to the EARLIEST known interaction ("when we first engaged"). A young
+  // relationship has not had a fair chance to generate evidence, and — most
+  // importantly — a relationship that has only just begun cannot have
+  // *deteriorated*. `ageDays` is null only when we can find no origin at all.
+  const originMs = createdMs != null ? createdMs : firstSeenMs;
+  const ageDays = originMs != null ? wholeDaysBetween(originMs, todayMs) : null;
+  const isBrandNew = ageDays != null && ageDays <= NEW_PARTNER_GRACE_DAYS;
+
+  // 1. Explicit, recent risk language.
   if (recentRisk) {
+    // A brand-new partnership is NOT declared At Risk on risk language alone.
+    // In an early conversation, phrases like "blocked", "on hold" or "not
+    // interested" usually describe the prospect's own situation, not a
+    // relationship that is falling apart — the relationship is just getting
+    // started. Surface it as Watch (keep an eye on it) with an honest reason.
+    if (isBrandNew) {
+      return mk(RELATIONSHIP_HEALTH.WATCH, daysSinceActivity,
+        `A recent source contains cautionary language, but the partnership is only ${ageDays} day(s) old — too new to be At Risk. Watch as it develops.`);
+    }
     return mk(RELATIONSHIP_HEALTH.AT_RISK, daysSinceActivity,
       'A recent source explicitly documents disengagement, blocked progress, or a relationship risk.');
   }
 
   // 2. No meaningful activity at all.
   if (daysSinceActivity == null) {
-    const ageDays = createdMs != null ? wholeDaysBetween(createdMs, todayMs) : null;
     // A brand-new partner (or one with essentially no evidence) is judged
     // fairly — Insufficient history, never automatically At Risk.
     const isNew = ageDays == null || ageDays <= NEW_PARTNER_GRACE_DAYS;
@@ -143,7 +167,7 @@ export function derivePartnerHealth(signals = {}, options = {}) {
     // Established for longer than the grace window with no meaningful
     // activity on record → the relationship has gone cold.
     return mk(RELATIONSHIP_HEALTH.AT_RISK, null,
-      `No meaningful activity on record and the partner has existed for ${ageDays} days.`);
+      `No meaningful activity on record and the partnership has existed for ${ageDays} days.`);
   }
 
   // 3. Activity is on record — bucket by recency.

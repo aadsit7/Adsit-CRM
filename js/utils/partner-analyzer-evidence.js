@@ -62,6 +62,16 @@ function latestPastDate(dates, todayMs) {
   }
   return bestStr;
 }
+/** Oldest ISO date among `dates` that is <= today (the first real touchpoint). */
+function earliestPastDate(dates, todayMs) {
+  let best = null; let bestStr = '';
+  for (const d of dates) {
+    const ms = toMs(d);
+    if (ms == null || ms > todayMs) continue;
+    if (best == null || ms < best) { best = ms; bestStr = String(d).slice(0, 10); }
+  }
+  return bestStr;
+}
 
 // ── Opportunity status semantics (mirrors the app's real filters) ────
 // The app treats `status === 'Won'` as won and `status === 'Lost'` as lost
@@ -267,6 +277,9 @@ export function buildPartnerKpis({
   opps.forEach(o => activityDates.push(firstDate(o.updated_at, o.created_at)));
   completedEvents.forEach(e => activityDates.push(e.event_date));
   const mostRecentActivityDate = latestPastDate(activityDates, todayMs);
+  // The earliest real touchpoint — used as a fallback for partnership age when
+  // the Partners row has no created_at ("when we first engaged").
+  const firstActivityDate = earliestPastDate(activityDates, todayMs);
 
   // Distinct interactions: meetings whose transcript_id matches a transcript
   // are NOT double-counted (they are metadata for the same conversation).
@@ -307,6 +320,7 @@ export function buildPartnerKpis({
     firstUpcomingEventId: String((upcomingEvents[0] || {}).event_id || '').trim(),
 
     mostRecentActivityDate,
+    firstActivityDate,
     today: todayISO,
   };
 }
@@ -695,7 +709,7 @@ export function collectPartnerAnchors(evidence, ids = {}) {
  * @param {Array} [params.opportunities]
  * @param {Array} [params.events]
  * @param {string} [params.today]
- * @returns {{ lastActivityDate, createdAt, hasActiveSignal, recentRiskEvidence, evidenceCount }}
+ * @returns {{ lastActivityDate, createdAt, firstActivityDate, hasActiveSignal, recentRiskEvidence, evidenceCount }}
  */
 export function computeHealthSignals({
   partner, kpis, transcripts = [], opportunityDescriptions = [], eventDescriptions = [],
@@ -728,6 +742,7 @@ export function computeHealthSignals({
   return {
     lastActivityDate: k.mostRecentActivityDate || '',
     createdAt: String(partner && partner.created_at || k.created_at || '').trim(),
+    firstActivityDate: k.firstActivityDate || '',
     hasActiveSignal,
     recentRiskEvidence,
     evidenceCount,
