@@ -34,6 +34,11 @@
 var SHEET_ID = '18Yhe3Yiq9_eI7kBxtFOzdu6Pb0_VUx730TYjq1xPjzI';
 var DRIVE_FOLDER_ID = '1Jl86IHpClRaIFqM-RUQn-gzcCqYV9XTA';
 var ANTHROPIC_API_KEY = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+// Optional secondary AI backend. A preset can be set to run on Kimi
+// (Moonshot AI) instead of Anthropic; the portal proxies those chat
+// requests through this web app (action: 'kimiChat') so the key stays
+// server-side and the call is not blocked by browser CORS.
+var KIMI_API_KEY = PropertiesService.getScriptProperties().getProperty('KIMI_API_KEY');
 
 function doPost(e) {
   try {
@@ -97,6 +102,12 @@ function doPost(e) {
       return doGetConfig();
     }
 
+    // Proxy a chat completion to Kimi (Moonshot AI) for presets configured
+    // to run on Kimi instead of Anthropic. Keeps the key server-side.
+    if (payload.action === 'kimiChat') {
+      return doKimiChat(payload);
+    }
+
     throw new Error('Unknown action: ' + payload.action);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message }))
@@ -112,8 +123,57 @@ function doPost(e) {
 function doGetConfig() {
   return ContentService.createTextOutput(JSON.stringify({
     ok: true,
-    anthropicApiKey: ANTHROPIC_API_KEY
+    anthropicApiKey: ANTHROPIC_API_KEY,
+    // Whether a Kimi key is configured — reported as a boolean so the
+    // portal can show a connection status without exposing the key
+    // itself (Kimi requests are proxied through this web app, so the
+    // browser never needs the raw key).
+    hasKimiKey: !!KIMI_API_KEY
   })).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ============================================================
+// KIMI (Moonshot AI) chat proxy
+// ------------------------------------------------------------
+// The portal builds an OpenAI-style { model, messages, max_tokens,
+// temperature } payload and posts it here. We forward it to Moonshot
+// server-side (no browser CORS to worry about) and return the assistant
+// text in the same { ok, text } envelope the rest of the app expects.
+// ============================================================
+
+function doKimiChat(payload) {
+  if (!KIMI_API_KEY) throw new Error('KIMI_API_KEY is not set in this project’s Script Properties');
+
+  var body = {
+    model: payload.model || 'kimi-k2.5',
+    max_tokens: payload.max_tokens || 4096,
+    messages: payload.messages || []
+  };
+  if (typeof payload.temperature === 'number') body.temperature = payload.temperature;
+
+  var response = UrlFetchApp.fetch('https://api.moonshot.ai/v1/chat/completions', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'Authorization': 'Bearer ' + KIMI_API_KEY },
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  });
+
+  var result;
+  try {
+    result = JSON.parse(response.getContentText());
+  } catch (e) {
+    throw new Error('Kimi API returned a non-JSON response (HTTP ' + response.getResponseCode() + ')');
+  }
+  if (result && result.error) {
+    throw new Error('Kimi API error: ' + (result.error.message || JSON.stringify(result.error)));
+  }
+
+  var text = '';
+  if (result.choices && result.choices[0] && result.choices[0].message) {
+    text = result.choices[0].message.content || '';
+  }
+  return jsonOut({ ok: true, text: text });
 }
 
 // ============================================================

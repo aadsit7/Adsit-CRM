@@ -15,10 +15,14 @@
 
 import { CONFIG, setRuntimeConfig } from '../config.js';
 
-export async function fileApiRequest(payload) {
+export async function fileApiRequest(payload, { signal } = {}) {
   const res = await fetch(CONFIG.FILE_API_URL, {
     method: 'POST',
     body: JSON.stringify(payload),
+    // Optional AbortSignal so long-running proxied calls (e.g. the Kimi
+    // chat proxy) can be cancelled/timed out. Omitted → no signal, exactly
+    // as before, so every existing single-arg caller is unaffected.
+    ...(signal ? { signal } : {}),
   });
   if (!res.ok) {
     throw new Error(`File API returned ${res.status}`);
@@ -43,6 +47,10 @@ export async function syncAiKeyFromBackend() {
     const data = await fileApiRequest({ action: 'getConfig' });
     const key = (data && data.anthropicApiKey) ? String(data.anthropicApiKey).trim() : '';
     if (key) setRuntimeConfig('ANTHROPIC_API_KEY', key);
+    // The Kimi key stays server-side (its chat requests are proxied through
+    // the Apps Script). We only cache whether one is configured so the Setup
+    // page can show a Kimi connection status without ever handling the key.
+    setRuntimeConfig('KIMI_KEY_PRESENT', !!(data && data.hasKimiKey));
     return key;
   } catch (err) {
     console.warn('Could not load AI key from Apps Script:', err?.message);

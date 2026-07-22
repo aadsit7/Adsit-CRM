@@ -8,6 +8,7 @@ import { el, mount } from '../utils/dom.js';
 import { setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { syncAiKeyFromBackend } from '../utils/file-api.js';
+import { AI_PROVIDERS, normalizeProvider, providerLabel } from '../utils/ai-providers.js';
 
 export const title = 'Setup';
 
@@ -38,6 +39,11 @@ export async function render(container) {
   // into the app automatically on load. This row just reports whether that
   // pull succeeded so the admin can confirm the AI Assistant is powered.
   const aiKeyStatus = el('div', { class: 'form-hint' }, 'Checking…');
+
+  // Kimi (Moonshot) connectivity. Like the Anthropic key, KIMI_API_KEY lives
+  // as an Apps Script Script Property; here we only report whether one is set
+  // (Kimi requests are proxied server-side, so the key never loads into the app).
+  const kimiKeyStatus = el('div', { class: 'form-hint', style: { marginTop: '4px' } }, 'Checking…');
 
   // --- Spreadsheet ID display ---
   const sheetIdDisplay = el('input', {
@@ -100,11 +106,14 @@ export async function render(container) {
       el('div', { class: 'form-group' },
         el('label', { class: 'form-label' }, 'AI Assistant API Key'),
         aiKeyStatus,
+        kimiKeyStatus,
         el('div', { class: 'form-hint' },
-          'Managed automatically. The Anthropic key is read from the Google Apps Script ',
+          'Managed automatically. Keys are read from the Google Apps Script ',
           'web app (Project Settings → Script Properties → ',
           el('strong', {}, 'ANTHROPIC_API_KEY'),
-          '), so there is nothing to paste here. Update the key in Apps Script and it applies everywhere.'
+          ' and ',
+          el('strong', {}, 'KIMI_API_KEY'),
+          '), so there is nothing to paste here. Update a key in Apps Script and it applies everywhere.'
         )
       ),
 
@@ -132,6 +141,11 @@ export async function render(container) {
       el('h3', { class: 'setup-card__title' }, 'AI Assistant Presets'),
       el('p', { class: 'setup-card__description' },
         'Create up to 5 custom instruction sets for Randy. Activate one from the pill menu above Randy\'s chat input to change how he responds for that conversation.'
+      ),
+      el('p', { class: 'setup-card__description', style: { marginTop: '6px' } },
+        'Each preset can run on a different AI backend. Use the ',
+        el('strong', {}, 'AI Provider'),
+        ' slider to pick Anthropic (Claude) or Kimi (Moonshot) — requests you send while that preset is active use the chosen API.'
       ),
       el('p', { class: 'setup-card__description', style: { marginTop: '6px', fontStyle: 'italic' } },
         'Tip: naming a preset “Timeline PDF” activates automatic PDF generation mode — any message you send becomes the opportunity name.'
@@ -310,13 +324,23 @@ export async function render(container) {
   async function refreshAiKeyStatus() {
     aiKeyStatus.textContent = 'Checking…';
     aiKeyStatus.style.color = '';
+    kimiKeyStatus.textContent = 'Checking…';
+    kimiKeyStatus.style.color = '';
     const key = await syncAiKeyFromBackend();
     if (key) {
-      aiKeyStatus.textContent = `✓ Connected — key loaded from Apps Script (…${key.slice(-4)})`;
+      aiKeyStatus.textContent = `✓ Anthropic connected — key loaded from Apps Script (…${key.slice(-4)})`;
       aiKeyStatus.style.color = '#059669';
     } else {
-      aiKeyStatus.textContent = '✗ No key found. Add ANTHROPIC_API_KEY to the Apps Script Script Properties and redeploy.';
+      aiKeyStatus.textContent = '✗ Anthropic: no key found. Add ANTHROPIC_API_KEY to the Apps Script Script Properties and redeploy.';
       aiKeyStatus.style.color = '#dc2626';
+    }
+    // Kimi presence is stashed by syncAiKeyFromBackend (server-side key).
+    if (getRuntimeConfig('KIMI_KEY_PRESENT')) {
+      kimiKeyStatus.textContent = '✓ Kimi connected — KIMI_API_KEY is configured in Apps Script.';
+      kimiKeyStatus.style.color = '#059669';
+    } else {
+      kimiKeyStatus.textContent = '○ Kimi not configured — add KIMI_API_KEY in Apps Script to run presets on Kimi.';
+      kimiKeyStatus.style.color = 'var(--color-text-muted)';
     }
   }
 
@@ -396,6 +420,10 @@ export async function render(container) {
       style: { resize: 'vertical' },
     }, preset.instructions || '');
 
+    // Per-preset AI backend selector. Defaults to Anthropic; switching to
+    // Kimi routes this preset's requests through the Kimi (Moonshot) proxy.
+    const providerSlider = buildProviderSlider(preset.provider);
+
     const savePresetBtn = el('button', {
       class: 'btn btn--primary',
       style: { fontSize: '0.875rem', padding: '7px 14px' },
@@ -405,15 +433,17 @@ export async function render(container) {
         const instructions = instructionsInput.value.trim();
         if (!label) { showToast('Preset name is required', 'error'); return; }
         if (!instructions) { showToast('Instructions are required', 'error'); return; }
+        const provider = providerSlider.get();
         savePresetBtn.disabled = true;
         savePresetBtn.textContent = 'Saving...';
         try {
-          await saveCustomPrompt(preset.prompt_id || null, label, icon, instructions, preset._rowIndex || null);
-          showToast('Preset saved', 'success');
+          await saveCustomPrompt(preset.prompt_id || null, label, icon, instructions, preset._rowIndex || null, provider);
+          showToast(`Preset saved — runs on ${providerLabel(provider)}`, 'success');
           preset.prompt_id = preset.prompt_id || label;
           preset.label = label;
           preset.icon = icon;
           preset.instructions = instructions;
+          preset.provider = provider;
           window.dispatchEvent(new CustomEvent('custom-prompts-changed'));
           // Reload cards to get the updated _rowIndex for newly-created presets
           if (isNew) {
@@ -464,7 +494,11 @@ export async function render(container) {
         el('label', { class: 'form-label' }, 'Instructions'),
         instructionsInput
       ),
-      el('div', { style: { display: 'flex', justifyContent: 'flex-end' } },
+      el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap' } },
+        el('div', { class: 'preset-provider' },
+          el('label', { class: 'form-label', style: { marginBottom: '4px' } }, 'AI Provider'),
+          providerSlider.el
+        ),
         savePresetBtn
       )
     );
@@ -574,6 +608,42 @@ export async function render(container) {
     card.querySelector('input')?.focus();
     refreshAddBtn();
   }
+}
+
+// Two-option segmented slider for choosing a preset's AI backend
+// (Anthropic ↔ Kimi). Returns the wrapper element plus a get() that
+// reports the currently-selected provider id.
+function buildProviderSlider(currentProvider) {
+  let selected = normalizeProvider(currentProvider);
+
+  const options = AI_PROVIDERS.map(p =>
+    el('button', {
+      type: 'button',
+      class: 'provider-slider__opt',
+      role: 'radio',
+      title: p.hint,
+      dataset: { provider: p.id },
+      onClick: () => setSelected(p.id),
+    }, p.label)
+  );
+
+  const track = el('div', {
+    class: 'provider-slider',
+    role: 'radiogroup',
+    'aria-label': 'AI provider for this preset',
+  }, ...options);
+
+  function setSelected(id) {
+    selected = normalizeProvider(id);
+    options.forEach(opt => {
+      const active = opt.dataset.provider === selected;
+      opt.classList.toggle('is-active', active);
+      opt.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+  }
+  setSelected(selected);
+
+  return { el: track, get: () => selected };
 }
 
 function infoItem(label, description) {

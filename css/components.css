@@ -2488,6 +2488,53 @@
   outline-offset: 2px;
 }
 
+/* Per-preset AI provider selector (Anthropic ↔ Kimi) — a two-option
+   segmented slider. The active option gets the raised "thumb" treatment. */
+.preset-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-slider {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 3px;
+  background: var(--color-border-light);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  gap: 2px;
+}
+
+.provider-slider__opt {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 5px 16px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.provider-slider__opt:hover:not(.is-active) {
+  color: var(--color-text-primary);
+}
+
+.provider-slider__opt.is-active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+
+.provider-slider__opt:focus-visible {
+  outline: 2px solid var(--color-primary-lighter);
+  outline-offset: 2px;
+}
+
 .form-hint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);

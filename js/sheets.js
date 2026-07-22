@@ -4,6 +4,7 @@
 
 import { CONFIG, getRuntimeConfig } from './config.js';
 import { getAccessToken, getCurrentUser, clearAccessToken } from './auth.js';
+import { normalizeProvider } from './utils/ai-providers.js';
 
 /**
  * Get the effective Spreadsheet ID (runtime override or hardcoded).
@@ -443,7 +444,7 @@ const SHEET_HEADERS = {
   // source via readSheetAsObjects and degrades gracefully when it is absent.
   [CONFIG.SHEET_EVENT_PLAYBOOK]: ['event_id', 'event_title', 'stages_json', 'updated_at'],
   [CONFIG.SHEET_PARTNER_DOCUMENTS]: ['document_id', 'partner_id', 'partner_name', 'title', 'doc_type', 'html_content', 'status', 'created_at', 'updated_at'],
-  [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at'],
+  [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at', 'provider'],
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
   [CONFIG.SHEET_MEETING_INDEX]: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
 };
@@ -576,16 +577,20 @@ export async function seedSheetData() {
 
 export async function loadCustomPrompts() {
   try {
-    return await readSheetAsObjects(CONFIG.SHEET_CUSTOM_PROMPTS);
+    const rows = await readSheetAsObjects(CONFIG.SHEET_CUSTOM_PROMPTS);
+    // Normalize the provider column so every downstream consumer sees a
+    // known value. Presets saved before the column existed have no
+    // provider and fall back to the default (Anthropic).
+    return rows.map(r => ({ ...r, provider: normalizeProvider(r.provider) }));
   } catch {
     return [];
   }
 }
 
-export async function saveCustomPrompt(promptId, label, icon, instructions, rowIndex) {
+export async function saveCustomPrompt(promptId, label, icon, instructions, rowIndex, provider) {
   const now = new Date().toISOString();
   const id = promptId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `p_${Date.now()}`);
-  const row = [id, label, icon, instructions, now];
+  const row = [id, label, icon, instructions, now, normalizeProvider(provider)];
   if (rowIndex) {
     return updateRow(CONFIG.SHEET_CUSTOM_PROMPTS, rowIndex, row);
   }
@@ -599,7 +604,7 @@ export async function deleteCustomPrompt(rowIndex) {
 export async function saveReorderedPrompts(orderedPresets) {
   for (let i = 0; i < orderedPresets.length; i++) {
     const p = orderedPresets[i];
-    const row = [p.prompt_id, p.label, p.icon, p.instructions, p.created_at];
+    const row = [p.prompt_id, p.label, p.icon, p.instructions, p.created_at, normalizeProvider(p.provider)];
     await updateRow(CONFIG.SHEET_CUSTOM_PROMPTS, i + 2, row);
   }
 }

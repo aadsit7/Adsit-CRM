@@ -1026,7 +1026,13 @@ async function processUserInput(text) {
     const activePreset = loadedPresets.find(p => p.prompt_id === activePresetId);
     const presetInstructions = activePreset?.instructions?.trim();
     const activeMode = presetInstructions
-      ? { label: activePreset.label || 'Custom Mode', instructions: presetInstructions }
+      ? {
+          label: activePreset.label || 'Custom Mode',
+          instructions: presetInstructions,
+          // Which AI backend this preset runs on (anthropic | kimi).
+          // callClaudeStream routes on this; ai.js normalizes/defaults it.
+          provider: activePreset.provider,
+        }
       : null;
 
     const response = await callClaudeStream(
