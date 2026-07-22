@@ -111,7 +111,9 @@ test('a kimi preset routes to the Apps Script proxy with an OpenAI-style payload
   const body = JSON.parse(captured.opts.body);
   assert.equal(body.action, 'kimiChat');
   assert.equal(body.model, 'kimi-k2.5');
-  assert.equal(body.temperature, 0.3);
+  // kimi-k2.5 only accepts temperature 1 in its default mode; Moonshot 400s
+  // ("only 1 is allowed for this model") on any other value.
+  assert.equal(body.temperature, 1);
   assert.equal(body.max_tokens, 800); // simple tier budget
   assert.ok(Array.isArray(body.messages));
   // OpenAI shape: a leading system message carrying the base prompt + the

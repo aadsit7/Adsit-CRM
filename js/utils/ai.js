@@ -1129,7 +1129,12 @@ export async function callClaude(messages, sheetData, userMessage, signal, syste
 // its chat message is rendered from the returned string exactly as with
 // the Anthropic path.
 const KIMI_MODEL = 'kimi-k2.5';
-const KIMI_TEMPERATURE = 0.3;
+// kimi-k2.5 pins temperature to a fixed value per mode — 1.0 in its default
+// (thinking) mode, 0.6 in instant mode — and Moonshot returns HTTP 400
+// "invalid temperature: only 1 is allowed for this model" for anything else.
+// We call the model in its default mode, so this MUST be 1. Do not lower it
+// (a smaller value looks more deterministic but is rejected by the API).
+const KIMI_TEMPERATURE = 1;
 
 // Build the OpenAI-style payload Kimi expects, reusing the exact same
 // system prompt, data context, and complexity-tiered token budget as the
