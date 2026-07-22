@@ -16,6 +16,8 @@ import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { filterOpportunities, filterEvents } from '../utils/filters.js';
 import { stripHtml, ensureHtml, initQuillEditor } from '../components/quill-editor.js';
+import { buildDocumentsPanel } from '../components/documents-panel.js';
+import { fileApiRequest } from '../utils/file-api.js';
 
 export const title = 'Partner Detail';
 
@@ -91,6 +93,11 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
   });
 
   const initials = (partner.display_name || '').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase() || '?';
+
+  // Documents — drag-drop file uploads + AI "Analyze", the same panel used in
+  // the Opportunities and Events modals. Built here so its refresh() handle can
+  // be invoked after mount (below). See buildPartnerDocumentsSection.
+  const { section: documentsSection, docsHandle } = buildPartnerDocumentsSection(partner);
 
   const content = el('div', { class: 'partner-detail-page' },
     // Hero: condensed metadata strip + flat Revenue chart card
@@ -190,9 +197,73 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
     el('div', { class: 'partner-detail-page__section' },
       buildTranscriptsPanel(partner, transcripts),
     ),
+
+    // Section 4: Documents (file uploader + AI Analyze)
+    documentsSection,
   );
 
   mount(container, content);
+
+  // Load the partner's attached documents in the background so the page paints
+  // immediately, then the list fills in — mirrors the opp/event modals, which
+  // also fetch the document list via the Apps Script after the modal opens.
+  docsHandle.refresh();
+}
+
+// ============================================
+// Documents Panel (file uploader + AI Analyze)
+// ============================================
+
+/**
+ * Build the partner Documents section: a drag-and-drop uploader backed by the
+ * same Apps Script file API the Opportunities and Events views use. Files are
+ * keyed on partner_id, whose `p_` prefix is distinct from opportunity (`opp_`)
+ * and event (`evt_`) ids, so a partner's documents never cross-list with those
+ * entities even though all three share one backing sheet.
+ *
+ * "Analyze" runs the same generic document extraction as Opportunities and
+ * appends the formatted result as a new dated Description (a Transcripts row),
+ * since the partner's "Descriptions" section is backed by that sheet.
+ */
+function buildPartnerDocumentsSection(partner) {
+  const docsHandle = buildDocumentsPanel({
+    entityId: partner.partner_id,
+    // Drive folder name for this partner's uploads (analogous to the customer
+    // name for opportunities and the title for events).
+    getContextName: () => partner.display_name || '',
+    initialFiles: [],
+    loading: true,
+    onAnalyze: async (file) => {
+      const data = await fileApiRequest({
+        action: 'analyzeDocument',
+        docId: file.doc_id,
+        driveUrl: file.drive_url,
+      });
+      const fileName = data.fileName || file.file_name || 'Document';
+      const dateISO = todayISO();
+      const dateLabel = formatDate(dateISO);
+      const descriptionHtml =
+        `<h4>📄 ${escapeHtml(fileName)} — Analyzed ${escapeHtml(dateLabel)}</h4>` +
+        ensureHtml(data.html || '');
+      // A partner "description" is a Transcripts row:
+      // [transcript_id, partner_id, partner_name, conversation_date, transcript_text, created_at]
+      const values = [uuid('trn'), partner.partner_id, partner.display_name, dateISO, descriptionHtml, nowISO()];
+      if (isConfigured()) {
+        await appendRow(CONFIG.SHEET_TRANSCRIPTS, values);
+      } else {
+        addDemoRow(CONFIG.SHEET_TRANSCRIPTS, values);
+      }
+      file.analyzed = 'TRUE';
+      showToast('Document analyzed and added to descriptions', 'success');
+      // Reload so the new description appears (with a real row index) and the
+      // document shows as analyzed — the same full re-render every other
+      // mutation in this view uses.
+      reRender(partner.partner_id);
+    },
+  });
+
+  const section = el('div', { class: 'partner-detail-page__section' }, docsHandle.panel);
+  return { section, docsHandle };
 }
 
 function buildPartnerStatCell(label, value) {
@@ -672,6 +743,18 @@ function upcomingEventRow(evt, container) {
       }, evt.status || 'Upcoming')
     )
   );
+}
+
+// Escape user/AI-supplied text before interpolating it into the analyzed
+// document's HTML header (the file name). Mirrors the helper the Opportunities
+// and Events views use for the same purpose.
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export function cleanup() {}
