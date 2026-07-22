@@ -20,7 +20,6 @@ const ADMIN_NAV = [
   { path: '/admin/forecast', label: 'Analyzer', icon: 'forecast' },
   { path: '/admin/partners', label: 'Partners', icon: 'partners' },
   { path: '/admin/events', label: 'Events / JLG', icon: 'events', short: 'Events' },
-  { path: '/admin/leadcheck', label: 'Accounts', icon: 'leadcheck' },
   { label: 'Pricing', icon: 'pricing', externalUrl: 'https://aadsit7.github.io/Partner-Calculator/' },
   { path: '/admin/comp', label: 'Comp', icon: 'comp' },
   { path: '/admin/randy', label: 'Randy', icon: 'ai' },
