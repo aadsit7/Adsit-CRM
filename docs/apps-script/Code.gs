@@ -135,21 +135,29 @@ function doGetConfig() {
 // ============================================================
 // KIMI (Moonshot AI) chat proxy
 // ------------------------------------------------------------
-// The portal builds an OpenAI-style { model, messages, max_tokens,
-// temperature } payload and posts it here. We forward it to Moonshot
-// server-side (no browser CORS to worry about) and return the assistant
-// text in the same { ok, text } envelope the rest of the app expects.
+// The portal posts an OpenAI-style { model, messages, max_tokens } payload
+// here. We PIN the model to Kimi's current flagship and forward the chat to
+// Moonshot server-side (no browser CORS to worry about), returning the
+// assistant text in the same { ok, text } envelope the rest of the app expects.
 // ============================================================
 
 function doKimiChat(payload) {
   if (!KIMI_API_KEY) throw new Error('KIMI_API_KEY is not set in this project’s Script Properties');
 
+  // kimi-k3 (Kimi's current flagship) runs with thinking mode always on and
+  // LOCKS its sampling parameters: temperature is fixed at 1.0 and, per
+  // Moonshot's docs, must be OMITTED from the request. Any explicit temperature
+  // returns HTTP 400 "invalid temperature: only 1 is allowed for this model".
+  // So we PIN the model here (not just default it) and send NO temperature —
+  // this switches the whole portal to the latest model on deploy and cannot
+  // 400, even if an older cached page still asks for a previous model.
+  // (The ×0.6 temperature mapping some guides mention is for Moonshot's
+  // Anthropic-compatible endpoint, not this OpenAI /v1/chat/completions path.)
   var body = {
-    model: payload.model || 'kimi-k2.5',
+    model: 'kimi-k3',
     max_tokens: payload.max_tokens || 4096,
     messages: payload.messages || []
   };
-  if (typeof payload.temperature === 'number') body.temperature = payload.temperature;
 
   var response = UrlFetchApp.fetch('https://api.moonshot.ai/v1/chat/completions', {
     method: 'post',

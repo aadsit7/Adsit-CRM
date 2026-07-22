@@ -1128,13 +1128,15 @@ export async function callClaude(messages, sheetData, userMessage, signal, syste
 // contract — Randy's summary detection runs on the accumulated text and
 // its chat message is rendered from the returned string exactly as with
 // the Anthropic path.
-const KIMI_MODEL = 'kimi-k2.5';
-// kimi-k2.5 pins temperature to a fixed value per mode — 1.0 in its default
-// (thinking) mode, 0.6 in instant mode — and Moonshot returns HTTP 400
-// "invalid temperature: only 1 is allowed for this model" for anything else.
-// We call the model in its default mode, so this MUST be 1. Do not lower it
-// (a smaller value looks more deterministic but is rejected by the API).
-const KIMI_TEMPERATURE = 1;
+const KIMI_MODEL = 'kimi-k3';
+// kimi-k3 runs with thinking mode always on and LOCKS its sampling parameters:
+// temperature is fixed at 1.0 and, per Moonshot's docs, "should be omitted from
+// requests" — sending any explicit temperature returns HTTP 400 "invalid
+// temperature". So the Kimi payload below deliberately carries NO temperature
+// and lets the model apply its locked value. (The ×0.6 temperature mapping some
+// guides mention is for Moonshot's Anthropic-compatible endpoint, not this
+// OpenAI-style path.) The Apps Script proxy also pins the model and omits
+// temperature, so a stale cached copy of this file can't reintroduce a 400.
 
 // Build the OpenAI-style payload Kimi expects, reusing the exact same
 // system prompt, data context, and complexity-tiered token budget as the
@@ -1190,7 +1192,6 @@ export async function callKimiStream(messages, sheetData, userMessage, signal, s
     action: 'kimiChat',
     model: KIMI_MODEL,
     max_tokens,
-    temperature: KIMI_TEMPERATURE,
     messages: kimiMessages,
   }, { signal: withTimeout(signal) });
 
