@@ -238,13 +238,23 @@ function drawPositionStrip(doc, ctx, board, position, furthest, confidence, heal
     y += 12;
   }
 
-  // Health chip line.
+  // Health chip line + the deterministic reason, so the label is transparent
+  // and defensible (e.g. why a brand-new partnership is Watch, not At Risk).
   if (health && health.label) {
     setText(doc, healthColor(health.status));
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.text(`Relationship health: ${health.label}`, MARGIN, y);
-    y += 13;
+    y += 12;
+    const reason = String(health.reason || '').trim();
+    if (reason) {
+      setText(doc, MUTED_TEXT);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      const rlines = wrap(doc, reason, CONTENT_W).slice(0, 3);
+      doc.text(rlines, MARGIN, y);
+      y += rlines.length * 9.5 + 3;
+    }
   }
 
   // Completion bar.
@@ -267,10 +277,15 @@ function drawContext(doc, ctx, kpis, yStart) {
   let y = drawHeading(doc, 'CRM Context & KPIs', yStart) + 14;
   const k = kpis || {};
 
+  // When the partnership began: the created date if stamped, otherwise the
+  // earliest known interaction ("when we first engaged").
+  const relSince = String(k.created_at || k.firstActivityDate || '').trim();
+
   const rows = [
     ['CRM tier', k.tier || '—'],
     ['CRM status', k.status || '—'],
     ['Type / region', [k.partner_type, k.region].filter(Boolean).join(' · ') || '—'],
+    ['Relationship since', relSince ? (formatDate(relSince) || relSince) : '—'],
     ['Last activity', k.mostRecentActivityDate ? (formatDate(k.mostRecentActivityDate) || k.mostRecentActivityDate) : '—'],
     ['Transcripts', String(k.transcriptCount || 0)],
     ['Indexed meetings', String(k.meetingCount || 0)],

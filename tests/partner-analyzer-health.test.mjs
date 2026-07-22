@@ -13,6 +13,7 @@ import {
   RELATIONSHIP_HEALTH,
   HEALTH_HEALTHY_MAX_DAYS,
   HEALTH_WATCH_MAX_DAYS,
+  NEW_PARTNER_GRACE_DAYS,
 } from '../js/utils/partner-analyzer-health.js';
 
 const TODAY = '2026-07-21';
@@ -91,6 +92,61 @@ test('At Risk: established partner (>90 days old) with NO activity on record', (
   const r = H({ lastActivityDate: '', createdAt: daysAgo(200), hasActiveSignal: false });
   assert.equal(r.status, RELATIONSHIP_HEALTH.AT_RISK);
   assert.equal(r.daysSinceActivity, null);
+});
+
+// ── New-partnership age gate (the reported PDF scenario) ─────────────
+// A relationship that just began cannot have "deteriorated". Risk language in
+// an early conversation usually describes the prospect, not the partnership.
+test('brand-new partnership: first call today with risk language is Watch, NOT At Risk', () => {
+  const r = H({
+    lastActivityDate: daysAgo(0), createdAt: daysAgo(0),
+    hasActiveSignal: true, recentRiskEvidence: true,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.WATCH);
+  assert.equal(r.label, 'Watch');
+  assert.match(r.reason, /too new to be At Risk/i);
+});
+
+test('new partnership within the grace window + risk language → Watch', () => {
+  const r = H({
+    lastActivityDate: daysAgo(2), createdAt: daysAgo(NEW_PARTNER_GRACE_DAYS),
+    hasActiveSignal: true, recentRiskEvidence: true,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.WATCH, 'exactly at the grace boundary is still new');
+});
+
+test('age falls back to firstActivityDate when createdAt is missing (still new → Watch)', () => {
+  const r = H({
+    lastActivityDate: daysAgo(1), createdAt: '', firstActivityDate: daysAgo(1),
+    hasActiveSignal: true, recentRiskEvidence: true,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.WATCH, 'no created date → earliest interaction dates the partnership');
+});
+
+test('an ESTABLISHED partner (via firstActivityDate) with risk language is still At Risk', () => {
+  const r = H({
+    lastActivityDate: daysAgo(5), createdAt: '', firstActivityDate: daysAgo(200),
+    hasActiveSignal: true, recentRiskEvidence: true,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.AT_RISK, 'first engaged 200 days ago → old enough to be At Risk');
+});
+
+test('createdAt takes precedence over firstActivityDate for age', () => {
+  // Created 300 days ago even though the earliest surviving note is only 3 days
+  // old → established, so risk language still means At Risk.
+  const r = H({
+    lastActivityDate: daysAgo(3), createdAt: daysAgo(300), firstActivityDate: daysAgo(3),
+    hasActiveSignal: true, recentRiskEvidence: true,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.AT_RISK);
+});
+
+test('a positive first call (no risk language) is Healthy, not held back by newness', () => {
+  const r = H({
+    lastActivityDate: daysAgo(0), createdAt: daysAgo(0),
+    hasActiveSignal: true, recentRiskEvidence: false,
+  });
+  assert.equal(r.status, RELATIONSHIP_HEALTH.HEALTHY);
 });
 
 // ── Insufficient history (new partners handled fairly) ───────────────
