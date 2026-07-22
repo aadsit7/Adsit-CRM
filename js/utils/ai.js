@@ -7,6 +7,7 @@ import { CONFIG, getRuntimeConfig } from '../config.js';
 import { readSheetAsObjects } from '../sheets.js';
 import { stripHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from './file-api.js';
+import { normalizeProvider } from './ai-providers.js';
 
 // ── Cache State ────────────────────────────────────────────────────
 let cachedSheetData = null;
@@ -1010,6 +1011,13 @@ function requireApiKey() {
  * completes. Aborts cleanly when the supplied AbortSignal fires.
  */
 export async function callClaudeStream(messages, sheetData, userMessage, signal, systemPrompt, onChunk, activeMode = null) {
+  // Provider routing: when the active preset is set to Kimi, hand off to the
+  // Kimi (Moonshot) path. Checked BEFORE requireApiKey() so a Kimi-only setup
+  // (no Anthropic key configured) still works.
+  if (normalizeProvider(activeMode?.provider) === 'kimi') {
+    return callKimiStream(messages, sheetData, userMessage, signal, systemPrompt, onChunk, activeMode);
+  }
+
   const apiKey = requireApiKey();
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1102,6 +1110,88 @@ export async function callClaude(messages, sheetData, userMessage, signal, syste
     .filter(block => block.type === 'text')
     .map(block => block.text)
     .join('\n');
+}
+
+// ── Kimi (Moonshot AI) provider ────────────────────────────────────
+//
+// A preset can be configured to run on Kimi instead of Anthropic. Kimi
+// exposes an OpenAI-compatible /chat/completions endpoint, but this app
+// is a static site and Moonshot does not offer a browser-CORS path the
+// way Anthropic does (anthropic-dangerous-direct-browser-access). So the
+// request is proxied through the Apps Script web app (action: 'kimiChat'),
+// which calls Moonshot server-side and returns the completion text. The
+// Kimi key therefore lives only in the Apps Script Script Properties and
+// never reaches the browser.
+//
+// The proxy returns the full completion (no token streaming), so we call
+// onChunk once with the whole text. That preserves the callClaudeStream
+// contract — Randy's summary detection runs on the accumulated text and
+// its chat message is rendered from the returned string exactly as with
+// the Anthropic path.
+const KIMI_MODEL = 'kimi-k2.5';
+const KIMI_TEMPERATURE = 0.3;
+
+// Build the OpenAI-style payload Kimi expects, reusing the exact same
+// system prompt, data context, and complexity-tiered token budget as the
+// Anthropic path so a preset behaves the same on either backend. The one
+// structural difference: OpenAI-format has a single `system` role message
+// and no client-side cache_control, so the stable context that Anthropic
+// splits into a cached block is concatenated into the final user turn.
+function buildKimiPayload(messages, sheetData, userMessage, systemPrompt, activeMode) {
+  const tier = classifyQueryComplexity(userMessage);
+  const tierCfg = TIER_CONFIG[tier];
+  const isSimple = tier === 'simple';
+
+  const stableContext = isSimple ? null : buildStableContext(sheetData);
+  const queryContext  = isSimple ? null : buildQueryContext(sheetData, userMessage);
+
+  const modeReminder = activeMode
+    ? `\n\n<mode_reminder>Active Mode: "${String(activeMode.label).replace(/[<>]/g, '')}". Follow the <active_mode> instructions in the system prompt exactly. If any base instruction conflicts with the Mode, the Mode wins.</mode_reminder>`
+    : '';
+
+  // System message = base prompt + the active-mode block (same block the
+  // Anthropic path appends as a second system entry), flattened into one.
+  let systemText = systemPrompt || SYSTEM_PROMPT;
+  if (activeMode) systemText += `\n\n${buildModeSystemBlock(activeMode)}`;
+
+  const outMessages = [{ role: 'system', content: systemText }];
+  messages.forEach((m, i) => {
+    if (i === messages.length - 1 && m.role === 'user') {
+      let userText = m.content;
+      if (!isSimple) {
+        const tail = queryContext ? `${m.content}\n\n---${queryContext}` : m.content;
+        userText = `${stableContext}\n\n---\n\n${tail}`;
+      }
+      outMessages.push({ role: 'user', content: `${userText}${modeReminder}` });
+    } else {
+      outMessages.push({ role: m.role, content: m.content });
+    }
+  });
+
+  return { messages: outMessages, max_tokens: tierCfg.max_tokens };
+}
+
+/**
+ * Stream (in one shot) a Kimi response via the Apps Script proxy.
+ * Signature mirrors callClaudeStream so it is a drop-in for the routing
+ * dispatch. Returns the full text; invokes onChunk(full, full) once.
+ */
+export async function callKimiStream(messages, sheetData, userMessage, signal, systemPrompt, onChunk, activeMode = null) {
+  const { messages: kimiMessages, max_tokens } = buildKimiPayload(
+    messages, sheetData, userMessage, systemPrompt, activeMode
+  );
+
+  const data = await fileApiRequest({
+    action: 'kimiChat',
+    model: KIMI_MODEL,
+    max_tokens,
+    temperature: KIMI_TEMPERATURE,
+    messages: kimiMessages,
+  }, { signal: withTimeout(signal) });
+
+  const full = (data && typeof data.text === 'string') ? data.text : '';
+  if (full && onChunk) onChunk(full, full);
+  return full;
 }
 
 // ── MAP PDF helpers ────────────────────────────────────────────────
