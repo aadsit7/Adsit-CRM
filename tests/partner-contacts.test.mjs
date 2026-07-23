@@ -23,6 +23,7 @@ import {
   partnerContactFromRow,
   mergeExtractedContacts,
   sortContactsForDisplay,
+  applyPartnerCompanyDefaults,
 } from '../js/utils/partner-contacts.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────
@@ -810,6 +811,86 @@ test('merge: an ambiguous bare name or a contradicting email stays a separate ro
   });
   assert.equal(contradicting.toUpdate.length, 0);
   assert.equal(contradicting.toAppend.length, 1);
+});
+
+// ── Company default (blank company → partner name) ───────────────────
+test('applyPartnerCompanyDefaults: fills blanks in place, stamps updated_at, returns the changed rows', () => {
+  const contacts = [
+    { name: 'Jane Doe', company: '', updated_at: 'old' },
+    { name: 'Raj Patel', company: 'Insight Enterprises, Inc.', updated_at: 'old' },
+    { name: 'Ana Ruiz', company: '   ', updated_at: 'old' },
+  ];
+  const changed = applyPartnerCompanyDefaults(contacts, 'Insight', '2026-07-23T10:00:00Z');
+  assert.equal(changed.length, 2);
+  assert.equal(contacts[0].company, 'Insight');
+  assert.equal(contacts[0].updated_at, '2026-07-23T10:00:00Z');
+  assert.equal(contacts[1].company, 'Insight Enterprises, Inc.'); // richer saved value kept
+  assert.equal(contacts[1].updated_at, 'old');
+  assert.equal(contacts[2].company, 'Insight');
+  // Idempotent: a second pass finds nothing blank.
+  assert.equal(applyPartnerCompanyDefaults(contacts, 'Insight', '2026-07-24T10:00:00Z').length, 0);
+});
+
+test('applyPartnerCompanyDefaults: blank partner name or junk entries are a safe no-op', () => {
+  const contacts = [{ name: 'Jane Doe', company: '' }];
+  assert.equal(applyPartnerCompanyDefaults(contacts, '   ').length, 0);
+  assert.equal(contacts[0].company, '');
+  assert.equal(applyPartnerCompanyDefaults(null, 'Insight').length, 0);
+  const mixed = [null, 'junk', { name: 'Ok', company: '' }];
+  assert.equal(applyPartnerCompanyDefaults(mixed, 'Insight').length, 1);
+  assert.equal(mixed[2].company, 'Insight');
+});
+
+test('merge: a new row with no verified company gets the partner name as its company', () => {
+  const { toAppend } = mergeExtractedContacts({
+    existing: [],
+    extracted: [{
+      name: 'Raj Patel', role: '', company: '', email: 'raj.patel@getnerdio.com', phone: '', evidence: '',
+      sources: [{ type: 'meeting', id: 'm1', label: 'QBR', date: '2026-06-20' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(toAppend.length, 1);
+  assert.equal(toAppend[0].company, 'Nerdio');
+});
+
+test('merge: a verbatim-verified company variant beats the default on a new row', () => {
+  const { toAppend } = mergeExtractedContacts({
+    existing: [],
+    extracted: [{
+      name: 'Dana Lee', role: '', company: 'Insight Enterprises, Inc.', email: 'dana@insight.com', phone: '', evidence: '',
+      sources: [{ type: 'description', id: 't1', label: 'Description', date: '2026-06-10' }],
+    }],
+    partnerId: 'p1', partnerName: 'Insight', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(toAppend.length, 1);
+  assert.equal(toAppend[0].company, 'Insight Enterprises, Inc.');
+});
+
+test('merge: a matched row still blank after fills gets the partner name — saved companies untouched', () => {
+  const blankCompany = mergeExtractedContacts({
+    existing: [existingRow({ company: '' })],
+    extracted: [{
+      name: 'Jane Doe', role: '', company: '', email: 'jane.doe@acme.com', phone: '', evidence: '',
+      sources: [{ type: 'attachment', id: 'doc_1', label: 'attendees.xlsx', date: '2026-06-01' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(blankCompany.toUpdate.length, 1);
+  assert.equal(blankCompany.toUpdate[0].company, 'Nerdio');
+  assert.equal(blankCompany.toUpdate[0].updated_at, '2026-07-22T10:00:00Z');
+
+  // The same extraction against a row with a saved company changes nothing.
+  const savedCompany = mergeExtractedContacts({
+    existing: [existingRow()], // company: 'Acme Corp'
+    extracted: [{
+      name: 'Jane Doe', role: '', company: '', email: 'jane.doe@acme.com', phone: '', evidence: '',
+      sources: [{ type: 'attachment', id: 'doc_1', label: 'attendees.xlsx', date: '2026-06-01' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(savedCompany.toUpdate.length, 0);
+  assert.equal(savedCompany.unchanged, 1);
 });
 
 // ── Display sort ─────────────────────────────────────────────────────

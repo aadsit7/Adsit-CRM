@@ -26,6 +26,7 @@ import {
   partnerContactRowValues,
   partnerContactFromRow,
   sortContactsForDisplay,
+  applyPartnerCompanyDefaults,
 } from '../utils/partner-contacts.js';
 import { requestPartnerContactsExtraction } from '../utils/partner-contacts-client.js';
 import {
@@ -87,6 +88,18 @@ export async function render(container, params) {
         .filter(c => String(c.partner_id || '').trim() === partnerId)
         .map(partnerContactFromRow)
     );
+
+    // Company backfill: every row in this table is a partner-side person
+    // (the affiliation rule), so a blank Company means the partner itself.
+    // Fill it for this render and persist the fix to Partner_Contacts in
+    // the background — the sheet then carries the company on every contact,
+    // for this page and any other reader of the spreadsheet. One-time per
+    // row: once saved, later loads find nothing blank.
+    const companyBackfill = applyPartnerCompanyDefaults(partnerContacts, partner.display_name, nowISO());
+    if (companyBackfill.length && !companyBackfillPromise) {
+      companyBackfillPromise = persistContactCompanyBackfill(companyBackfill)
+        .finally(() => { companyBackfillPromise = null; });
+    }
 
     renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts);
   } catch (err) {
@@ -322,6 +335,28 @@ function buildPartnerStatCell(label, value) {
 // re-renders every mutation in this view performs.
 const expandedContactSections = new Set();
 
+// The in-flight load-time company backfill, if any. Deleting a contact
+// awaits it first: a delete shifts the row indexes beneath it, and a
+// pending in-place update aimed at a pre-delete index would land on the
+// wrong row. Also stops overlapping re-renders from starting a second,
+// identical backfill pass.
+let companyBackfillPromise = null;
+
+// Persist the company backfill (blank → partner name) without blocking the
+// page paint — the filled values are already on screen. A failure only
+// logs: the next page open retries, and nothing else depends on it.
+async function persistContactCompanyBackfill(contacts) {
+  for (const c of contacts) {
+    if (!c._rowIndex) continue;
+    try {
+      await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, c._rowIndex, partnerContactRowValues(c));
+    } catch (err) {
+      console.warn('[Partner Contacts] company backfill not saved:', err.message);
+      return; // the remaining rows would almost certainly fail the same way
+    }
+  }
+}
+
 const CONTACT_SOURCE_TYPE_LABELS = {
   description: 'Description',
   meeting: 'Meeting',
@@ -481,9 +516,15 @@ function openContactModal(partner, existingContact, onSaved) {
     return { input, group: el('div', { class: 'form-group' }, el('label', { class: 'form-label', for: id }, label), input) };
   };
 
+  // Company pre-fills with the partner: adding a contact from this partner's
+  // page means a partner-side person, so their company is the partner
+  // organization unless the user types something more specific. A saved
+  // (blank-company) row gets the same default when reopened for editing.
+  const partnerCompany = partner.display_name || '';
+
   const name = field('Name *', 'contact-name', isEdit ? existingContact.name : '');
   const role = field('Role / Title', 'contact-role', isEdit ? existingContact.role : '');
-  const company = field('Company', 'contact-company', isEdit ? existingContact.company : '');
+  const company = field('Company', 'contact-company', (isEdit ? existingContact.company : '') || partnerCompany);
   const email = field('Email', 'contact-email', isEdit ? existingContact.email : '', 'email');
   const phone = field('Phone', 'contact-phone', isEdit ? existingContact.phone : '', 'tel');
 
@@ -515,12 +556,16 @@ function openContactModal(partner, existingContact, onSaved) {
       saveBtn.textContent = 'Saving...';
       try {
         const now = nowISO();
+        // A cleared Company snaps back to the partner name on save — every
+        // saved contact carries a company, so the sheet is self-explanatory
+        // wherever it's read.
+        const companyVal = company.input.value.trim() || partnerCompany;
         if (isEdit) {
           const updated = {
             ...existingContact,
             name: nameVal,
             role: role.input.value.trim(),
-            company: company.input.value.trim(),
+            company: companyVal,
             email: emailVal,
             phone: phone.input.value.trim(),
             updated_at: now,
@@ -535,7 +580,7 @@ function openContactModal(partner, existingContact, onSaved) {
             partner_name: partner.display_name || '',
             name: nameVal,
             role: role.input.value.trim(),
-            company: company.input.value.trim(),
+            company: companyVal,
             email: emailVal,
             phone: phone.input.value.trim(),
             evidence: '',
@@ -577,6 +622,9 @@ async function handleDeleteContact(contact, partner) {
   if (!confirmed) return;
 
   try {
+    // Let any in-flight company backfill finish first — its in-place row
+    // updates must not race a delete that shifts row indexes.
+    if (companyBackfillPromise) await companyBackfillPromise;
     await deleteRow(CONFIG.SHEET_PARTNER_CONTACTS, contact._rowIndex);
     showToast('Contact removed', 'success');
     reRender(partner.partner_id);

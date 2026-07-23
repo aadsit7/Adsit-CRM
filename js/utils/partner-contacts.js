@@ -43,6 +43,15 @@
 // everyone else can only fill blanks / add provenance on rows that already
 // exist. Manual Add Contact bypasses this by design.
 //
+// COMPANY DEFAULT (the partner name):
+// By the affiliation rule, every saved row is a person on the partner's
+// side — so the partner organization IS their company. A blank company is
+// therefore defaulted to the partner name whenever a row is persisted
+// (manual add, scan merge, and a load-time backfill of older rows via
+// applyPartnerCompanyDefaults). Extraction/verification stays verbatim —
+// only the value that could never be anything else is defaulted; a richer
+// verified form ("Insight Enterprises, Inc.") is kept over the default.
+//
 // Attachment (Drive file) contacts arrive from the Apps Script attendee
 // pipeline, which is deterministic for spreadsheets and strictly grounded
 // for documents — they are mapped (and affiliation-filtered), not
@@ -956,6 +965,29 @@ export function partnerContactFromRow(row) {
   return c;
 }
 
+/**
+ * The company default: every row in this table is, by the affiliation rule,
+ * a person on the partner's side — so a blank company means the partner
+ * organization. Fill it in place on every contact that lacks one (stamping
+ * updated_at when a timestamp is given) and return the changed contacts so
+ * the caller can persist them. Non-blank companies — manual entries and
+ * verbatim-verified variants like "Insight Enterprises, Inc." — are never
+ * touched. Idempotent: a second pass changes nothing.
+ */
+export function applyPartnerCompanyDefaults(contacts, partnerName, nowIso = '') {
+  const company = String(partnerName || '').trim();
+  const changed = [];
+  if (!company) return changed;
+  for (const c of contacts || []) {
+    if (!c || typeof c !== 'object') continue;
+    if (String(c.company || '').trim()) continue;
+    c.company = company;
+    if (nowIso) c.updated_at = nowIso;
+    changed.push(c);
+  }
+  return changed;
+}
+
 // ── Merge (scan results into existing saved contacts) ───────────────
 function minDate(a, b) {
   if (!a) return b || '';
@@ -1003,6 +1035,11 @@ function defaultMakeId() {
  * `skippedNew` — a scan can enrich existing rows freely, but it can't
  * mint a row for someone without a partner-domain email. (Manual
  * Add Contact is unaffected; it doesn't go through this merge.)
+ *
+ * Every row this merge persists carries a company: when neither the saved
+ * row nor the verified extraction states one, it defaults to the partner
+ * name (the affiliation rule makes that definitionally true). A saved or
+ * verified company is never overwritten by the default.
  *
  * @param {object} params
  * @param {Array} params.existing   partnerContactFromRow() objects.
@@ -1065,7 +1102,9 @@ export function mergeExtractedContacts({
         partner_name: partnerName,
         name: x.name || '',
         role: x.role || '',
-        company: x.company || '',
+        // Company default: a verified value wins; otherwise the partner
+        // name — this row is a partner-side person by the affiliation rule.
+        company: x.company || partnerName || '',
         email: x.email || '',
         phone: x.phone || '',
         evidence: x.evidence || '',
@@ -1087,6 +1126,13 @@ export function mergeExtractedContacts({
         if (f === 'email') { const ek = String(x.email).toLowerCase(); if (!byEmail.has(ek)) byEmail.set(ek, target); }
         changed = true;
       }
+    }
+    // Company default on a matched row: still blank after the fill above
+    // (nothing saved, nothing verified in the sources) → the partner name.
+    // Only ever fills a blank, so saved values and manual edits survive.
+    if (!target.company && partnerName) {
+      target.company = partnerName;
+      changed = true;
     }
     // Upgrade to a strictly fuller form of the same name ("Aaron" →
     // "Aaron Adsit"). Equal completeness never overwrites, so a manual
