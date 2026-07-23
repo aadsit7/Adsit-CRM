@@ -59,6 +59,12 @@ import {
 } from '../utils/partner-analyzer-stages.js';
 import { buildPartnerSelectorOptions } from '../utils/partner-analyzer-evidence.js';
 import { buildPartnerAnalysisPdf, partnerAnalysisFilename } from '../utils/partner-analyzer-pdf-builder.js';
+// ── Contact Analyzer (fourth entity mode: partner → contact → brief) ──
+import { partnerContactFromRow } from '../utils/partner-contacts.js';
+import { loadCustomPrompts } from '../sheets.js';
+import { requestContactBriefJson } from '../utils/contact-analyzer-client.js';
+import { deriveContactBriefBoard } from '../utils/contact-analyzer-schema.js';
+import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-analyzer-pdf-builder.js';
 
 // ── Module state ─────────────────────────────────────────────────────
 // This state deliberately OUTLIVES the view. The analysis runs as a
@@ -82,8 +88,8 @@ let activeJob = null;
 // tab restores the last-used board. Each mode owns its OWN selection and
 // background job; nothing about one flow can touch another's state, so one
 // mode's result can never land on another's board.
-let mode = 'opportunity'; // 'opportunity' | 'event' | 'partner'
-const MODES = ['opportunity', 'event', 'partner'];
+let mode = 'opportunity'; // 'opportunity' | 'event' | 'partner' | 'contact'
+const MODES = ['opportunity', 'event', 'partner', 'contact'];
 let modeSlotEl = null;    // the container the active mode panel renders into
 
 // ── Event Analyzer state (parallel to the opportunity state above) ────
@@ -110,6 +116,34 @@ let partnerJob = null;
 //     controller: AbortController, pill,
 //     result: { analysis, board, kpis, health, partner, coverage } | null,
 //     error: string | null }
+
+// ── Contact Analyzer state (parallel to the three above) ─────────────
+// The Contacts tab picks a partner, then one of that partner's saved
+// contacts, and produces an Account Intelligence Brief. Like the other
+// modes it owns its OWN selection and background job (contactJob), keyed by
+// a typed job key so a stale Contact-A brief can never render under
+// Contact B. The Lead Search preset instructions (the methodology the brief
+// is built from) are loaded once and cached in module state.
+let allContacts = [];              // partnerContactFromRow objects (all partners)
+let selectedContactPartnerId = '';
+let selectedContactId = '';
+let contactJob = null;
+let leadSearchInstructions = null; // null = not loaded yet; '' = none found
+// contactJob shape:
+//   { key: { entityType:'contact', entityId:contactId, runId }, partnerId, label,
+//     status: 'running' | 'done' | 'error',
+//     controller: AbortController, pill,
+//     result: { brief, board, contact, partner } | null,
+//     error: string | null }
+
+// Contact-mode twin of abortPartnerInflight.
+function abortContactInflight() {
+  if (contactJob && contactJob.status === 'running') {
+    if (contactJob.controller) { try { contactJob.controller.abort(); } catch { /* ignore */ } }
+    if (contactJob.pill) { try { destroyPill(contactJob.pill); } catch { /* ignore */ } }
+    contactJob = null;
+  }
+}
 
 // Partner-mode twin of abortInflight / abortEventInflight.
 function abortPartnerInflight() {
@@ -210,14 +244,23 @@ export async function render(container) {
     // Load each board's selector source in parallel. Opportunities are
     // required (a failure is fatal, as before); events and partners are
     // optional — a read failure just leaves that picker empty.
-    const [opportunities, events, partners] = await Promise.all([
+    const [opportunities, events, partners, contactRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
       readSheetAsObjects(CONFIG.SHEET_EVENTS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_PARTNERS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(() => []),
     ]);
     // The partner selector excludes admin rows / rows without a valid id,
     // sorts by display_name, and disambiguates duplicate names (pure helper).
     allPartners = buildPartnerSelectorOptions(partners);
+    // Contacts for the Contacts tab — one dropdown filtered per partner. A
+    // read failure just leaves the picker empty (the tab is optional).
+    allContacts = (contactRows || [])
+      .filter(r => r && r.contact_id && r.partner_id)
+      .map(partnerContactFromRow);
+    // Warm the Lead Search preset (the brief's methodology) in the background
+    // so it's ready when the user clicks Analyze; never blocks the view.
+    ensureLeadSearchInstructions();
     allOpps = filterOpportunities(opportunities)
       .filter(o => o.opportunity_id)
       .sort((a, b) => {
@@ -270,7 +313,7 @@ function buildView() {
 }
 
 function buildModeBar() {
-  const labels = { opportunity: 'Opportunity', event: 'Event', partner: 'Partner' };
+  const labels = { opportunity: 'Opportunity', event: 'Event', partner: 'Partner', contact: 'Contacts' };
   const mk = (key) => el('button', {
     type: 'button',
     class: `analyzer-modebar__tab ${mode === key ? 'analyzer-modebar__tab--active' : ''}`,
@@ -290,6 +333,7 @@ function fillModeSlot() {
   if (!modeSlotEl) return;
   const panel = mode === 'partner' ? buildPartnerPanel()
     : mode === 'event' ? buildEventPanel()
+    : mode === 'contact' ? buildContactPanel()
     : buildOppPanel();
   modeSlotEl.replaceChildren(panel);
 }
@@ -298,6 +342,7 @@ function fillModeSlot() {
 function restoreForMode() {
   if (mode === 'partner') restorePartnerJob();
   else if (mode === 'event') restoreEventJob();
+  else if (mode === 'contact') restoreContactJob();
   else restoreActiveJob();
 }
 
@@ -2031,4 +2076,536 @@ function partnerSourceLinkLabel(sourceType) {
   if (sourceType === 'opportunity' || sourceType === 'opportunity_description') return 'Open opportunity';
   if (sourceType === 'event' || sourceType === 'event_description' || sourceType === 'event_contacts') return 'Open event';
   return 'Open partner';
+}
+
+// ============================================================
+// CONTACT ANALYZER
+// ============================================================
+// The fourth Analyzer mode. The user picks a PARTNER, then one of that
+// partner's saved contacts, and Randy produces an "Account Intelligence
+// Brief" for that ONE person — the executive summary, contact assessment,
+// influence scores, missing-stakeholder map, likely org map, account risk,
+// recommended next move, and seller focus (matching the reference brief).
+//
+// The brief's METHODOLOGY comes from the team's tuned "Lead Search" preset
+// (the same instructions the manual copy-into-Randy flow uses); the analysis
+// combines that with the contact's CRM evidence, any prior LeadCheck, the
+// partner/deal context, and live web research (contact-analyzer-client.js).
+//
+// It reuses the same background-job pattern as the other three modes (a run
+// survives navigation; a new run supersedes the stale one; a typed job key
+// stops a stale Contact-A brief rendering under Contact B) and keeps its OWN
+// state (contactJob / selectedContact*) and DOM handles (.contact-analyzer__*).
+// ============================================================
+
+// The preset whose instructions drive the brief. Matched case-insensitively.
+const LEAD_SEARCH_PRESET_LABEL = 'lead search';
+let leadSearchLoadPromise = null;
+
+// Load the Lead Search preset instructions once, cache them in module state.
+// Never rejects — a missing preset (renamed / not configured) resolves to ''
+// and the client falls back to a built-in methodology, so the tab still works.
+function ensureLeadSearchInstructions() {
+  if (leadSearchInstructions !== null) return Promise.resolve(leadSearchInstructions);
+  if (leadSearchLoadPromise) return leadSearchLoadPromise;
+  leadSearchLoadPromise = loadCustomPrompts()
+    .then((presets) => {
+      const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const match = (presets || []).find(p => norm(p.label) === LEAD_SEARCH_PRESET_LABEL)
+        || (presets || []).find(p => norm(p.label).includes(LEAD_SEARCH_PRESET_LABEL));
+      leadSearchInstructions = match ? String(match.instructions || '').trim() : '';
+      return leadSearchInstructions;
+    })
+    .catch(() => { leadSearchInstructions = ''; return ''; })
+    .finally(() => { leadSearchLoadPromise = null; });
+  return leadSearchLoadPromise;
+}
+function getLeadSearchInstructions() {
+  return leadSearchInstructions !== null ? Promise.resolve(leadSearchInstructions) : ensureLeadSearchInstructions();
+}
+
+// ── Contact panel (two dependent dropdowns: partner → contact) ───────
+function buildContactPanel() {
+  const contactSelect = el('select', {
+    class: 'form-select contact-analyzer__contact-select',
+    onChange: (e) => { selectedContactId = e.target.value; refreshEnabled(); },
+  }, ...contactSelectOptions(selectedContactPartnerId));
+  if (selectedContactId) contactSelect.value = selectedContactId;
+
+  const partnerSelect = el('select', {
+    class: 'form-select contact-analyzer__partner-select',
+    onChange: (e) => {
+      selectedContactPartnerId = e.target.value;
+      selectedContactId = '';
+      contactSelect.replaceChildren(...contactSelectOptions(selectedContactPartnerId));
+      contactSelect.value = '';
+      refreshEnabled();
+    },
+  },
+    el('option', { value: '' }, 'Select a partner…'),
+    ...allPartners.map(p => el('option', { value: p.id }, p.label)),
+  );
+  if (selectedContactPartnerId) partnerSelect.value = selectedContactPartnerId;
+
+  const analyzeBtn = el('button', {
+    class: 'btn btn--primary contact-analyzer__analyze',
+    disabled: !(selectedContactPartnerId && selectedContactId),
+    onClick: () => runContactAnalysis(),
+  }, 'Analyze with Randy');
+
+  function refreshEnabled() { analyzeBtn.disabled = !(selectedContactPartnerId && selectedContactId); }
+
+  const resultSlot = el('div', { class: 'contact-analyzer__result' }, buildContactIntroEmptyState());
+
+  return el('div', { class: 'contact-analyzer__panel' },
+    el('div', { class: 'forecast__controls forecast__controls--contact' },
+      el('label', { class: 'forecast__control' },
+        el('span', { class: 'forecast__control-label' }, 'Partner'),
+        partnerSelect,
+      ),
+      el('label', { class: 'forecast__control' },
+        el('span', { class: 'forecast__control-label' }, 'Contact'),
+        contactSelect,
+      ),
+      analyzeBtn,
+    ),
+    resultSlot,
+  );
+}
+
+// Options for the contact <select>, scoped to one partner. A friendly
+// placeholder guides the two-step selection; a partner with no saved
+// contacts says so rather than looking broken.
+function contactSelectOptions(partnerId) {
+  const head = el('option', { value: '' }, partnerId ? 'Select a contact…' : 'Select a partner first…');
+  if (!partnerId) return [head];
+  const rows = allContacts
+    .filter(c => c.partner_id === partnerId)
+    .sort((a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()));
+  if (rows.length === 0) {
+    return [head, el('option', { value: '', disabled: true }, 'No saved contacts for this partner')];
+  }
+  return [head, ...rows.map(c => el('option', { value: c.contact_id }, contactOptionLabel(c)))];
+}
+
+function contactOptionLabel(c) {
+  const name = String(c.name || '').trim() || String(c.email || '').trim() || 'Unnamed contact';
+  const role = String(c.role || '').trim();
+  return role ? `${name} — ${role}` : name;
+}
+
+function buildContactIntroEmptyState() {
+  return el('div', { class: 'empty-state contact-analyzer__intro' },
+    el('div', { class: 'empty-state__title' }, 'Build an account intelligence brief'),
+    el('div', { class: 'empty-state__description' },
+      'Pick a partner, then a contact, and Randy will research the person and the buying group—'
+      + 'delivering their ICP bucket, influence scores, the stakeholders still missing, likely org map, '
+      + 'account risk, and the best next move.'),
+  );
+}
+
+// ── Contact live DOM handles + paint helpers ────────────────────────
+function liveContactResultSlot() { return $('.forecast .contact-analyzer__result'); }
+function liveContactAnalyzeBtn() { return $('.forecast .contact-analyzer__analyze'); }
+function setContactAnalyzeDisabled(disabled) {
+  const btn = liveContactAnalyzeBtn();
+  if (btn) btn.disabled = disabled;
+}
+
+function paintContactRunning() {
+  const slot = liveContactResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'forecast__loading' },
+    el('div', { class: 'spinner' }),
+    el('span', {}, 'Randy is researching the contact… you can switch tabs — this keeps running.'),
+  ));
+}
+function paintContactResult(job) {
+  const slot = liveContactResultSlot();
+  if (!slot || !job.result) return;
+  slot.replaceChildren(renderContactBrief(job.result));
+}
+function paintContactError(job) {
+  const slot = liveContactResultSlot();
+  if (!slot) return;
+  slot.replaceChildren(el('div', { class: 'empty-state forecast__error' },
+    el('div', { class: 'empty-state__title' }, 'Randy could not build the brief'),
+    el('div', { class: 'empty-state__description' }, job.error || 'Something went wrong. Try again.'),
+  ));
+}
+function notifyContactIfAway(job) {
+  if (liveContactResultSlot()) return;
+  if (job.status === 'error') {
+    showToast(`Contact brief failed for ${job.label}. Open the Analyzer to retry.`, 'error');
+  } else {
+    showToast(`Contact brief ready for ${job.label}. Open the Analyzer to view it.`, 'success');
+  }
+}
+function restoreContactJob() {
+  if (!contactJob) return;
+  if (contactJob.partnerId) {
+    selectedContactPartnerId = contactJob.partnerId;
+    const psel = $('.forecast .contact-analyzer__partner-select');
+    if (psel) psel.value = contactJob.partnerId;
+  }
+  if (contactJob.key && contactJob.key.entityId) {
+    selectedContactId = contactJob.key.entityId;
+    const csel = $('.forecast .contact-analyzer__contact-select');
+    if (csel) { csel.replaceChildren(...contactSelectOptions(selectedContactPartnerId)); csel.value = contactJob.key.entityId; }
+  }
+  setContactAnalyzeDisabled(contactJob.status === 'running');
+  if (contactJob.status === 'running') paintContactRunning();
+  else if (contactJob.status === 'done') paintContactResult(contactJob);
+  else if (contactJob.status === 'error') paintContactError(contactJob);
+}
+
+// ── The contact run ─────────────────────────────────────────────────
+// Pass an explicit { partnerId, contactId } to brief that exact contact
+// (used by a re-run so it can't drift to whatever the dropdowns now show);
+// with no argument it briefs the current selection.
+async function runContactAnalysis(explicit = null) {
+  const partnerId = (explicit && explicit.partnerId) || selectedContactPartnerId;
+  const contactId = (explicit && explicit.contactId) || selectedContactId;
+  const contact = allContacts.find(c => c.contact_id === contactId && c.partner_id === partnerId);
+  if (!contact) { showToast('Pick a contact first', 'error'); return; }
+  const partnerOption = allPartners.find(p => p.id === partnerId);
+
+  abortContactInflight();
+  const controller = new AbortController();
+  const runId = uuid('run');
+  const key = makeJobKey('contact', contactId, runId);
+  const label = contact.name || 'Contact';
+  const pill = createPill('Researching the contact…', { label });
+  const job = { key, partnerId, label, status: 'running', controller, pill, result: null, error: null };
+  contactJob = job;
+
+  const stillCurrent = () => job === contactJob && sameJobKey(job.key, contactJob && contactJob.key) && !controller.signal.aborted;
+
+  setContactAnalyzeDisabled(true);
+  paintContactRunning();
+
+  try {
+    // Evidence in parallel — all non-fatal, the brief still runs on whatever
+    // succeeded plus live web research.
+    const [transcripts, meetings, documents, opportunities, opportunityDescriptions] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_DOCUMENTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_OPP_DESCRIPTIONS).catch(() => []),
+    ]);
+
+    if (!stillCurrent()) return;
+
+    const presetInstructions = await getLeadSearchInstructions();
+    const partner = (partnerOption && partnerOption.partner)
+      || { partner_id: partnerId, partner_name: contact.partner_name };
+    const nowIso = nowISO();
+    const timezone = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+    })();
+
+    updatePillStage(pill, 'Randy is researching the web…');
+
+    const brief = await requestContactBriefJson({
+      contact, partner, presetInstructions,
+      transcripts, meetings, documents, opportunities, opportunityDescriptions,
+      nowIso, timezone, signal: controller.signal,
+      onProgress: (round) => updatePillStage(pill, round > 1 ? `Researching… (round ${round})` : 'Researching the contact…'),
+    });
+
+    if (!stillCurrent()) return;
+
+    const board = deriveContactBriefBoard(brief);
+    job.status = 'done';
+    job.result = { brief, board, contact, partner };
+    markPillSuccess(pill, 'Brief ready');
+    paintContactResult(job);
+    notifyContactIfAway(job);
+  } catch (err) {
+    if (!stillCurrent()) return;
+    console.error('[Contact Analyzer] failed', err);
+    job.status = 'error';
+    job.error = err.message || 'Something went wrong. Try again.';
+    markPillFailure(pill, 'Analysis failed');
+    paintContactError(job);
+    notifyContactIfAway(job);
+  } finally {
+    if (job === contactJob) setContactAnalyzeDisabled(!(selectedContactPartnerId && selectedContactId));
+  }
+}
+
+// ── Contact brief render ────────────────────────────────────────────
+function renderContactBrief({ brief, board, contact }) {
+  const frag = el('div', { class: 'contact-brief' });
+
+  frag.appendChild(buildContactBoardActions({ brief, contact }));
+
+  if (brief.partial) {
+    frag.appendChild(el('div', { class: 'forecast-coverage event-coverage' },
+      el('span', { class: 'forecast-coverage__icon', html: warnIcon() }),
+      el('span', { class: 'forecast-coverage__text' },
+        'The research reply was cut off, so the tail of this brief may be incomplete. Re-run to regenerate a full brief.'),
+    ));
+  }
+
+  frag.appendChild(buildBriefExecSummary(brief, board));
+  const assessment = buildBriefAssessment(brief.contact_assessment);
+  if (assessment) frag.appendChild(assessment);
+  const scores = buildBriefInfluence(brief.influence_scores, board);
+  if (scores) frag.appendChild(scores);
+  const why = buildBriefClassification(brief.why_this_classification);
+  if (why) frag.appendChild(why);
+  const stake = buildBriefStakeholders(brief.missing_stakeholders);
+  if (stake) frag.appendChild(stake);
+  const org = buildBriefOrgMap(brief.org_map);
+  if (org) frag.appendChild(org);
+  const risk = buildBriefRisk(brief.account_risk);
+  if (risk) frag.appendChild(risk);
+  const move = buildBriefNextMove(brief.recommended_next_move);
+  if (move) frag.appendChild(move);
+  const seller = buildBriefSellerFocus(brief.seller_focus);
+  if (seller) frag.appendChild(seller);
+  const sources = buildBriefSources(brief.sources);
+  if (sources) frag.appendChild(sources);
+
+  return frag;
+}
+
+// ── PDF export toolbar ──────────────────────────────────────────────
+function buildContactBoardActions({ brief, contact }) {
+  const btn = el('button', {
+    class: 'btn btn--secondary btn--sm contact-brief__pdf-btn',
+    type: 'button',
+  }, el('span', { class: 'forecast-board__pdf-icon', html: pdfIcon() }), 'Create PDF');
+  btn.addEventListener('click', () => handleCreateContactPdf({ brief, contact, btn }));
+  return el('div', { class: 'forecast-board__actions' }, btn);
+}
+
+async function handleCreateContactPdf({ brief, contact, btn }) {
+  if (btn.disabled) return;
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Building PDF…';
+  try {
+    const blob = await buildContactBriefPdf({ brief, contact });
+    const filename = contactBriefFilename(brief.contact?.name || contact?.name || 'Contact');
+    downloadBlob(blob, filename);
+    showToast('Account brief PDF downloaded', 'success');
+  } catch (err) {
+    console.error('[Contact Analyzer] PDF export failed', err);
+    showToast(err.message || 'Could not create the PDF', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+// ── Brief section builders ──────────────────────────────────────────
+function briefSection(title, subtitle, ...children) {
+  const head = [el('div', { class: 'contact-brief__section-title' }, title)];
+  if (subtitle) head.push(el('div', { class: 'contact-brief__section-sub' }, subtitle));
+  return el('section', { class: 'contact-brief__section' },
+    el('div', { class: 'contact-brief__section-head' }, ...head),
+    ...children.filter(Boolean),
+  );
+}
+
+function briefKeyValue(label, value, valueClass) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return null;
+  return el('div', { class: 'contact-brief__kv' },
+    el('div', { class: 'contact-brief__kv-label' }, label),
+    el('div', { class: `contact-brief__kv-value ${valueClass || ''}` }, v),
+  );
+}
+
+function briefCallout(kind, title, text) {
+  const body = String(text || '').trim();
+  if (!body) return null;
+  return el('div', { class: `contact-brief__callout contact-brief__callout--${kind}` },
+    el('span', { class: 'contact-brief__callout-title' }, title),
+    el('span', { class: 'contact-brief__callout-text' }, body),
+  );
+}
+
+function buildBriefExecSummary(brief, board) {
+  const es = brief.executive_summary || {};
+  const cov = es.coverage_status || {};
+  const covLabel = `${(cov.level || 'yellow').charAt(0).toUpperCase()}${(cov.level || 'yellow').slice(1)}`;
+  const covValue = el('span', { class: 'contact-brief__coverage' },
+    el('span', { class: `contact-brief__cov-dot contact-brief__cov-dot--${cov.level || 'yellow'}` }),
+    el('span', {}, cov.note ? `${covLabel} — ${cov.note}` : covLabel),
+  );
+
+  const kvs = el('div', { class: 'contact-brief__kv-grid' },
+    briefKeyValue('Company', es.company),
+    briefKeyValue('Contact', es.contact),
+    briefKeyValue('Primary ICP bucket', es.primary_icp_bucket, 'contact-brief__kv-value--strong'),
+    el('div', { class: 'contact-brief__kv' },
+      el('div', { class: 'contact-brief__kv-label' }, 'Coverage status'),
+      el('div', { class: 'contact-brief__kv-value' }, covValue),
+    ),
+    briefKeyValue('Account maturity', es.account_maturity),
+  );
+
+  const callouts = el('div', { class: 'contact-brief__callouts' },
+    briefCallout('is', 'What this person likely is', es.likely_is),
+    briefCallout('isnot', 'What this person likely is not', es.likely_is_not),
+    briefCallout('gap', 'Biggest gap', es.biggest_gap),
+    briefCallout('move', 'Best next move', es.best_next_move),
+  );
+
+  return briefSection('Executive Summary', '', kvs, callouts);
+}
+
+function buildBriefAssessment(ca) {
+  const a = ca || {};
+  const grid = el('div', { class: 'contact-brief__kv-grid' },
+    briefKeyValue('Likely responsibility', a.likely_responsibility),
+    briefKeyValue('Confidence', a.confidence),
+    briefKeyValue('What they care about', a.what_they_care_about),
+    briefKeyValue('Recast focus', a.recast_focus),
+  );
+  if (!grid.children.length) return null;
+  return briefSection('Contact Assessment', '', grid);
+}
+
+function scoreTier(score) {
+  if (typeof score !== 'number') return 'na';
+  if (score >= 7) return 'high';
+  if (score >= 4) return 'mid';
+  return 'low';
+}
+
+function buildBriefInfluence(scores, board) {
+  const list = Array.isArray(scores) ? scores : [];
+  if (!list.length) return null;
+  const rows = list.map(s => {
+    const tier = scoreTier(s.score);
+    const pct = typeof s.score === 'number' ? Math.max(0, Math.min(100, s.score * 10)) : 0;
+    return el('div', { class: 'contact-brief__score' },
+      el('div', { class: 'contact-brief__score-head' },
+        el('span', { class: 'contact-brief__score-dim' }, s.dimension),
+        el('span', { class: `contact-brief__score-num contact-brief__score-num--${tier}` },
+          typeof s.score === 'number' ? `${s.score}/10` : '—'),
+      ),
+      el('div', { class: 'contact-brief__score-bar' },
+        el('span', { class: `contact-brief__score-fill contact-brief__score-fill--${tier}`, style: { width: `${pct}%` } }),
+      ),
+      s.reason ? el('div', { class: 'contact-brief__score-reason' }, s.reason) : null,
+    );
+  });
+  const sub = typeof board?.avgInfluence === 'number' ? `Average ${board.avgInfluence}/10 across ${list.length} dimensions` : '';
+  return briefSection('Influence Scores', sub, el('div', { class: 'contact-brief__scores' }, ...rows));
+}
+
+function classificationBadgeLabel(level) {
+  if (level === 'verified') return 'Verified';
+  if (level === 'strong_inference') return 'Strong inference';
+  return 'Inference';
+}
+
+function buildBriefClassification(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+  const rows = list.map(row => el('li', { class: `contact-brief__why contact-brief__why--${row.level}` },
+    el('span', { class: `contact-brief__why-badge contact-brief__why-badge--${row.level}` }, classificationBadgeLabel(row.level)),
+    el('span', { class: 'contact-brief__why-text' }, row.text),
+  ));
+  return briefSection('Why This Classification', '', el('ul', { class: 'contact-brief__why-list' }, ...rows));
+}
+
+function buildBriefStakeholders(list) {
+  const rows = Array.isArray(list) ? list : [];
+  if (!rows.length) return null;
+  const cards = rows.map((s, i) => el('div', { class: 'contact-brief__stake' },
+    el('div', { class: 'contact-brief__stake-head' },
+      el('span', { class: 'contact-brief__stake-num' }, String(i + 1)),
+      el('span', { class: 'contact-brief__stake-role' }, s.role),
+      s.icp_bucket ? el('span', { class: 'contact-brief__stake-bucket' }, s.icp_bucket) : null,
+    ),
+    s.why_needed ? el('div', { class: 'contact-brief__stake-line' },
+      el('span', { class: 'contact-brief__stake-key' }, 'Why: '), s.why_needed) : null,
+    s.recommended_conversation ? el('div', { class: 'contact-brief__stake-line' },
+      el('span', { class: 'contact-brief__stake-key' }, 'Conversation: '), s.recommended_conversation) : null,
+  ));
+  return briefSection('Missing Stakeholder Map', 'Who is not yet in the room',
+    el('div', { class: 'contact-brief__stakes' }, ...cards));
+}
+
+function buildBriefOrgMap(nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  if (!list.length) return null;
+  const rows = list.map(n => el('div', {
+    class: 'contact-brief__org-node',
+    style: { paddingLeft: `${Math.min(n.depth || 0, 6) * 20}px` },
+  },
+    el('span', { class: `contact-brief__org-dot contact-brief__org-dot--${n.status}` }),
+    el('span', { class: 'contact-brief__org-name' }, n.name),
+    el('span', { class: `contact-brief__org-status contact-brief__org-status--${n.status}` }, n.status),
+  ));
+  return briefSection('Likely Organizational Map', 'Inferred structure — not an official org chart',
+    el('div', { class: 'contact-brief__org' }, ...rows));
+}
+
+function buildBriefRisk(risk) {
+  const r = risk || {};
+  if (!r.overall && !(r.factors || []).length) return null;
+  const overall = r.overall || 'MODERATE';
+  const head = el('div', { class: 'contact-brief__risk-head' },
+    el('span', { class: 'contact-brief__risk-label' }, 'Overall risk'),
+    el('span', { class: `contact-brief__risk-chip contact-brief__risk-chip--${overall.toLowerCase()}` }, overall),
+  );
+  const factors = (r.factors || []).length
+    ? el('ul', { class: 'contact-brief__risk-list' }, ...r.factors.map(f => el('li', {}, f)))
+    : null;
+  return briefSection('Account Risk', '', head, factors);
+}
+
+function buildBriefNextMove(nm) {
+  const m = nm || {};
+  const has = m.immediate_objective || m.next_role_to_engage || m.next_meeting || m.suggested_ask;
+  if (!has) return null;
+  const grid = el('div', { class: 'contact-brief__kv-grid' },
+    briefKeyValue('Immediate objective', m.immediate_objective),
+    briefKeyValue('Next role to engage', m.next_role_to_engage),
+    briefKeyValue('Next meeting', m.next_meeting),
+  );
+  const ask = String(m.suggested_ask || '').trim();
+  const askBox = ask ? el('div', { class: 'contact-brief__ask' },
+    el('div', { class: 'contact-brief__ask-label' }, 'Suggested ask'),
+    el('div', { class: 'contact-brief__ask-text' }, ask),
+  ) : null;
+  return briefSection('Recommended Next Move', '', grid, askBox);
+}
+
+function buildBriefSellerFocus(sf) {
+  const f = sf || {};
+  const cols = [
+    ['Discuss now', f.discuss_now, 'now'],
+    ['Do not force yet', f.do_not_force_yet, 'hold'],
+    ['Evidence to obtain', f.evidence_to_obtain, 'evidence'],
+  ].filter(c => (c[1] || []).length);
+  if (!cols.length) return null;
+  const columns = cols.map(([title, items, kind]) => el('div', { class: `contact-brief__focus-col contact-brief__focus-col--${kind}` },
+    el('div', { class: 'contact-brief__focus-title' }, title),
+    el('ul', { class: 'contact-brief__focus-list' }, ...items.map(t => el('li', {}, t))),
+  ));
+  return briefSection('Seller Focus', '', el('div', { class: 'contact-brief__focus' }, ...columns));
+}
+
+function buildBriefSources(sources) {
+  const list = Array.isArray(sources) ? sources : [];
+  if (!list.length) return null;
+  const rows = list.map(s => {
+    const label = String(s.label || s.url || '').trim();
+    const url = String(s.url || '').trim();
+    if (url) {
+      return el('li', {}, el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url));
+    }
+    return el('li', {}, label);
+  });
+  return briefSection('Sources', 'Public references used to verify identity, role, and org',
+    el('ul', { class: 'contact-brief__sources' }, ...rows));
 }
