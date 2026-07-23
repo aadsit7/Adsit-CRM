@@ -24,10 +24,12 @@ const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xls
 
 /**
  * List documents stored in Drive for a given entity (opportunity or event).
+ * Optional AbortSignal lets non-interactive callers (the partner contact
+ * scan) bound the call instead of hanging on a wedged connection.
  */
-export async function listEntityDocuments(entityId) {
+export async function listEntityDocuments(entityId, { signal } = {}) {
   if (!entityId) return [];
-  const data = await fileApiRequest({ action: 'listFiles', opportunityId: entityId });
+  const data = await fileApiRequest({ action: 'listFiles', opportunityId: entityId }, { signal });
   return Array.isArray(data.files) ? data.files : [];
 }
 

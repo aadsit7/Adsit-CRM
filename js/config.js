@@ -87,6 +87,9 @@ export const CONFIG = {
   SHEET_OPP_DESCRIPTIONS: 'Opportunity_Descriptions',
   SHEET_EVENT_DESCRIPTIONS: 'Event_Descriptions',
   SHEET_EVENT_CONTACTS: 'Event_Contacts',
+  // Contacts extracted from a partner's description notes and attachments
+  // (see js/utils/partner-contacts.js for the row contract).
+  SHEET_PARTNER_CONTACTS: 'Partner_Contacts',
   // Saved partner-event playbook state, one row per event. Written by the
   // standalone Event Workspace (savePlaybook Apps Script action) and read by
   // the Event Analyzer as an optional evidence source. See apps-script/Code.gs

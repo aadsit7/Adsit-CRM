@@ -5,6 +5,7 @@
 import { CONFIG, getRuntimeConfig } from './config.js';
 import { getAccessToken, getCurrentUser, clearAccessToken } from './auth.js';
 import { normalizeProvider } from './utils/ai-providers.js';
+import { PARTNER_CONTACT_HEADERS } from './utils/partner-contacts.js';
 
 /**
  * Get the effective Spreadsheet ID (runtime override or hardcoded).
@@ -444,6 +445,10 @@ const SHEET_HEADERS = {
   // source via readSheetAsObjects and degrades gracefully when it is absent.
   [CONFIG.SHEET_EVENT_PLAYBOOK]: ['event_id', 'event_title', 'stages_json', 'updated_at'],
   [CONFIG.SHEET_PARTNER_DOCUMENTS]: ['document_id', 'partner_id', 'partner_name', 'title', 'doc_type', 'html_content', 'status', 'created_at', 'updated_at'],
+  // Partner_Contacts: contacts extracted (and verified) from a partner's
+  // description notes and Drive attachments. Header lives with the
+  // extraction/merge logic so the two can never drift apart.
+  [CONFIG.SHEET_PARTNER_CONTACTS]: PARTNER_CONTACT_HEADERS,
   [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at', 'provider'],
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
   [CONFIG.SHEET_MEETING_INDEX]: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
@@ -471,7 +476,7 @@ export async function initializeSheet() {
 
   // 2. Build batchUpdate requests to add missing tabs
   const requests = [];
-  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabsToCreate) {
     if (!existingSheets.includes(tabName)) {
@@ -506,6 +511,54 @@ export async function initializeSheet() {
 }
 
 /**
+ * Ensure one sheet tab exists with its header row, creating it when missing.
+ * Used by features whose backing tab may post-date the spreadsheet's original
+ * initialization (e.g. Partner_Contacts) so their first write can't fail on a
+ * missing range. No-op in demo mode and when the tab already exists. Creating
+ * a tab requires an OAuth token; without one this throws a readable error
+ * pointing at Setup → Initialize Sheet.
+ */
+export async function ensureSheetWithHeaders(sheetName, headerRow) {
+  if (!isConfigured()) return { created: false };
+
+  const base = getBaseUrl();
+  const authParam = getAuthParam();
+  const metaUrl = `${base}?fields=sheets.properties${authParam ? '&' + authParam : ''}`;
+  const metaRes = await writeWithAuthRetry((token) => fetch(
+    metaUrl,
+    token ? { headers: { 'Authorization': `Bearer ${token}` } } : undefined,
+  ));
+  if (!metaRes.ok) await throwWriteError(metaRes, 'Failed to read spreadsheet metadata');
+  const meta = await metaRes.json();
+  const exists = (meta.sheets || []).some(s => s.properties?.title === sheetName);
+  if (exists) return { created: false };
+
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error(`The "${sheetName}" tab is missing from the spreadsheet. `
+      + 'Log in with Google SSO and run Setup → Initialize Sheet to create it.');
+  }
+  const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+  const batchRes = await fetch(`${base}:batchUpdate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: sheetName } } }] }),
+  });
+  if (!batchRes.ok) await throwWriteError(batchRes, `Failed to create the "${sheetName}" tab`);
+
+  const headerRes = await fetch(`${base}/values/${encodeURIComponent(sheetName)}!A1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ values: [headerRow] }),
+  });
+  if (!headerRes.ok) await throwWriteError(headerRes, `Failed to write headers for "${sheetName}"`);
+
+  invalidateSheetCache(sheetName);
+  return { created: true };
+}
+
+/**
  * Sync header rows in all tabs to match current code schema.
  * Overwrites row 1 in each tab. Does NOT affect data rows.
  */
@@ -515,7 +568,7 @@ export async function syncHeaders() {
   if (!token) throw new Error('OAuth token required — please log in with Google SSO first.');
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabs) {
     const headerRow = SHEET_HEADERS[tabName];
@@ -704,12 +757,16 @@ let demoEventContacts = [
   ['event_id', 'event_title', 'contact_id', 'name', 'title', 'company', 'email', 'owner', 'status', 'icp_role', 'seniority_tier', 'ai_confidence', 'ai_rationale', 'source_file', 'saved_at'],
 ];
 
+let demoPartnerContacts = [
+  [...PARTNER_CONTACT_HEADERS],
+];
+
 // ============================================
 // Demo data localStorage persistence
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 17; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 18; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {
@@ -723,6 +780,7 @@ function persistDemoData() {
       eventDescriptions: demoEventDescriptions,
       partnerDocuments: demoPartnerDocuments,
       eventContacts: demoEventContacts,
+      partnerContacts: demoPartnerContacts,
     }));
   } catch { /* quota exceeded — silently ignore */ }
 }
@@ -745,6 +803,7 @@ function loadPersistedDemoData() {
     if (data.eventDescriptions) demoEventDescriptions = data.eventDescriptions;
     if (data.partnerDocuments) demoPartnerDocuments = data.partnerDocuments;
     if (data.eventContacts) demoEventContacts = data.eventContacts;
+    if (data.partnerContacts) demoPartnerContacts = data.partnerContacts;
     return true;
   } catch {
     return false;
@@ -772,6 +831,7 @@ function getDemoData(sheetName) {
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: return [...demoEventDescriptions.map(r => [...r])];
     case CONFIG.SHEET_PARTNER_DOCUMENTS: return [...demoPartnerDocuments.map(r => [...r])];
     case CONFIG.SHEET_EVENT_CONTACTS: return [...demoEventContacts.map(r => [...r])];
+    case CONFIG.SHEET_PARTNER_CONTACTS: return [...demoPartnerContacts.map(r => [...r])];
     default: return [];
   }
 }
@@ -789,6 +849,7 @@ export function addDemoRow(sheetName, values) {
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: demoEventDescriptions.push(values); break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: demoPartnerDocuments.push(values); break;
     case CONFIG.SHEET_EVENT_CONTACTS: demoEventContacts.push(values); break;
+    case CONFIG.SHEET_PARTNER_CONTACTS: demoPartnerContacts.push(values); break;
   }
   invalidateSheetCache(sheetName);
   persistDemoData();
@@ -808,6 +869,7 @@ export function updateDemoRow(sheetName, rowIndex, values) {
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: data = demoEventDescriptions; break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
     case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
+    case CONFIG.SHEET_PARTNER_CONTACTS: data = demoPartnerContacts; break;
     default: return;
   }
   if (data[rowIndex - 1]) {
@@ -831,6 +893,7 @@ export function deleteDemoRow(sheetName, rowIndex) {
     case CONFIG.SHEET_EVENT_DESCRIPTIONS: data = demoEventDescriptions; break;
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
     case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
+    case CONFIG.SHEET_PARTNER_CONTACTS: data = demoPartnerContacts; break;
     default: return;
   }
   data.splice(rowIndex - 1, 1);
