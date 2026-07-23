@@ -13,6 +13,7 @@ import {
   CRM_OWNER_COMPANY,
   nameFoundInText, emailFoundInText, phoneFoundInText, fieldFoundInText,
   nameFoundInTextFuzzy, namesLikelySamePerson, companyMatchesPartner,
+  emailAlignsWithPartner,
   collectPartnerContactSources,
   buildPartnerContactsPrompt,
   parsePartnerContactsResponse,
@@ -137,6 +138,24 @@ test('nameFoundInTextFuzzy: one-character spelling variants verify, stitching st
   // Single-word names still require the exact phrase.
   assert.equal(nameFoundInTextFuzzy('Smith', 'Jack Smiths presented'), false);
   assert.equal(nameFoundInTextFuzzy('Mark Smith', 'Mary Smith presented'), false);
+});
+
+test('emailAlignsWithPartner: partner-domain emails align, everything else fails', () => {
+  assert.equal(emailAlignsWithPartner('dana@insight.com', 'Insight'), true);
+  // Subdomains, legal suffixes, joined names, and initialisms all count.
+  assert.equal(emailAlignsWithPartner('dana@us.insight.com', 'Insight Enterprises, Inc.'), true);
+  assert.equal(emailAlignsWithPartner('sam@insightenterprises.com', 'Insight Enterprises, Inc.'), true);
+  assert.equal(emailAlignsWithPartner('kim@getnerdio.com', 'Nerdio'), true);
+  assert.equal(emailAlignsWithPartner('lee@wwt.com', 'World Wide Technology'), true);
+  assert.equal(emailAlignsWithPartner('pat@cdw.com', 'CDW'), true);
+  // Free-mail and other companies' domains never align.
+  assert.equal(emailAlignsWithPartner('dana@gmail.com', 'Insight'), false);
+  assert.equal(emailAlignsWithPartner('dana@recastsoftware.com', 'Insight'), false);
+  assert.equal(emailAlignsWithPartner('dana@acme.com', 'Insight'), false);
+  // No email, junk email, or no partner name can never align.
+  assert.equal(emailAlignsWithPartner('', 'Insight'), false);
+  assert.equal(emailAlignsWithPartner('not-an-email', 'Insight'), false);
+  assert.equal(emailAlignsWithPartner('dana@insight.com', ''), false);
 });
 
 // ── Company ↔ partner matching ───────────────────────────────────────
@@ -503,12 +522,12 @@ function existingRow(overrides = {}) {
   };
 }
 
-test('merge: new person becomes a new row with ids and seen dates', () => {
+test('merge: new person with a partner-domain email becomes a new row with ids and seen dates', () => {
   let n = 0;
-  const { toAppend, toUpdate, added, updated } = mergeExtractedContacts({
+  const { toAppend, toUpdate, added, updated, skippedNew } = mergeExtractedContacts({
     existing: [],
     extracted: [{
-      name: 'Raj Patel', role: '', company: '', email: '', phone: '', evidence: '',
+      name: 'Raj Patel', role: '', company: '', email: 'raj.patel@getnerdio.com', phone: '', evidence: '',
       sources: [{ type: 'meeting', id: 'm1', label: 'QBR', date: '2026-06-20' }],
     }],
     partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
@@ -517,12 +536,57 @@ test('merge: new person becomes a new row with ids and seen dates', () => {
   assert.equal(added, 1);
   assert.equal(updated, 0);
   assert.equal(toUpdate.length, 0);
+  assert.equal(skippedNew.length, 0);
   const c = toAppend[0];
   assert.equal(c.contact_id, 'id_1');
   assert.equal(c.partner_id, 'p1');
   assert.equal(c.first_seen, '2026-06-20');
   assert.equal(c.last_seen, '2026-06-20');
   assert.equal(c.created_at, '2026-07-22T10:00:00Z');
+});
+
+test('merge: creation gate — no email, or an email away from the partner domain, never mints a row', () => {
+  const noEmail = mergeExtractedContacts({
+    existing: [],
+    extracted: [{
+      name: 'Raj Patel', role: '', company: '', email: '', phone: '', evidence: '',
+      sources: [{ type: 'meeting', id: 'm1', label: 'QBR', date: '2026-06-20' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(noEmail.toAppend.length, 0);
+  assert.equal(noEmail.toUpdate.length, 0);
+  assert.equal(noEmail.skippedNew.length, 1);
+  assert.equal(noEmail.skippedNew[0].name, 'Raj Patel');
+  assert.match(noEmail.skippedNew[0].reason, /no email/);
+
+  const wrongDomain = mergeExtractedContacts({
+    existing: [],
+    extracted: [{
+      name: 'Raj Patel', role: '', company: '', email: 'raj@othercorp.com', phone: '', evidence: '',
+      sources: [{ type: 'meeting', id: 'm1', label: 'QBR', date: '2026-06-20' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(wrongDomain.toAppend.length, 0);
+  assert.equal(wrongDomain.skippedNew.length, 1);
+  assert.match(wrongDomain.skippedNew[0].reason, /othercorp\.com/);
+});
+
+test('merge: a no-email mention still enriches an EXISTING contact — the gate only blocks creation', () => {
+  const existing = [existingRow()]; // Jane Doe, role blank
+  const { toAppend, toUpdate, skippedNew } = mergeExtractedContacts({
+    existing,
+    extracted: [{
+      name: 'Jane Doe', role: 'Director of IT', company: '', email: '', phone: '', evidence: '',
+      sources: [{ type: 'description', id: 't1', label: 'Description', date: '2026-06-10' }],
+    }],
+    partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
+  });
+  assert.equal(toAppend.length, 0);
+  assert.equal(skippedNew.length, 0);
+  assert.equal(toUpdate.length, 1);
+  assert.equal(toUpdate[0].role, 'Director of IT');
 });
 
 test('merge: email match fills blanks only — saved values are never overwritten', () => {
@@ -590,26 +654,31 @@ test('merge: same name with a different saved email stays a separate row', () =>
   const { toAppend, toUpdate } = mergeExtractedContacts({
     existing,
     extracted: [{
-      name: 'Jane Doe', role: '', company: '', email: 'jane@elsewhere.org', phone: '', evidence: '',
+      // A partner-domain email (clears the creation gate) that contradicts
+      // the saved one — this is a different human, not an update.
+      name: 'Jane Doe', role: '', company: '', email: 'jane@getnerdio.com', phone: '', evidence: '',
       sources: [{ type: 'description', id: 't1', label: 'Description', date: '2026-06-10' }],
     }],
     partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
   });
   assert.equal(toUpdate.length, 0);
   assert.equal(toAppend.length, 1);
-  assert.equal(toAppend[0].email, 'jane@elsewhere.org');
+  assert.equal(toAppend[0].email, 'jane@getnerdio.com');
 });
 
 test('merge: two extracted mentions of the same new person collapse into one row', () => {
-  const { toAppend } = mergeExtractedContacts({
+  // The emailed mention seeds the row; the no-email mention folds into it
+  // (it could never create a row on its own).
+  const { toAppend, skippedNew } = mergeExtractedContacts({
     existing: [],
     extracted: [
-      { name: 'Priya Nair', role: '', company: '', email: 'priya@partner.io', phone: '', evidence: '', sources: [{ type: 'partner_document', id: 'd1', label: 'GTM Plan', date: '2026-06-05' }] },
+      { name: 'Priya Nair', role: '', company: '', email: 'priya@getnerdio.com', phone: '', evidence: '', sources: [{ type: 'partner_document', id: 'd1', label: 'GTM Plan', date: '2026-06-05' }] },
       { name: 'Priya Nair', role: '', company: '', email: '', phone: '', evidence: '', sources: [{ type: 'meeting', id: 'm1', label: 'QBR', date: '2026-06-20' }] },
     ],
     partnerId: 'p1', partnerName: 'Nerdio', nowIso: '2026-07-22T10:00:00Z',
   });
   assert.equal(toAppend.length, 1);
+  assert.equal(skippedNew.length, 0);
   assert.deepEqual(toAppend[0].sources.map(s => s.id).sort(), ['d1', 'm1']);
   assert.equal(toAppend[0].last_seen, '2026-06-20');
 });
@@ -649,21 +718,23 @@ test('merge: a one-letter surname variant folds in and the saved spelling wins',
 
 test('merge: an ambiguous bare name or a contradicting email stays a separate row', () => {
   // Two saved Aarons — a bare "Aaron" could be either, so don't guess.
+  // (Partner-domain email so the creation gate isn't what's being tested.)
   const ambiguous = mergeExtractedContacts({
     existing: [
       existingRow({ contact_id: 'e1', _rowIndex: 2, name: 'Aaron Adsit', company: '', email: '', sources: [], first_seen: '', last_seen: '' }),
       existingRow({ contact_id: 'e2', _rowIndex: 3, name: 'Aaron Miller', company: '', email: '', sources: [], first_seen: '', last_seen: '' }),
     ],
-    extracted: [{ name: 'Aaron', role: '', company: '', email: '', phone: '', evidence: '', sources: [] }],
+    extracted: [{ name: 'Aaron', role: '', company: '', email: 'aaron@insight.com', phone: '', evidence: '', sources: [] }],
     partnerId: 'p1', partnerName: 'Insight', nowIso: '2026-07-23T10:00:00Z',
   });
   assert.equal(ambiguous.toUpdate.length, 0);
   assert.equal(ambiguous.toAppend.length, 1);
 
-  // A similar name with a DIFFERENT email is a different person.
+  // A similar name with a DIFFERENT email is a different person — even at
+  // the same partner domain.
   const contradicting = mergeExtractedContacts({
     existing: [existingRow({ name: 'Aaron Adsit', company: '', email: 'aadsit@insight.com', sources: [], first_seen: '', last_seen: '' })],
-    extracted: [{ name: 'Aaron', role: '', company: '', email: 'aaron@other.io', phone: '', evidence: '', sources: [] }],
+    extracted: [{ name: 'Aaron', role: '', company: '', email: 'aaron.m@insight.com', phone: '', evidence: '', sources: [] }],
     partnerId: 'p1', partnerName: 'Insight', nowIso: '2026-07-23T10:00:00Z',
   });
   assert.equal(contradicting.toUpdate.length, 0);
