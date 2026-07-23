@@ -2349,25 +2349,26 @@ function renderContactBrief({ brief, board, contact }) {
     ));
   }
 
-  frag.appendChild(buildBriefExecSummary(brief, board));
-  const assessment = buildBriefAssessment(brief.contact_assessment);
-  if (assessment) frag.appendChild(assessment);
-  const scores = buildBriefInfluence(brief.influence_scores, board);
-  if (scores) frag.appendChild(scores);
-  const why = buildBriefClassification(brief.why_this_classification);
-  if (why) frag.appendChild(why);
-  const stake = buildBriefStakeholders(brief.missing_stakeholders);
-  if (stake) frag.appendChild(stake);
-  const org = buildBriefOrgMap(brief.org_map);
-  if (org) frag.appendChild(org);
-  const risk = buildBriefRisk(brief.account_risk);
-  if (risk) frag.appendChild(risk);
-  const move = buildBriefNextMove(brief.recommended_next_move);
-  if (move) frag.appendChild(move);
-  const seller = buildBriefSellerFocus(brief.seller_focus);
-  if (seller) frag.appendChild(seller);
-  const sources = buildBriefSources(brief.sources);
-  if (sources) frag.appendChild(sources);
+  // A compact summary strip — identical in style to the Event / Partner board
+  // headers (same .event-summary chrome) — carries the at-a-glance read. The
+  // rest of the brief then lays out as a dense two-column masonry of cards
+  // instead of a tall stack of full-width panels, so the whole brief fits the
+  // screen the way the other three boards do.
+  frag.appendChild(buildBriefSummaryStrip(brief, board));
+
+  const grid = el('div', { class: 'contact-brief__grid' });
+  const add = (node) => { if (node) grid.appendChild(node); };
+  add(buildBriefExecCallouts(brief.executive_summary));
+  add(buildBriefAssessment(brief.contact_assessment));
+  add(buildBriefInfluence(brief.influence_scores, board));
+  add(buildBriefClassification(brief.why_this_classification));
+  add(buildBriefStakeholders(brief.missing_stakeholders));
+  add(buildBriefOrgMap(brief.org_map));
+  add(buildBriefRisk(brief.account_risk));
+  add(buildBriefNextMove(brief.recommended_next_move));
+  add(buildBriefSellerFocus(brief.seller_focus));
+  add(buildBriefSources(brief.sources));
+  frag.appendChild(grid);
 
   return frag;
 }
@@ -2429,42 +2430,91 @@ function briefCallout(kind, title, text) {
   );
 }
 
-function buildBriefExecSummary(brief, board) {
+// ── Summary strip (mirrors the Event / Partner board header) ─────────
+// The at-a-glance read: contact + coverage/risk chips, the primary-ICP band
+// (the single most important classification), the derived facts, and the
+// account-maturity / coverage note as the muted summary line. Reuses the
+// shared .event-summary chrome and summaryFact() so it is visually identical
+// to the other boards' headers.
+function buildBriefSummaryStrip(brief, board) {
   const es = brief.executive_summary || {};
   const cov = es.coverage_status || {};
-  const covLabel = `${(cov.level || 'yellow').charAt(0).toUpperCase()}${(cov.level || 'yellow').slice(1)}`;
-  const covValue = el('span', { class: 'contact-brief__coverage' },
-    el('span', { class: `contact-brief__cov-dot contact-brief__cov-dot--${cov.level || 'yellow'}` }),
-    el('span', {}, cov.note ? `${covLabel} — ${cov.note}` : covLabel),
+  const covLevel = cov.level || 'yellow';
+  const risk = (brief.account_risk && brief.account_risk.overall) || '';
+  const c = brief.contact || {};
+  const contactLine = es.contact
+    || [c.name, c.title].filter(Boolean).join(' — ')
+    || c.name || 'Contact';
+
+  const chips = el('div', { class: 'event-summary__chips' },
+    el('span', { class: 'event-summary__stage-chip' }, contactLine),
+    coverageChip(covLevel),
+    risk ? riskChip(risk) : null,
   );
 
-  const kvs = el('div', { class: 'contact-brief__kv-grid' },
-    briefKeyValue('Company', es.company),
-    briefKeyValue('Contact', es.contact),
-    briefKeyValue('Primary ICP bucket', es.primary_icp_bucket, 'contact-brief__kv-value--strong'),
-    el('div', { class: 'contact-brief__kv' },
-      el('div', { class: 'contact-brief__kv-label' }, 'Coverage status'),
-      el('div', { class: 'contact-brief__kv-value' }, covValue),
-    ),
-    briefKeyValue('Account maturity', es.account_maturity),
+  const icp = es.primary_icp_bucket ? el('div', { class: 'contact-summary__icp' },
+    el('span', { class: 'contact-summary__icp-label' }, 'Primary ICP'),
+    el('span', { class: 'contact-summary__icp-value' }, es.primary_icp_bucket),
+  ) : null;
+
+  const facts = el('div', { class: 'event-summary__facts' },
+    summaryFact('Company', String(es.company || c.company || '—').trim() || '—'),
+    summaryFact('Avg influence', typeof board.avgInfluence === 'number' ? `${board.avgInfluence} / 10` : '—'),
+    summaryFact('Buying group', board.orgTotal ? `${board.orgEngaged} engaged / ${board.orgTotal}` : '—'),
+    summaryFact('Missing roles', String(board.stakeholderGaps || 0)),
   );
 
+  const children = [
+    el('div', { class: 'event-summary__eyebrow' }, 'Account intelligence brief'),
+    chips,
+    icp,
+    facts,
+  ].filter(Boolean);
+
+  const notes = [];
+  if (es.account_maturity) notes.push(es.account_maturity);
+  if (cov.note) notes.push(cov.note);
+  if (notes.length) children.push(el('p', { class: 'event-summary__text' }, notes.join('  ·  ')));
+
+  const stateClass = covLevel === 'green' ? 'event-summary--complete'
+    : covLevel === 'red' ? 'event-summary--none' : 'event-summary--working';
+  return el('div', { class: `event-summary contact-summary ${stateClass}` }, ...children);
+}
+
+// Coverage + risk chips share one colored-pill style (good / warn / bad).
+function contactChipKind(value, goodVal, badVal) {
+  return value === goodVal ? 'good' : value === badVal ? 'bad' : 'warn';
+}
+function coverageChip(level) {
+  const word = level ? level.charAt(0).toUpperCase() + level.slice(1) : 'Yellow';
+  return el('span', { class: `contact-summary__chip contact-summary__chip--${contactChipKind(level, 'green', 'red')}` },
+    el('span', { class: 'contact-summary__chip-dot' }), `Coverage: ${word}`);
+}
+function riskChip(overall) {
+  const o = String(overall).toUpperCase();
+  return el('span', { class: `contact-summary__chip contact-summary__chip--${contactChipKind(o, 'LOW', 'HIGH')}` },
+    el('span', { class: 'contact-summary__chip-dot' }), `Risk: ${o}`);
+}
+
+// ── Executive read — the four callouts (KV facts moved to the strip) ─
+function buildBriefExecCallouts(execSummary) {
+  const es = execSummary || {};
   const callouts = el('div', { class: 'contact-brief__callouts' },
-    briefCallout('is', 'What this person likely is', es.likely_is),
-    briefCallout('isnot', 'What this person likely is not', es.likely_is_not),
+    briefCallout('is', 'Likely IS', es.likely_is),
+    briefCallout('isnot', 'Likely IS NOT', es.likely_is_not),
     briefCallout('gap', 'Biggest gap', es.biggest_gap),
     briefCallout('move', 'Best next move', es.best_next_move),
   );
-
-  return briefSection('Executive Summary', '', kvs, callouts);
+  if (!callouts.children.length) return null;
+  return briefSection('Executive Read', '', callouts);
 }
 
 function buildBriefAssessment(ca) {
   const a = ca || {};
   const grid = el('div', { class: 'contact-brief__kv-grid' },
-    briefKeyValue('Likely responsibility', a.likely_responsibility),
+    briefKeyValue('Responsibility', a.likely_responsibility),
     briefKeyValue('Confidence', a.confidence),
-    briefKeyValue('What they care about', a.what_they_care_about),
+    briefKeyValue('Cares about', a.what_they_care_about),
     briefKeyValue('Recast focus', a.recast_focus),
   );
   if (!grid.children.length) return null;
@@ -2496,7 +2546,7 @@ function buildBriefInfluence(scores, board) {
       s.reason ? el('div', { class: 'contact-brief__score-reason' }, s.reason) : null,
     );
   });
-  const sub = typeof board?.avgInfluence === 'number' ? `Average ${board.avgInfluence}/10 across ${list.length} dimensions` : '';
+  const sub = typeof board?.avgInfluence === 'number' ? `Avg ${board.avgInfluence}/10 · ${list.length} dimensions` : '';
   return briefSection('Influence Scores', sub, el('div', { class: 'contact-brief__scores' }, ...rows));
 }
 
@@ -2545,7 +2595,7 @@ function buildBriefOrgMap(nodes) {
     el('span', { class: 'contact-brief__org-name' }, n.name),
     el('span', { class: `contact-brief__org-status contact-brief__org-status--${n.status}` }, n.status),
   ));
-  return briefSection('Likely Organizational Map', 'Inferred structure — not an official org chart',
+  return briefSection('Likely Organizational Map', 'Inferred — not an official org chart',
     el('div', { class: 'contact-brief__org' }, ...rows));
 }
 
@@ -2568,8 +2618,8 @@ function buildBriefNextMove(nm) {
   const has = m.immediate_objective || m.next_role_to_engage || m.next_meeting || m.suggested_ask;
   if (!has) return null;
   const grid = el('div', { class: 'contact-brief__kv-grid' },
-    briefKeyValue('Immediate objective', m.immediate_objective),
-    briefKeyValue('Next role to engage', m.next_role_to_engage),
+    briefKeyValue('Objective', m.immediate_objective),
+    briefKeyValue('Engage next', m.next_role_to_engage),
     briefKeyValue('Next meeting', m.next_meeting),
   );
   const ask = String(m.suggested_ask || '').trim();
@@ -2592,7 +2642,9 @@ function buildBriefSellerFocus(sf) {
     el('div', { class: 'contact-brief__focus-title' }, title),
     el('ul', { class: 'contact-brief__focus-list' }, ...items.map(t => el('li', {}, t))),
   ));
-  return briefSection('Seller Focus', '', el('div', { class: 'contact-brief__focus' }, ...columns));
+  const section = briefSection('Seller Focus', '', el('div', { class: 'contact-brief__focus' }, ...columns));
+  section.classList.add('contact-brief__section--wide');
+  return section;
 }
 
 function buildBriefSources(sources) {
@@ -2606,6 +2658,8 @@ function buildBriefSources(sources) {
     }
     return el('li', {}, label);
   });
-  return briefSection('Sources', 'Public references used to verify identity, role, and org',
+  const section = briefSection('Sources', 'Public references used to verify identity, role, and org',
     el('ul', { class: 'contact-brief__sources' }, ...rows));
+  section.classList.add('contact-brief__section--wide');
+  return section;
 }
