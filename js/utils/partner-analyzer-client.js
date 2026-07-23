@@ -160,7 +160,13 @@ export async function requestPartnerAnalysisJson(params = {}) {
     body: JSON.stringify({
       model: PARTNER_MODEL,
       max_tokens: PARTNER_MAX_TOKENS,
-      messages: [{ role: 'user', content: prompt }],
+      // Output-neutral prompt caching: a single text block with the same text
+      // tokenizes identically to the bare string, so scoring is unchanged — but
+      // re-analyzing the same partner within the cache window reads the prompt
+      // from Anthropic's cache instead of reprocessing it, cutting
+      // time-to-first-token. Below the model's minimum cacheable size the
+      // marker silently no-ops.
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }] }],
     }),
     signal: makeTimeoutSignal(signal, PARTNER_TIMEOUT_MS),
   });

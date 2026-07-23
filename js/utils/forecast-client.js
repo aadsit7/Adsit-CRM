@@ -107,7 +107,13 @@ export async function requestForecastJson(opportunity, descriptions, documents, 
     body: JSON.stringify({
       model:      FORECAST_MODEL,
       max_tokens: FORECAST_MAX_TOKENS,
-      messages:   [{ role: 'user', content: prompt }],
+      // Output-neutral prompt caching: a single text block with the same text
+      // tokenizes identically to the bare string, so scoring is unchanged — but
+      // re-analyzing the same opportunity within the cache window (e.g. the
+      // coverage-banner re-run) now reads the prompt from Anthropic's cache
+      // instead of reprocessing it, cutting time-to-first-token. Below the
+      // model's minimum cacheable size the marker silently no-ops.
+      messages:   [{ role: 'user', content: [{ type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }] }],
     }),
     signal: makeTimeoutSignal(signal, FORECAST_TIMEOUT_MS),
   });
