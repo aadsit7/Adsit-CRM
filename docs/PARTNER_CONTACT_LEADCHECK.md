@@ -88,16 +88,42 @@ outlook, …) never count as identifying.
   loop-check result strings) — never silently resolved.
 - **The compliance note is forced verbatim.**
 
-## Write-back (original values are never overwritten)
+## Write-back (existing values are never overwritten)
 
 Results live in three columns appended to `Partner_Contacts`
 (`analysis_state`, `analysis_last_verified`, `analysis_json` — the full
 validated report + identity fingerprint, shrunk in stages to fit the 50k
-cell cap). The user-entered row fields are untouched; the report's
+cell cap). The user-entered row fields are never overwritten; the report's
 **On file vs Verified** table shows both side by side (e.g. Original Role
 "Director of IT" vs Verified "Senior Director, Enterprise Technology").
 `ensureSheetWithHeaders` extends existing sheets' header rows in place when
 they match the old 14-column prefix.
+
+### Verified-role backfill (the one narrow row write)
+
+When the analysis identified the person's role and the row's own **Role**
+field is EMPTY, the verified title is written into the Role column of the
+partner table. All gates must hold (`verifiedRoleFromAnalysis` /
+`applyAnalysisRoleToContact`):
+
+- final state `COMPLETE` or `COMPLETE_WITH_GAPS` — never `NEEDS_REVIEW`,
+  `CONFLICT_FOUND`, `FAILED`, or a paused run;
+- identity match `CONFIRMED` — a `PROBABLE` match could be a different
+  person with the same name;
+- `title_status` `CONFIRMED` or `CORROBORATED` — multiple credible
+  sources agree (`SINGLE_SOURCE`, `UNKNOWN`, `CONFLICTING` never write);
+- the record's identity fingerprint still matches the row on name,
+  company, and email — an analysis of a since-edited contact never fills
+  it;
+- the Role field is blank — a role already on file is **never** replaced
+  (checked on the fresh row at save time, so a role typed while the
+  analysis ran survives).
+
+The fill happens in the same write that stores the analysis; rows whose
+analysis ran before this write-back existed are backfilled once on the
+next Partner Detail load (same background-persist pattern as the company
+default). The stored fingerprint is updated with the written role so the
+fill never raises a false "fields changed — re-analyze" flag.
 
 ## Modules & tests
 

@@ -39,6 +39,8 @@ import {
   parseAnalysisRecord,
   buildAnalysisRecord,
   shrinkAnalysisRecordToFit,
+  applyAnalysisRoleToContact,
+  applyAnalysisRoleBackfill,
   leadCheckButtonState,
   leadCheckReportToPlainText,
 } from '../utils/partner-contact-leadcheck.js';
@@ -96,9 +98,17 @@ export async function render(container, params) {
     // for this page and any other reader of the spreadsheet. One-time per
     // row: once saved, later loads find nothing blank.
     const companyBackfill = applyPartnerCompanyDefaults(partnerContacts, partner.display_name, nowISO());
-    if (companyBackfill.length && !companyBackfillPromise) {
-      companyBackfillPromise = persistContactCompanyBackfill(companyBackfill)
-        .finally(() => { companyBackfillPromise = null; });
+    // Role backfill: a stored analysis that identified the person's role —
+    // under the strict gates in verifiedRoleFromAnalysis (completed run,
+    // CONFIRMED identity, multi-source title, unchanged identity fields) —
+    // fills an EMPTY Role field on the row. A role already on file is
+    // never replaced. Covers analyses executed before this write-back
+    // existed; new analyses fill the role in their own save.
+    const roleBackfill = applyAnalysisRoleBackfill(partnerContacts, nowISO());
+    const contactBackfill = [...new Set([...companyBackfill, ...roleBackfill])];
+    if (contactBackfill.length && !contactBackfillPromise) {
+      contactBackfillPromise = persistContactBackfill(contactBackfill)
+        .finally(() => { contactBackfillPromise = null; });
     }
 
     renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts);
@@ -337,23 +347,24 @@ function buildPartnerStatCell(label, value) {
 // open — the default for every partner.
 const collapsedContactSections = new Set();
 
-// The in-flight load-time company backfill, if any. Deleting a contact
-// awaits it first: a delete shifts the row indexes beneath it, and a
-// pending in-place update aimed at a pre-delete index would land on the
-// wrong row. Also stops overlapping re-renders from starting a second,
-// identical backfill pass.
-let companyBackfillPromise = null;
+// The in-flight load-time backfill (company defaults + analysis-verified
+// roles), if any. Deleting a contact awaits it first: a delete shifts the
+// row indexes beneath it, and a pending in-place update aimed at a
+// pre-delete index would land on the wrong row. Also stops overlapping
+// re-renders from starting a second, identical backfill pass.
+let contactBackfillPromise = null;
 
-// Persist the company backfill (blank → partner name) without blocking the
-// page paint — the filled values are already on screen. A failure only
-// logs: the next page open retries, and nothing else depends on it.
-async function persistContactCompanyBackfill(contacts) {
+// Persist the load-time backfills (blank company → partner name, blank
+// role → analysis-verified title) without blocking the page paint — the
+// filled values are already on screen. A failure only logs: the next page
+// open retries, and nothing else depends on it.
+async function persistContactBackfill(contacts) {
   for (const c of contacts) {
     if (!c._rowIndex) continue;
     try {
       await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, c._rowIndex, partnerContactRowValues(c));
     } catch (err) {
-      console.warn('[Partner Contacts] company backfill not saved:', err.message);
+      console.warn('[Partner Contacts] contact backfill not saved:', err.message);
       return; // the remaining rows would almost certainly fail the same way
     }
   }
@@ -624,9 +635,9 @@ async function handleDeleteContact(contact, partner) {
   if (!confirmed) return;
 
   try {
-    // Let any in-flight company backfill finish first — its in-place row
+    // Let any in-flight contact backfill finish first — its in-place row
     // updates must not race a delete that shifts row indexes.
-    if (companyBackfillPromise) await companyBackfillPromise;
+    if (contactBackfillPromise) await contactBackfillPromise;
     await deleteRow(CONFIG.SHEET_PARTNER_CONTACTS, contact._rowIndex);
     showToast('Contact removed', 'success');
     reRender(partner.partner_id);
@@ -885,7 +896,12 @@ function buildLeadCheckButton(partner, contact) {
  * Persist an analysis result onto the selected record. The row is located
  * by contact_id on a FRESH read (rows may have shifted since render);
  * nothing is ever written to a different row, and the user-entered fields
- * are carried over untouched from that fresh row.
+ * are carried over untouched from that fresh row — with one narrow
+ * exception: an EMPTY Role field is filled with the analysis's verified
+ * title when the gates in verifiedRoleFromAnalysis pass. Checking the
+ * FRESH row means a role someone typed while the analysis ran is never
+ * overwritten, and the fingerprint check inside skips the fill when the
+ * row's name/company/email changed mid-run.
  */
 async function saveContactAnalysis(partner, contactId, { state, lastVerified, record }) {
   const rows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS, { forceRefresh: true });
@@ -896,9 +912,10 @@ async function saveContactAnalysis(partner, contactId, { state, lastVerified, re
   const hydrated = partnerContactFromRow(row);
   hydrated.analysis_state = state;
   hydrated.analysis_last_verified = lastVerified;
+  const filledRole = applyAnalysisRoleToContact(hydrated, record, nowISO());
   hydrated.analysis_json = JSON.stringify(shrinkAnalysisRecordToFit(record));
   await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, row._rowIndex, partnerContactRowValues(hydrated));
-  return hydrated;
+  return { contact: hydrated, filledRole };
 }
 
 function leadCheckReRender(partner) {
@@ -963,7 +980,7 @@ async function runLeadCheck(partner, contact, btn) {
       analyzedAtIso: nowIso,
     });
     const lastVerified = report.state === 'NEEDS_MORE_INFORMATION' ? '' : (report.loop_check?.checked_at || nowIso);
-    await saveContactAnalysis(partner, contactId, { state: report.state, lastVerified, record });
+    const { filledRole } = await saveContactAnalysis(partner, contactId, { state: report.state, lastVerified, record });
 
     const toastByState = {
       COMPLETE: ['Analysis complete — identity and role verified.', 'success'],
@@ -973,7 +990,7 @@ async function runLeadCheck(partner, contact, btn) {
       NEEDS_MORE_INFORMATION: ['Analysis paused: more identity information is needed.', 'info'],
     };
     const [msg, kind] = toastByState[report.state] || ['Analysis finished.', 'success'];
-    showToast(msg, kind);
+    showToast(filledRole ? `${msg} Verified role "${filledRole}" filled the empty Role field.` : msg, kind);
     leadCheckReRender(partner);
   } catch (err) {
     console.error('[LeadCheck]', err);

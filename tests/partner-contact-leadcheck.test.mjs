@@ -20,6 +20,11 @@ import {
   parseAnalysisRecord,
   buildAnalysisRecord,
   shrinkAnalysisRecordToFit,
+  verifiedRoleFromAnalysis,
+  fingerprintWithRole,
+  fingerprintMatchesIgnoringRole,
+  applyAnalysisRoleToContact,
+  applyAnalysisRoleBackfill,
   leadCheckButtonState,
   buildLeadCheckPrompt,
   parseLeadCheckResponse,
@@ -442,6 +447,139 @@ test('plain-text report carries the key verified facts and compliance note', () 
   assert.ok(text.includes('Reports to: Chris Founder'));
   assert.ok(text.includes(NO_DIRECT_REPORTS_NOTE));
   assert.ok(text.includes(LEADCHECK_COMPLIANCE_NOTE));
+});
+
+// ── Verified-role write-back ─────────────────────────────────────────
+// The one narrow row write an analysis may make: a verified title fills
+// an EMPTY Role field. Everything else must refuse.
+
+// Run the real pipeline: mutate the model response, parse it under the
+// given contact, and persist it the way runLeadCheck does (fingerprint of
+// the contact as analyzed).
+function recordFor(contact, mutate) {
+  const response = fullResponse();
+  if (mutate) mutate(response);
+  const report = parseLeadCheckResponse(JSON.stringify(response), { contact, nowIso: NOW });
+  return buildAnalysisRecord({
+    state: report.state, report, fingerprint: contactFingerprint(contact), analyzedAtIso: NOW,
+  });
+}
+
+test('verifiedRoleFromAnalysis: multi-source title on a CONFIRMED identity, completed run', () => {
+  const contact = { ...CONTACT, role: '' };
+  assert.equal(verifiedRoleFromAnalysis(recordFor(contact)), 'Senior Director, Enterprise Technology');
+
+  // COMPLETE_WITH_GAPS with a CORROBORATED title still writes (low
+  // checklist coverage is not a correctness problem for the title itself).
+  const gaps = recordFor(contact, r => {
+    r.profile.title_status = 'CORROBORATED';
+    r.checklist = LEADCHECK_CHECKLIST.map(c => ({ key: c.key, result: 'NOT_FOUND' }));
+  });
+  assert.equal(gaps.state, 'COMPLETE_WITH_GAPS');
+  assert.equal(verifiedRoleFromAnalysis(gaps), 'Senior Director, Enterprise Technology');
+});
+
+test('verifiedRoleFromAnalysis: every failed gate returns empty', () => {
+  const contact = { ...CONTACT, role: '' };
+  // Identity below CONFIRMED — could be a different person with this name.
+  assert.equal(verifiedRoleFromAnalysis(recordFor(contact, r => { r.identity.match = 'PROBABLE'; })), '');
+  // Single-source / unverified titles never write.
+  assert.equal(verifiedRoleFromAnalysis(recordFor(contact, r => { r.profile.title_status = 'SINGLE_SOURCE'; })), '');
+  assert.equal(verifiedRoleFromAnalysis(recordFor(contact, r => { r.profile.title_status = 'UNKNOWN'; })), '');
+  // A conflicting title forces CONFLICT_FOUND — doubly refused.
+  const conflict = recordFor(contact, r => { r.profile.title_status = 'CONFLICTING'; });
+  assert.equal(conflict.state, 'CONFLICT_FOUND');
+  assert.equal(verifiedRoleFromAnalysis(conflict), '');
+  // Gated identity (NEEDS_REVIEW) never writes.
+  const gated = recordFor(contact, r => { r.identity.match = 'AMBIGUOUS'; });
+  assert.equal(gated.state, 'NEEDS_REVIEW');
+  assert.equal(verifiedRoleFromAnalysis(gated), '');
+  // No identified title, nothing to write.
+  assert.equal(verifiedRoleFromAnalysis(recordFor(contact, r => { r.profile.current_title = ''; })), '');
+  // Records without a report (FAILED / paused) never write.
+  assert.equal(verifiedRoleFromAnalysis(buildAnalysisRecord({
+    state: 'FAILED', error: 'boom', fingerprint: contactFingerprint(contact), analyzedAtIso: NOW,
+  })), '');
+  assert.equal(verifiedRoleFromAnalysis(buildAnalysisRecord({
+    state: 'NEEDS_MORE_INFORMATION', missing: ['Employer'], fingerprint: contactFingerprint(contact), analyzedAtIso: NOW,
+  })), '');
+  assert.equal(verifiedRoleFromAnalysis(null), '');
+});
+
+test('verifiedRoleFromAnalysis: survives the shrink-to-fit last resort', () => {
+  const contact = { ...CONTACT, role: '' };
+  const shrunk = shrinkAnalysisRecordToFit(recordFor(contact), 500);
+  assert.equal(verifiedRoleFromAnalysis(shrunk), 'Senior Director, Enterprise Technology');
+});
+
+test('applyAnalysisRoleToContact: fills only an EMPTY role, fingerprint kept in sync', () => {
+  const contact = { ...CONTACT, role: '' };
+  const record = recordFor(contact);
+  const filled = applyAnalysisRoleToContact(contact, record, NOW);
+  assert.equal(filled, 'Senior Director, Enterprise Technology');
+  assert.equal(contact.role, 'Senior Director, Enterprise Technology');
+  assert.equal(contact.updated_at, NOW);
+  // The stored fingerprint now matches the filled row exactly, so the
+  // fill can never raise a false "fields changed — re-analyze" flag.
+  assert.equal(record.fingerprint, contactFingerprint(contact));
+  const persisted = {
+    ...contact, analysis_state: record.state,
+    analysis_last_verified: NOW, analysis_json: JSON.stringify(record),
+  };
+  const st = leadCheckButtonState(persisted, { todayIso: NOW });
+  assert.equal(st.kind, 'view');
+  assert.equal(st.changed, false);
+
+  // A role already on file — user-entered or previously filled — is
+  // NEVER overwritten, even by a fully confirmed analysis.
+  const kept = { ...CONTACT, role: 'Director of IT' };
+  const rec2 = recordFor(kept);
+  const before = rec2.fingerprint;
+  assert.equal(applyAnalysisRoleToContact(kept, rec2, NOW), '');
+  assert.equal(kept.role, 'Director of IT');
+  assert.equal(rec2.fingerprint, before);
+});
+
+test('applyAnalysisRoleToContact: refuses a row whose identity fields changed', () => {
+  const analyzed = { ...CONTACT, role: '' };
+  // Renamed since the analysis — the report may describe someone else.
+  const renamed = { ...analyzed, name: 'Janet Doe' };
+  assert.equal(applyAnalysisRoleToContact(renamed, recordFor(analyzed), NOW), '');
+  assert.equal(renamed.role, '');
+  // Same guard for a changed company or email.
+  const moved = { ...analyzed, company: 'Other Corp' };
+  assert.equal(applyAnalysisRoleToContact(moved, recordFor(analyzed), NOW), '');
+  // The role part of the fingerprint is deliberately ignored: an analysis
+  // run while the row still had a role may fill it after it was cleared,
+  // as long as name/company/email are unchanged.
+  const hadRole = { ...CONTACT };
+  const clearedNow = { ...CONTACT, role: '' };
+  assert.equal(applyAnalysisRoleToContact(clearedNow, recordFor(hadRole), NOW), 'Senior Director, Enterprise Technology');
+  // Malformed fingerprints refuse rather than guess.
+  assert.equal(fingerprintMatchesIgnoringRole('not-a-fingerprint', analyzed), false);
+  assert.equal(fingerprintWithRole('not-a-fingerprint', 'X'), 'not-a-fingerprint');
+});
+
+test('applyAnalysisRoleBackfill: fills eligible stored rows once, idempotent', () => {
+  const eligible = { ...CONTACT, role: '' };
+  eligible.analysis_json = JSON.stringify(recordFor(eligible));
+  const taken = { ...CONTACT, contact_id: 'pct_2', role: 'Director of IT' };
+  taken.analysis_json = JSON.stringify(recordFor(taken));
+  const unanalyzed = { ...CONTACT, contact_id: 'pct_3', role: '', analysis_json: '' };
+  const broken = { ...CONTACT, contact_id: 'pct_4', role: '', analysis_json: '{broken' };
+
+  const contacts = [eligible, taken, unanalyzed, broken];
+  const changed = applyAnalysisRoleBackfill(contacts, NOW);
+  assert.deepEqual(changed, [eligible]);
+  assert.equal(eligible.role, 'Senior Director, Enterprise Technology');
+  assert.equal(eligible.updated_at, NOW);
+  // analysis_json was re-serialized with the role-synced fingerprint.
+  assert.equal(parseAnalysisRecord(eligible.analysis_json).fingerprint, contactFingerprint(eligible));
+  assert.equal(taken.role, 'Director of IT');
+  assert.equal(unanalyzed.role, '');
+  assert.equal(broken.role, '');
+  // Second pass: nothing left to fill.
+  assert.deepEqual(applyAnalysisRoleBackfill(contacts, NOW), []);
 });
 
 // ── Header prefix extension (sheet schema growth) ────────────────────
