@@ -17,11 +17,15 @@ that verifies that individual from public professional sources — see
 > literally present in this partner's own sources or was typed in manually.
 > The model only *proposes*; application code *verifies* — the same
 > philosophy as the Analyzer family. An empty cell means "not stated in the
-> sources"; it is never a guess. Three further scan rules: a row must be a
-> person on **the partner's side** of the relationship (the affiliation
-> rule), one person must never become two rows (similar-name duplicate
-> collapse), and a scan may only **create** a row for someone with a
-> partner-domain email (the creation gate) — all below.
+> sources"; it is never a guess. One deliberate exception: **Company** —
+> every row here is a partner-side person by the affiliation rule, so a
+> blank company *is* the partner, and it is filled with the partner name
+> (see "Company defaults to the partner name" below). Three further scan
+> rules: a row must be a person on **the partner's side** of the
+> relationship (the affiliation rule), one person must never become two
+> rows (similar-name duplicate collapse), and a scan may only **create** a
+> row for someone with a partner-domain email (the creation gate) — all
+> below.
 
 ---
 
@@ -110,6 +114,32 @@ The same company filters apply to attendee rows from attachments, which
 routinely mix in our own team and customer attendees. Every drop is
 reported in the scan's `dropped` list (logged to the console).
 
+## Company defaults to the partner name
+
+Because the affiliation rule guarantees every row is a person on the
+partner's side, the partner organization *is* their company — so no saved
+contact is left with a blank Company. Extraction stays verbatim (a company
+value from a scan still has to appear literally in a source); the default
+applies at the moments a row is persisted or displayed:
+
+- **Add Contact** opens with Company pre-filled with the partner's name —
+  type over it for something more specific (a subsidiary, a legal name);
+  a cleared field snaps back to the partner name on save. The row is
+  written to the `Partner_Contacts` tab of the Google Sheet like every
+  other contact, so it's there whenever the page is reopened.
+- **Edit Contact** shows the same default when the saved row has no
+  company.
+- **Scan Sources** persists the partner name on any row it creates or
+  touches whose company neither the sheet nor the verified sources state.
+- **Opening the partner page** backfills older rows: any contact with a
+  blank company is shown — and saved back to the sheet, in the background —
+  with the partner name (`applyPartnerCompanyDefaults`). This is one-time
+  per row; subsequent loads find nothing to fill.
+
+The default only ever fills a blank. A manually entered company, or a
+verbatim-verified richer form ("Insight Enterprises, Inc."), is never
+overwritten by it.
+
 ## When a scan may create a row — the partner-email gate
 
 A scan can **enrich** existing contacts freely, but it may **create** a
@@ -196,7 +226,7 @@ client-side path against older deployments.
 
 | Module | Responsibility |
 | --- | --- |
-| `js/utils/partner-contacts.js` | Source collection, prompt, strict verbatim validation, attendee mapping, merge, row (de)serialization |
+| `js/utils/partner-contacts.js` | Source collection, prompt, strict verbatim validation, attendee mapping, merge, company default, row (de)serialization |
 | `js/utils/partner-contacts-client.js` | Anthropic call (same conventions/model as the other analyzers) |
 | `js/views/admin-partner-detail.js` | Contacts section UI, table, add/edit/delete modals, scan orchestration |
 | `js/sheets.js` | `Partner_Contacts` headers/init/demo + `ensureSheetWithHeaders` |
