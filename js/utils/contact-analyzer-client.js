@@ -185,7 +185,20 @@ export async function requestContactBriefJson(params = {}) {
     timezone,
   });
 
-  const messages = [{ role: 'user', content: prompt }];
+  // Prompt caching (output-neutral): the brief runs as a pause_turn/web_search
+  // continuation loop that re-POSTs the ENTIRE message array every round. The
+  // first user turn — the large brief instructions + identity snapshot + all
+  // CRM source material + partner context — is byte-identical on every round,
+  // so marking it with an ephemeral cache breakpoint lets rounds 2..N read it
+  // from Anthropic's cache instead of reprocessing it. The model sees exactly
+  // the same tokens (a single text block with the same text tokenizes
+  // identically to the bare string), so results are unchanged — only the
+  // per-round time-to-first-token drops. If the prompt is below the model's
+  // minimum cacheable size the marker silently no-ops (no cost, no harm).
+  const messages = [{
+    role: 'user',
+    content: [{ type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }],
+  }];
 
   for (let round = 1; round <= CONTACT_MAX_ROUNDS; round += 1) {
     if (typeof onProgress === 'function') onProgress(round);
