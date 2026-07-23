@@ -17,10 +17,11 @@ that verifies that individual from public professional sources — see
 > literally present in this partner's own sources or was typed in manually.
 > The model only *proposes*; application code *verifies* — the same
 > philosophy as the Analyzer family. An empty cell means "not stated in the
-> sources"; it is never a guess. Two further scan rules: a row must be a
+> sources"; it is never a guess. Three further scan rules: a row must be a
 > person on **the partner's side** of the relationship (the affiliation
-> rule), and one person must never become two rows (similar-name duplicate
-> collapse) — both below.
+> rule), one person must never become two rows (similar-name duplicate
+> collapse), and a scan may only **create** a row for someone with a
+> partner-domain email (the creation gate) — all below.
 
 ---
 
@@ -99,6 +100,22 @@ The same company filters apply to attendee rows from attachments, which
 routinely mix in our own team and customer attendees. Every drop is
 reported in the scan's `dropped` list (logged to the console).
 
+## When a scan may create a row — the partner-email gate
+
+A scan can **enrich** existing contacts freely, but it may **create** a
+new row only for a person whose extracted email's domain aligns with the
+partner company (`emailAlignsWithPartner`). Alignment is generous about
+form but strict about identity: `dana@insight.com`, `us.insight.com`
+subdomains, joined legal names (`insightenterprises.com`), a distinctive
+token inside the label (`getnerdio.com` for Nerdio) and initialisms
+(`wwt.com` for World Wide Technology) all count; free-mail and other
+companies' domains never do. Everyone else the scan finds — no email, or
+an email elsewhere — can only fill blanks / add provenance on rows that
+already exist, and is reported in the merge's `skippedNew` list (shown in
+the toast and logged to the console). Mentions of the same person with and
+without an email still collapse: the emailed mention seeds the row and the
+rest fold into it. **Add Contact** (manual) is unaffected by the gate.
+
 ## One person, one row — similar-name duplicate collapse
 
 Duplicate mentions collapse into one contact: email first, then name —
@@ -137,8 +154,10 @@ Scan results merge into `Partner_Contacts` via `mergeExtractedContacts`:
   One deliberate exception: a strictly *fuller* form of the same name
   upgrades the record ("Aaron" → "Aaron Adsit"); equal-length variants
   keep the saved spelling;
-- unmatched people become new rows; `first_seen`/`last_seen` track the
-  source dates; re-running a scan with nothing new is a no-op.
+- unmatched people become new rows **only through the partner-email gate**
+  (above) — no partner-domain email, no new row, reported in `skippedNew`;
+  `first_seen`/`last_seen` track the source dates; re-running a scan with
+  nothing new is a no-op.
 
 Deleting a contact deletes its row; a later scan may re-add the person if
 they still appear in the sources (the confirm dialog says so).

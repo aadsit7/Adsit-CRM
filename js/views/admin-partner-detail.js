@@ -754,13 +754,20 @@ async function handleScanContacts(partner, btn) {
     }
 
     warnings.forEach(w => console.warn('[Partner Contacts]', w));
+    const skipped = merge.skippedNew || [];
+    if (skipped.length) {
+      console.info('[Partner Contacts] found but not added — a new contact needs an email at the partner\'s domain:', skipped);
+    }
     if (merge.added || merge.updated) {
       const bits = [];
       if (merge.added) bits.push(`${merge.added} added`);
       if (merge.updated) bits.push(`${merge.updated} updated`);
+      if (skipped.length) bits.push(`${skipped.length} skipped (no partner email)`);
       showToast(`Contacts scan: ${bits.join(', ')}${warnings.length ? ` · ${warnings.length} warning(s) — see console` : ''}`, 'success');
     } else if (warnings.length) {
       showToast(`Contacts scan finished with warnings: ${warnings[0]}`, 'error');
+    } else if (skipped.length) {
+      showToast(`Scan complete — ${skipped.length} ${skipped.length === 1 ? 'person' : 'people'} found but not added: new contacts need an email at the partner's domain`, 'info');
     } else {
       showToast('Scan complete — no new contacts found in the sources', 'info');
     }

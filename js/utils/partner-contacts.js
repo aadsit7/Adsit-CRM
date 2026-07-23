@@ -37,6 +37,12 @@
 // "Aaron Adsit") count as the same person when unambiguous and the emails
 // don't contradict; substitutions never match ("Mark" ≠ "Mary").
 //
+// CREATION GATE (scans enrich freely, create narrowly):
+// A scan may CREATE a new contact row only for a person whose extracted
+// email domain aligns with the partner company (emailAlignsWithPartner) —
+// everyone else can only fill blanks / add provenance on rows that already
+// exist. Manual Add Contact bypasses this by design.
+//
 // Attachment (Drive file) contacts arrive from the Apps Script attendee
 // pipeline, which is deterministic for spreadsheets and strictly grounded
 // for documents — they are mapped (and affiliation-filtered), not
@@ -317,6 +323,44 @@ export function companyMatchesPartner(company, partnerName) {
 function isCrmOwnerCompany(company, ownCompany) {
   const c = String(company || '').trim();
   return !!c && companyMatchesPartner(c, ownCompany || CRM_OWNER_COMPANY);
+}
+
+// Domain labels that never identify a company (TLDs, country codes, and
+// generic infrastructure words), ignored when reading an email domain.
+const DOMAIN_GENERIC_LABELS = new Set([
+  'com', 'net', 'org', 'io', 'co', 'us', 'ca', 'uk', 'de', 'fr', 'au', 'nl',
+  'eu', 'biz', 'info', 'email', 'mail', 'group', 'global', 'gov', 'edu',
+]);
+
+/**
+ * Does this email's domain plausibly belong to the partner organization?
+ * True when a meaningful domain label equals a partner-name token
+ * ("dana@insight.com" / Insight, subdomains like us.insight.com included),
+ * contains a distinctive token or the joined name ("kim@getnerdio.com" /
+ * Nerdio, "sam@insightenterprises.com"), or equals the partner's initials
+ * ("lee@wwt.com" / World Wide Technology). Free-mail and other companies'
+ * domains never align; no email or no partner name never aligns.
+ */
+export function emailAlignsWithPartner(email, partnerName) {
+  const e = String(email || '').trim().toLowerCase();
+  const at = e.lastIndexOf('@');
+  if (at <= 0 || at === e.length - 1) return false;
+  const labels = e.slice(at + 1).split('.')
+    .map(l => l.replace(/[^a-z0-9]/g, ''))
+    .filter(l => l && !DOMAIN_GENERIC_LABELS.has(l));
+  const tokens = companyTokens(partnerName);
+  if (!labels.length || !tokens.length) return false;
+  const joined = tokens.join('');
+  const acronym = tokens.length >= 2 ? tokens.map(t => t[0]).join('') : '';
+  for (const label of labels) {
+    for (const tok of tokens) {
+      if (tok.length >= 2 && label === tok) return true;
+      if (tok.length >= 5 && label.includes(tok)) return true;
+    }
+    if (joined.length >= 5 && (label === joined || label.includes(joined))) return true;
+    if (acronym.length >= 2 && label === acronym) return true;
+  }
+  return false;
 }
 
 // Characters legal inside an email token — used to boundary-check so
@@ -884,7 +928,14 @@ function defaultMakeId() {
  * never overwrites a saved value, so manual corrections always survive a
  * re-scan. The one exception is deliberate: a strictly FULLER form of the
  * same name upgrades the record ("Aaron" → "Aaron Adsit"); equal-length
- * variants keep the saved spelling. Unmatched contacts become new rows.
+ * variants keep the saved spelling.
+ *
+ * Unmatched contacts become new rows ONLY when they clear the creation
+ * gate: the scan must have found an email whose domain aligns with the
+ * partner company (emailAlignsWithPartner). Everyone else is reported in
+ * `skippedNew` — a scan can enrich existing rows freely, but it can't
+ * mint a row for someone without a partner-domain email. (Manual
+ * Add Contact is unaffected; it doesn't go through this merge.)
  *
  * @param {object} params
  * @param {Array} params.existing   partnerContactFromRow() objects.
@@ -893,7 +944,7 @@ function defaultMakeId() {
  * @param {string} params.partnerName
  * @param {string} params.nowIso    Timestamp for created_at/updated_at.
  * @param {Function} [params.makeId]
- * @returns {{ toAppend: Array, toUpdate: Array, added: number, updated: number, unchanged: number }}
+ * @returns {{ toAppend: Array, toUpdate: Array, added: number, updated: number, unchanged: number, skippedNew: Array<{name, reason}> }}
  */
 export function mergeExtractedContacts({
   existing = [], extracted = [], partnerId = '', partnerName = '', nowIso = '', makeId,
@@ -912,15 +963,34 @@ export function mergeExtractedContacts({
   const changedRows = new Set();
   let unchanged = 0;
 
-  // Fuller names first, so "Aaron Adsit" lands before a bare "Aaron" that
-  // should fold into it.
-  const ordered = [...extracted].sort((a, b) => nameCompleteness(b) - nameCompleteness(a));
+  const skippedNew = [];
+
+  // Contacts that can seed a new row (partner-aligned email) go first, then
+  // fuller names — so "Aaron Adsit" lands before a bare "Aaron" that should
+  // fold into it, and a no-email mention of the same person folds into the
+  // emailed row instead of being skipped.
+  const canSeed = (c) => (emailAlignsWithPartner(c.email, partnerName) ? 1 : 0);
+  const ordered = [...extracted].sort((a, b) =>
+    (canSeed(b) - canSeed(a)) || (nameCompleteness(b) - nameCompleteness(a)));
   for (const x of ordered) {
     const email = String(x.email || '').trim().toLowerCase();
     let target = (email && byEmail.get(email)) || null;
     if (!target) target = findSamePersonTarget(registry, x);
 
     if (!target) {
+      // Creation gate: a scan may CREATE a contact only when the sources
+      // yielded an email whose domain aligns with the partner company.
+      // Anyone else (no email, free-mail, another company's domain) can
+      // only enrich a row that already exists — never mint one.
+      if (!canSeed(x)) {
+        skippedNew.push({
+          name: x.name || x.email || '(unnamed)',
+          reason: email
+            ? `email "${email}" is not at ${partnerName || 'the partner'}'s domain`
+            : 'no email found in the sources',
+        });
+        continue;
+      }
       const { lo, hi } = sourceDateRange(x.sources);
       const fresh = {
         contact_id: mkId(),
@@ -979,7 +1049,7 @@ export function mergeExtractedContacts({
   }
 
   const toUpdate = [...changedRows];
-  return { toAppend, toUpdate, added: toAppend.length, updated: toUpdate.length, unchanged };
+  return { toAppend, toUpdate, added: toAppend.length, updated: toUpdate.length, unchanged, skippedNew };
 }
 
 /** Display sort: named contacts A→Z, nameless (email-only) rows last. */
