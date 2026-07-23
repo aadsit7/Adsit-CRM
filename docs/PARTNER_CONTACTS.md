@@ -1,10 +1,11 @@
 # Partner Contacts (Partner Detail → Contacts section)
 
 The Partner Detail page has a **Contacts** section between Opportunities and
-Descriptions. It is collapsed by default — clicking the header reveals a
-table matrix (the same Recast table chrome as the Events list) of every
-person connected to that partner's record: **Name · Role · Company · Email ·
-Phone · Sources · Actions**.
+Descriptions. It is expanded by default whenever a partner page opens —
+the table matrix (the same Recast table chrome as the Events list) of every
+person connected to that partner's record is immediately visible: **Name ·
+Role · Company · Email · Phone · Sources · Actions**. Clicking the header
+collapses it, and that choice sticks for the session.
 
 Contacts are identified by analyzing the partner's **description notes and
 attachments** — plus indexed meetings and partner documents — via the
