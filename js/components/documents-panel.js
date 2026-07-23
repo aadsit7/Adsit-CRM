@@ -19,6 +19,7 @@ import { formatDate } from '../utils/date.js';
 import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 import { fileApiRequest } from '../utils/file-api.js';
+import { createPill, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
 
 const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.csv', '.pptx', '.png', '.jpg', '.jpeg'];
 
@@ -192,12 +193,20 @@ export function buildDocumentsPanel({
       if (link.classList.contains('document-row__analyze--loading')) return;
       link.classList.add('document-row__analyze--loading');
       link.textContent = 'Analyzing...';
+      // The floating Randy pill carries progress in the global body-fixed
+      // stack, so the user can close this modal (or leave the page entirely)
+      // and still watch the document analysis run to completion.
+      const pill = createPill('Analyzing document…', { label: file.file_name || 'Document' });
       try {
         await onAnalyze(file, link);
+        markPillSuccess(pill, 'Analyzed');
         rebuildList();
       } catch (err) {
-        link.classList.remove('document-row__analyze--loading');
-        link.textContent = 'Analyze';
+        markPillFailure(pill, 'Analyze failed');
+        if (link.isConnected) {
+          link.classList.remove('document-row__analyze--loading');
+          link.textContent = 'Analyze';
+        }
         showToast(err.message || 'Failed to analyze document', 'error');
       }
     });

@@ -84,6 +84,26 @@ test('createPill returns {el, id, stageEl, elapsedEl}', () => {
   destroyPill(pill);
 });
 
+// ── Randy's face is the persistent identity badge on every pill ──
+test('createPill includes the Randy avatar badge by default', () => {
+  const pill = createPill('Working…');
+  assert.match(pill.el.innerHTML, /randy-map-pill__avatar/);
+  assert.match(pill.el.innerHTML, /assets\/randy-avatar\.png/);
+  destroyPill(pill);
+});
+
+test('createPill omits the avatar when { avatar: false }', () => {
+  const pill = createPill('Working…', { avatar: false });
+  assert.ok(!pill.el.innerHTML.includes('randy-map-pill__avatar'));
+  destroyPill(pill);
+});
+
+test('createPill accepts a custom avatar URL', () => {
+  const pill = createPill('Working…', { avatar: 'assets/other.png' });
+  assert.match(pill.el.innerHTML, /assets\/other\.png/);
+  destroyPill(pill);
+});
+
 // ── updatePillStage swaps stage text ─────────────────────────
 test('updatePillStage sets stageEl.textContent', () => {
   const pill = createPill('Stage A');

@@ -34,6 +34,16 @@ Re-analysis triggers: the **Re-analyze** button, a changed identity
 fingerprint (name/role/company/email), or an analysis older than the
 freshness period (`LEADCHECK_FRESH_DAYS` = 30 — surfaced, never auto-run).
 
+**Non-blocking progress.** A run is fire-and-forget: it drives a floating
+Randy pill in the global body-fixed stack (`createPill`, bottom-right,
+persists across route changes), so the user can switch tabs or open another
+partner while the analysis continues. The row button still mirrors the
+`Analyzing…` state locally (restored on re-render from the `leadCheckRuns`
+map), and the result is written back by `contact_id` regardless of where the
+user navigated. Each row analyzes independently, so several pills can run at
+once. The pill settles green on `COMPLETE` / `COMPLETE_WITH_GAPS`, amber on
+`NEEDS_REVIEW` / `CONFLICT_FOUND` / `NEEDS_MORE_INFORMATION`, and on failure.
+
 ## Deterministic pre-analysis validation
 
 Research never starts unless the row can identify a professional

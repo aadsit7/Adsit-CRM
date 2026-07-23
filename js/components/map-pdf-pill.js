@@ -22,6 +22,13 @@
 const WARN_THRESHOLD_MS = 150_000;  // 2:30 — switch to amber "taking longer…"
 const HARD_TIMEOUT_MS   = 240_000;  // 4:00 — hard fail state
 
+// Every pill is a background thing Randy is doing (analyzing, scanning,
+// building a PDF), so each one wears Randy's face as its persistent identity
+// badge — the "Randy icon" the user watches to know work is still progressing
+// even after they navigate to another tab. Resolved relative to the document
+// (index.html at the site root), matching every other `assets/…` reference.
+const RANDY_AVATAR_SRC = 'assets/randy-avatar.png';
+
 // Body-fixed global stack — created lazily, sits at viewport bottom-right.
 // All background MAP PDF jobs (both click-flow and Randy voice flow) use
 // this so pills are visible regardless of which panel or modal is open.
@@ -110,10 +117,19 @@ export function createPill(initialStage = 'Starting…', options = {}) {
     ? `<span class="randy-map-pill__label">${escapeHtml(options.label)}</span>`
     : '';
 
+  // Randy's face leads the spinner row so the pill reads as "Randy is on it."
+  // Defaults on for every pill; pass `avatar: false` to suppress, or a string
+  // to point at a different image.
+  const showAvatar = options.avatar !== false;
+  const avatarSrc = typeof options.avatar === 'string' ? options.avatar : RANDY_AVATAR_SRC;
+  const avatarHtml = showAvatar
+    ? `<img class="randy-map-pill__avatar" src="${escapeHtml(avatarSrc)}" alt="Randy" width="18" height="18">`
+    : '';
+
   // When a label is present, it sits on a line of its own (flex full-width)
   // above the spinner row. flex-wrap: wrap on the pill handles the break.
   el.innerHTML = `
-    ${labelHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed">0:00</span>
+    ${labelHtml}${avatarHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed">0:00</span>
   `.trim();
 
   // Newest pill on top (so older ones settle below if the user kicks

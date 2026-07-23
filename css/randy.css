@@ -1142,6 +1142,17 @@
   pointer-events: auto;
   transition: opacity 0.35s ease, transform 0.35s ease;
 }
+/* Randy's face — the persistent identity badge on every progress pill. Its
+   size is pinned so the 172KB PNG can't shift the pill's layout while it
+   decodes. */
+.randy-map-pill__avatar {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #eef1f8;   /* placeholder tint until the image paints */
+}
 .randy-map-pill__icon {
   display: inline-flex;
   align-items: center;

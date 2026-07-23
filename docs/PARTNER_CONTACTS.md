@@ -88,6 +88,22 @@ from the broken array (each still passes the full verbatim verification)
 and flags the result `partial`, which the scan surfaces as a warning
 ("some people may be missing") instead of discarding everything.
 
+## Non-blocking progress
+
+A scan can run for minutes (attachment analysis alone is Apps-Script-capped
+at ~6). It is therefore **fire-and-forget**: the moment it starts it drives a
+floating Randy pill in the global body-fixed stack (`createPill`,
+bottom-right, persists across route changes), so the user can leave the
+partner page and keep working while it runs. Every stage (`Preparing…`,
+`Attachment i/n…`, `Scanning notes…`, `Saving…`) updates the pill; the
+in-page **Scan Sources** button mirrors the same state while it is on-screen
+and is rebuilt in its `Scanning…` form if the view re-renders mid-scan
+(tracked by `contactScanInFlight`, which now holds the partner id). Results
+are persisted to the sheet regardless of where the user navigated, and the
+Contacts list only re-renders if they are still on that partner's page. The
+pill settles green with the merge summary (e.g. `2 added, 1 updated`), or
+amber on failure.
+
 ## Who qualifies — the affiliation rule
 
 A row in this table means "a person working for or representing **this
