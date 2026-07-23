@@ -65,6 +65,8 @@ import { loadCustomPrompts } from '../sheets.js';
 import { requestContactBriefJson } from '../utils/contact-analyzer-client.js';
 import { deriveContactBriefBoard } from '../utils/contact-analyzer-schema.js';
 import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-analyzer-pdf-builder.js';
+// ── Auto-attach: file every "Create PDF" export onto its CRM record ───
+import { attachAnalyzerPdf } from '../utils/analyzer-pdf-attach.js';
 
 // ── Module state ─────────────────────────────────────────────────────
 // This state deliberately OUTLIVES the view. The analysis runs as a
@@ -621,11 +623,19 @@ async function handleCreatePdf({ forecast, board, opp, positionState, btn }) {
     // stage, the PDF's "current position" follows the override.
     const overrideStageId = positionState ? positionState.overrideStageId : '';
     const blob = await buildForecastPdf({ forecast, board, opp, overrideStageId });
-    const filename = forecastFilename(
-      forecast.customer_name || opp?.customer_name || opp?.deal_name || 'Opportunity',
-    );
+    const contextName = forecast.customer_name || opp?.customer_name || opp?.deal_name || 'Opportunity';
+    const filename = forecastFilename(contextName);
+    // File the export onto the opportunity (keyed on opportunity_id), then
+    // download a local copy regardless of whether the attach succeeded.
+    const status = await autoAttachAnalyzerPdf({
+      entityId: opp?.opportunity_id,
+      contextName,
+      filename,
+      blob,
+      recordNoun: 'opportunity',
+    });
     downloadBlob(blob, filename);
-    showToast('Analysis PDF downloaded', 'success');
+    analyzerExportToast(status);
   } catch (err) {
     console.error('[Forecast] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -644,6 +654,45 @@ function downloadBlob(blob, filename) {
   a.remove();
   // Revoke on the next tick — Safari needs the URL to survive the click.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── Auto-attach a "Create PDF" export onto its CRM record ────────────
+// Every Analyzer board / brief the user exports is filed straight onto the
+// record it describes — the opportunity, event, partner, or contact — via the
+// shared Drive-backed file store, keyed by that record's id so it lists under
+// exactly the right entity (and never cross-lists with another).
+//
+// Best-effort by contract: the upload NEVER blocks the local download. It
+// returns a status the caller folds into its toast, so "Create PDF" always
+// produces a file even when Drive is unreachable, and the toast tells the
+// truth about whether the attach landed. `recordNoun` names the record type.
+async function autoAttachAnalyzerPdf({ entityId, contextName, filename, blob, recordNoun }) {
+  const id = String(entityId == null ? '' : entityId).trim();
+  if (!id) {
+    // A well-formed run always has an id; guard so we never claim an attach
+    // that could not have happened.
+    return { attached: false, reason: 'no-id', recordNoun };
+  }
+  try {
+    const { driveUrl } = await attachAnalyzerPdf({ entityId: id, contextName, filename, blob });
+    return { attached: true, driveUrl, recordNoun };
+  } catch (err) {
+    console.error(`[Analyzer] auto-attach to ${recordNoun} failed`, err);
+    return { attached: false, reason: 'error', recordNoun };
+  }
+}
+
+// Compose the export toast so it always states whether the PDF was filed onto
+// the record, downloaded, or both — never a false "attached".
+function analyzerExportToast(status) {
+  const noun = status.recordNoun || 'record';
+  if (status.attached) {
+    showToast(`PDF attached to the ${noun} and downloaded`, 'success');
+  } else if (status.reason === 'no-id') {
+    showToast('PDF downloaded', 'success');
+  } else {
+    showToast(`PDF downloaded, but couldn't attach it to the ${noun}. Try again.`, 'error');
+  }
 }
 
 function pdfIcon() {
@@ -1272,9 +1321,18 @@ async function handleCreateEventPdf({ analysis, board, event, timing, coverageWa
       timingLine: timing ? timing.daysLabel : '',
       coverageWarnings,
     });
+    const contextName = event?.title || analysis.event_title || 'Event';
     const filename = eventAnalysisFilename(analysis.event_title || event?.title || 'Event');
+    // File the export onto the event (keyed on event_id), then download.
+    const status = await autoAttachAnalyzerPdf({
+      entityId: event?.event_id,
+      contextName,
+      filename,
+      blob,
+      recordNoun: 'event',
+    });
     downloadBlob(blob, filename);
-    showToast('Event analysis PDF downloaded', 'success');
+    analyzerExportToast(status);
   } catch (err) {
     console.error('[Event Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -1753,9 +1811,18 @@ async function handleCreatePartnerPdf({ analysis, board, kpis, health, partner, 
       analysis, board, partner, kpis, health,
       coverageWarnings: (coverage && coverage.warnings) || [],
     });
+    const contextName = partner?.display_name || analysis.partner_name || 'Partner';
     const filename = partnerAnalysisFilename(analysis.partner_name || partner?.display_name || 'Partner');
+    // File the export onto the partner (keyed on partner_id), then download.
+    const status = await autoAttachAnalyzerPdf({
+      entityId: partner?.partner_id,
+      contextName,
+      filename,
+      blob,
+      recordNoun: 'partner',
+    });
     downloadBlob(blob, filename);
-    showToast('Partner analysis PDF downloaded', 'success');
+    analyzerExportToast(status);
   } catch (err) {
     console.error('[Partner Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -2390,9 +2457,22 @@ async function handleCreateContactPdf({ brief, contact, btn }) {
   btn.textContent = 'Building PDF…';
   try {
     const blob = await buildContactBriefPdf({ brief, contact });
+    // Drive folder matches the contact Documents panel's getContextName
+    // (the contact's own name) so manual uploads and this auto-attach land
+    // together under one folder.
+    const contextName = contact?.name || contact?.partner_name || 'Contact';
     const filename = contactBriefFilename(brief.contact?.name || contact?.name || 'Contact');
+    // File the brief onto the contact record (keyed on contact_id — the same
+    // capability opportunities/events/partners already have), then download.
+    const status = await autoAttachAnalyzerPdf({
+      entityId: contact?.contact_id,
+      contextName,
+      filename,
+      blob,
+      recordNoun: 'contact',
+    });
     downloadBlob(blob, filename);
-    showToast('Account brief PDF downloaded', 'success');
+    analyzerExportToast(status);
   } catch (err) {
     console.error('[Contact Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
