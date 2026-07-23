@@ -851,6 +851,54 @@
   padding: 8px 0 4px;
 }
 
+/* -----------------------------------------------
+   Top split — Opportunity Source chart (left half)
+   beside the embedded Quick Add form (right half)
+   ----------------------------------------------- */
+.dashboard-page__split {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.dashboard-page__split > .dashboard-page__chart-card {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.dashboard-page__quickform-host {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+}
+
+/* The embedded Quick Add form (quick-form.css .qf-panel--embedded) is
+   borderless and 100%-tall by default for the Randy page. On the dashboard
+   it needs a definite height so its flex body can scroll, plus a flat border
+   to match the Opportunity Source card. This selector's higher specificity
+   and later load order beat the quick-form.css !important rules. */
+.dashboard-page__quickform-host .qf-panel--embedded {
+  width: 100% !important;
+  height: clamp(460px, calc(100vh - 240px), 760px) !important;
+  border: 1px solid #DCE1EC !important;
+  border-radius: 0 !important;
+}
+
+/* Stack the split (chart above form) once the columns get too narrow. */
+@media (max-width: 900px) {
+  .dashboard-page__split {
+    flex-direction: column;
+  }
+  .dashboard-page__split > .dashboard-page__chart-card,
+  .dashboard-page__quickform-host {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+  .dashboard-page__quickform-host .qf-panel--embedded {
+    height: clamp(440px, calc(100vh - 180px), 680px) !important;
+  }
+}
+
 @media (max-width: 1024px) {
   .dashboard-page__stat-strip {
     grid-template-columns: repeat(2, 1fr);

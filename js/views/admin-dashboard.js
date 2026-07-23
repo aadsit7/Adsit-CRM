@@ -12,6 +12,7 @@ import { formatDate } from '../utils/date.js';
 import { openEventModal } from './admin-events.js';
 import { filterPartners, filterOpportunities, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
+import { mountQuickFormInline, unmountQuickFormInline } from '../components/quick-form.js';
 
 export const title = 'Admin Dashboard';
 
@@ -285,8 +286,14 @@ function renderDashboard(container, partners, opportunities, events) {
     chips: typeFilterBar,
   });
 
+  // Right half of the split: host the singleton Quick Add form inline
+  // (moved here from the dedicated Randy page). Mounted after the content
+  // is in the DOM, below.
+  const quickFormHost = el('div', { class: 'dashboard-page__quickform-host' });
+
   const content = el('div', { class: 'dashboard-page' },
-    // Top zone: 4-cell KPI strip + flat Opportunity Source chart card
+    // Top zone: full-width KPI strip, then a 50/50 split with the flat
+    // Opportunity Source chart (left) and the Quick Add form (right).
     el('div', { class: 'dashboard-page__top' },
       el('div', { class: 'dashboard-page__stat-strip stagger' },
         buildDashboardStatCell('Total Partners', tfPartners.length, () => toggleStat('partners')),
@@ -294,7 +301,10 @@ function renderDashboard(container, partners, opportunities, events) {
         buildDashboardStatCell('Revenue Won', formatCurrency(tfWonValue), () => toggleStat('won')),
         buildDashboardStatCell('Upcoming Events', tfUpcoming.length, () => toggleStat('events')),
       ),
-      buildPartnerSourceChart(tfOpps, tfPartners, onBarClick),
+      el('div', { class: 'dashboard-page__split' },
+        buildPartnerSourceChart(tfOpps, tfPartners, onBarClick),
+        quickFormHost,
+      ),
     ),
 
     // Tabs + views (full width below)
@@ -304,6 +314,11 @@ function renderDashboard(container, partners, opportunities, events) {
   );
 
   mount(container, content);
+
+  // Embed the shared Quick Add form into the right half of the split. It's
+  // the same singleton the floating Randy "Add" button uses; cleanup()
+  // returns it to the body so that toggle keeps working elsewhere.
+  mountQuickFormInline(quickFormHost);
 }
 
 // ============================================
@@ -753,6 +768,9 @@ function partnerThumbnail(partner, stats) {
 }
 
 export function cleanup() {
+  // Return the shared Quick Add form to the body so the floating Randy
+  // "Add" button toggle keeps working on other pages.
+  unmountQuickFormInline();
   if (mapInstance) {
     mapInstance.remove();
     mapInstance = null;

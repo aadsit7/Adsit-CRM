@@ -1,13 +1,14 @@
 // ============================================
-// Dedicated Randy Page — split two-column view
+// Dedicated Randy Page — docked assistant view
 // ============================================
-// Left column: the SAME singleton Randy widget that floats around the
-// app (chat, mode presets / custom GPTs, voice, type), docked in place,
-// with a dedicated preset selection menu as a header above the chat.
-// Right column: the Quick Add form, embedded inline instead of floating.
-// Both reuse their one existing instance rather than being cloned, so
-// leaving the page returns each to its normal floating behavior — the
-// floating assistant and the Add-button form are never lost.
+// Hosts the SAME singleton Randy widget that floats around the app
+// (chat, mode presets / custom GPTs, voice, type), docked to fill the
+// page, with a dedicated preset selection menu as a header above the
+// chat. It reuses the one existing instance rather than cloning it, so
+// leaving the page returns Randy to its normal floating behavior.
+//
+// (The Quick Add form that used to sit in a right-hand column now lives
+// on the Admin Dashboard, beside the Opportunity Source chart.)
 
 import { setTopbarTitle } from '../components/sidebar.js';
 import {
@@ -15,11 +16,6 @@ import {
   getRandyPresets, getActiveRandyPresetId, setActiveRandyPreset,
   ensureRandyPresetsLoaded, RANDY_PRESET_COLORS,
 } from '../components/randy.js';
-import { mountQuickFormInline, unmountQuickFormInline } from '../components/quick-form.js';
-
-// Track the Randy "Add" button wrap we hide while the form lives inline,
-// so cleanup can restore it.
-let hiddenAddWrap = null;
 
 // The preset-menu refresh listener, kept so cleanup() can detach it.
 let onPresetChanged = null;
@@ -33,15 +29,12 @@ export function render(container) {
   view.innerHTML = '';
 
   const page = document.createElement('div');
-  page.className = 'randy-page randy-page--split';
+  page.className = 'randy-page';
 
   const chatPane = document.createElement('div');
   chatPane.className = 'randy-page__pane randy-page__pane--chat';
 
-  const formPane = document.createElement('div');
-  formPane.className = 'randy-page__pane randy-page__pane--form';
-
-  page.append(chatPane, formPane);
+  page.appendChild(chatPane);
   view.appendChild(page);
 
   // Host that the shared widget docks into. Kept separate from the chat
@@ -51,8 +44,8 @@ export function render(container) {
   widgetHost.className = 'randy-page__widget-host';
   chatPane.appendChild(widgetHost);
 
-  // Dock the shared Randy widget into the left column. If the browser
-  // lacks Web Speech support the widget was never mounted — show a note.
+  // Dock the shared Randy widget into the page. If the browser lacks Web
+  // Speech support the widget was never mounted — show a note.
   const docked = dockRandy(widgetHost);
   if (!docked) {
     chatPane.innerHTML = `
@@ -63,11 +56,6 @@ export function render(container) {
         the latest Chrome or Edge to use the assistant here.</p>
       </div>`;
   } else {
-    // The Add button is redundant here (the form is always shown on the
-    // right), so hide its control while docked in split mode.
-    const wrap = document.getElementById('randy-form-bottom-btn')?.closest('.randy-btn-wrap');
-    if (wrap) { wrap.classList.add('randy-btn-wrap--hidden'); hiddenAddWrap = wrap; }
-
     // Add the dedicated preset selection menu as a header above the chat.
     // Selecting a preset drives the same active-preset state the widget's
     // built-in Mode dropdown uses, so Randy responds with that preset's
@@ -85,9 +73,6 @@ export function render(container) {
     bar.refresh();
     ensureRandyPresetsLoaded().then(() => bar.refresh()).catch(() => bar.refresh());
   }
-
-  // Embed the Quick Add form into the right column.
-  mountQuickFormInline(formPane);
 }
 
 // Build the preset selection menu shown at the top of the Randy page.
@@ -159,10 +144,8 @@ function buildPresetBar() {
 }
 
 export function cleanup() {
-  // Restore both singletons to their normal floating behavior.
-  unmountQuickFormInline();
+  // Return the docked Randy widget to its normal floating behavior.
   undockRandy();
-  if (hiddenAddWrap) { hiddenAddWrap.classList.remove('randy-btn-wrap--hidden'); hiddenAddWrap = null; }
   if (onPresetChanged) {
     window.removeEventListener('randy-preset-changed', onPresetChanged);
     window.removeEventListener('custom-prompts-changed', onPresetChanged);
