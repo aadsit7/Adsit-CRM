@@ -21,8 +21,11 @@
 //   • verification coverage and the confidence label are RECOMPUTED here
 //     from the checklist and score bands — never trusted from the model;
 //   • conflicts are preserved and surfaced (CONFLICT_FOUND), never
-//     silently overwritten; original row values are never modified by an
-//     analysis — results are stored separately on the record;
+//     silently overwritten; user-entered row values are never overwritten
+//     by an analysis — results are stored separately on the record, with
+//     ONE narrow write-back: an EMPTY Role field may be filled from a
+//     completed analysis's verified title, under the strict gates in
+//     verifiedRoleFromAnalysis (an existing role is never replaced);
 //   • the compliance note is forced verbatim.
 //
 // No DOM, no network — fully testable under Node.
@@ -289,6 +292,112 @@ export function buildAnalysisRecord({ state, report = null, missing = [], error 
     error: cleanStr(error, 300),
     report,
   };
+}
+
+// ── Verified-role write-back into the Partner_Contacts row ──────────
+// The one deliberate exception to "user-entered row values are never
+// modified": when an analysis identified the person's role and the row's
+// own Role field is EMPTY, the verified title is written back into the
+// partner table so the roster carries it. Accuracy gates — ALL required:
+//   • the analysis finished COMPLETE or COMPLETE_WITH_GAPS — never a
+//     NEEDS_REVIEW, CONFLICT_FOUND, FAILED, or paused run;
+//   • identity.match is CONFIRMED — a PROBABLE match could be a different
+//     person with the same name, and a wrong person's title on file is
+//     worse than an empty field;
+//   • title_status is CONFIRMED or CORROBORATED — an official/current
+//     source plus at least one more credible source agree; SINGLE_SOURCE,
+//     UNKNOWN and CONFLICTING never write;
+//   • the record's identity fingerprint still matches the row on name,
+//     company, and email — an analysis of yesterday's contact never fills
+//     a row that has since been edited into someone else;
+//   • the row's Role is blank — an existing role is NEVER overwritten.
+
+export const ROLE_BACKFILL_STATES = new Set(['COMPLETE', 'COMPLETE_WITH_GAPS']);
+export const ROLE_BACKFILL_TITLE_STATUSES = new Set(['CONFIRMED', 'CORROBORATED']);
+// Same cap the Partner_Contacts role column enforces on scanned values.
+const ROLE_BACKFILL_MAX_LEN = 160;
+
+/**
+ * The verified role this analysis record supports writing into an empty
+ * Role field — '' when any accuracy gate fails.
+ */
+export function verifiedRoleFromAnalysis(record) {
+  if (!record || typeof record !== 'object') return '';
+  if (!ROLE_BACKFILL_STATES.has(record.state)) return '';
+  const report = record.report;
+  if (!report || typeof report !== 'object') return '';
+  if (!ROLE_BACKFILL_STATES.has(report.state)) return '';
+  if (report.identity?.match !== 'CONFIRMED') return '';
+  if (!ROLE_BACKFILL_TITLE_STATUSES.has(report.profile?.title_status)) return '';
+  const title = typeof report.profile?.current_title === 'string'
+    ? report.profile.current_title.trim() : '';
+  if (!title || title.length > ROLE_BACKFILL_MAX_LEN) return '';
+  return title;
+}
+
+// contactFingerprint() joins four normalized parts with '|'; index 1 is
+// the role. Any other shape makes both helpers refuse (no match, no
+// patch) — refusing can only skip a fill, never write a wrong one.
+function fingerprintParts(fp) {
+  const parts = String(fp || '').split('|');
+  return parts.length === 4 ? parts : null;
+}
+
+/** The fingerprint as it will read AFTER the role is written — kept in
+ *  sync so a role fill never trips the "fields changed, re-analyze"
+ *  detector for a value the analysis itself supplied. */
+export function fingerprintWithRole(fingerprint, role) {
+  const parts = fingerprintParts(fingerprint);
+  if (!parts) return String(fingerprint || '');
+  parts[1] = normalizeLoose(role);
+  return parts.join('|');
+}
+
+/** Does the record's analysis-time fingerprint still match this contact
+ *  on the identity fields OTHER than role (name, company, email)? */
+export function fingerprintMatchesIgnoringRole(fingerprint, contact) {
+  const a = fingerprintParts(fingerprint);
+  const b = fingerprintParts(contactFingerprint(contact));
+  if (!a || !b) return false;
+  return a[0] === b[0] && a[2] === b[2] && a[3] === b[3];
+}
+
+/**
+ * Fill this contact's EMPTY Role field from its analysis record, under
+ * the gates above. Mutates `contact` (role, updated_at) and the record's
+ * fingerprint (so the stored analysis keeps matching the row it filled),
+ * and returns the written role — or '' when nothing may be written.
+ */
+export function applyAnalysisRoleToContact(contact, record, nowIso = '') {
+  if (!contact || typeof contact !== 'object') return '';
+  if (String(contact.role || '').trim()) return '';
+  const role = verifiedRoleFromAnalysis(record);
+  if (!role) return '';
+  if (!fingerprintMatchesIgnoringRole(record.fingerprint, contact)) return '';
+  contact.role = role;
+  record.fingerprint = fingerprintWithRole(record.fingerprint, role);
+  if (nowIso) contact.updated_at = nowIso;
+  return role;
+}
+
+/**
+ * Load-time backfill for analyses that ran before this feature existed
+ * (or rows whose role was blank at analysis time): fill each contact's
+ * empty Role from its stored analysis and return the changed contacts so
+ * the caller can persist them — analysis_json is re-serialized with the
+ * updated fingerprint. Idempotent: a second pass changes nothing.
+ */
+export function applyAnalysisRoleBackfill(contacts, nowIso = '') {
+  const changed = [];
+  for (const c of contacts || []) {
+    if (!c || typeof c !== 'object') continue;
+    const record = parseAnalysisRecord(c.analysis_json);
+    if (!record) continue;
+    if (!applyAnalysisRoleToContact(c, record, nowIso)) continue;
+    c.analysis_json = JSON.stringify(record);
+    changed.push(c);
+  }
+  return changed;
 }
 
 /**
