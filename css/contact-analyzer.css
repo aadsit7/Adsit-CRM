@@ -1,41 +1,98 @@
 /* ============================================================
    Contact Analyzer — Account Intelligence Brief board
    ============================================================
-   Styles for the Analyzer's fourth mode (Contacts). Mirrors the visual
-   language of the Opportunity / Event / Partner boards (same tokens, cards,
-   and chips) and lays out the brief sections to match the reference PDF:
-   executive summary, contact assessment, influence scores, why-this-
-   classification, missing-stakeholder map, likely org map, account risk,
-   recommended next move, and the three-column seller focus.
+   Styles for the Analyzer's fourth mode (Contacts). Matches the visual
+   language of the Opportunity / Event / Partner boards: a compact summary
+   strip (the same .event-summary header the other boards use) sits above a
+   dense two-column masonry of brief cards, so the whole brief reads at a
+   glance instead of scrolling a tall stack of full-width panels.
+
+   Sections rendered into the masonry: the executive read (callouts),
+   contact assessment, influence scores, why-this-classification, missing-
+   stakeholder map, likely org map, account risk, recommended next move, the
+   three-column seller focus, and sources.
    ============================================================ */
 
 /* Two dependent dropdowns (partner → contact) + the analyze button. */
 .forecast__controls--contact .forecast__control { flex: 1 1 240px; min-width: 220px; }
 
-.contact-analyzer__result { margin-top: var(--space-8); }
+.contact-analyzer__result { margin-top: var(--space-6); }
 
 .contact-brief {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-4);
 }
 
-/* ── Section shell ─────────────────────────────────────────── */
+/* ── Summary strip ───────────────────────────────────────────
+   Reuses .event-summary + .event-summary__* from forecast.css so the
+   Contacts header is visually identical to the other three boards. Only
+   the contact-specific chips (coverage / risk) and the ICP band are new. */
+.contact-summary__chip {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.contact-summary__chip-dot { width: 8px; height: 8px; border-radius: var(--radius-full); background: currentColor; flex: none; }
+.contact-summary__chip--good { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border)); }
+.contact-summary__chip--warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border)); }
+.contact-summary__chip--bad  { color: var(--color-danger);  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border)); }
+
+/* Primary-ICP band — the single most important read, highlighted full-width. */
+.contact-summary__icp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-sidebar-active);
+  border-radius: var(--radius-sm);
+}
+.contact-summary__icp-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-primary);
+}
+.contact-summary__icp-value { font-size: var(--text-sm); font-weight: var(--font-semibold); color: var(--color-text-primary); }
+
+/* ── Masonry of brief cards ──────────────────────────────────
+   Two balanced columns on desktop, one on narrow screens. break-inside
+   keeps every card intact; margin (not gap) spaces stacked cards because
+   multicol ignores flex/grid gap between column items. */
+.contact-brief__grid {
+  columns: 2;
+  column-gap: var(--space-4);
+}
 .contact-brief__section {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  margin: 0 0 var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-primary);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-8);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
-.contact-brief__section-head { display: flex; flex-direction: column; gap: 2px; }
+/* Sections that carry inherently wide content span both columns. */
+.contact-brief__section--wide { column-span: all; }
+
+.contact-brief__section-head { display: flex; flex-direction: column; gap: 1px; }
 .contact-brief__section-title {
   font-family: var(--font-display);
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   font-weight: var(--font-bold);
   color: var(--color-text-primary);
 }
@@ -43,45 +100,35 @@
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
-/* ── Key/value grid ────────────────────────────────────────── */
-.contact-brief__kv-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-4) var(--space-8);
-}
-.contact-brief__kv { display: grid; grid-template-columns: 160px 1fr; gap: var(--space-4); align-items: start; }
+/* ── Key/value grid (single column inside the narrow cards) ── */
+.contact-brief__kv-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-2); }
+.contact-brief__kv { display: grid; grid-template-columns: 116px 1fr; gap: var(--space-3); align-items: start; }
 .contact-brief__kv-label {
   font-size: var(--text-xs);
   font-weight: var(--font-bold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: var(--color-text-muted);
-  padding-top: 2px;
+  padding-top: 1px;
 }
 .contact-brief__kv-value { font-size: var(--text-sm); color: var(--color-text-primary); line-height: var(--leading-normal); }
 .contact-brief__kv-value--strong { font-weight: var(--font-semibold); }
 
-.contact-brief__coverage { display: inline-flex; align-items: center; gap: var(--space-2); }
-.contact-brief__cov-dot { width: 10px; height: 10px; border-radius: var(--radius-full); flex: none; display: inline-block; }
-.contact-brief__cov-dot--green { background: var(--color-success); }
-.contact-brief__cov-dot--yellow { background: var(--color-warning); }
-.contact-brief__cov-dot--red { background: var(--color-danger); }
-
-/* ── Executive-summary callouts ────────────────────────────── */
-.contact-brief__callouts { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+/* ── Executive-read callouts (2×2 on wide cards) ───────────── */
+.contact-brief__callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-2); }
 .contact-brief__callout {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--space-4);
+  padding: var(--space-3);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--color-border);
   background: var(--color-surface-hover);
 }
-.contact-brief__callout-title { font-size: var(--text-xs); font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.05em; }
+.contact-brief__callout-title { font-size: 10px; font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.05em; }
 .contact-brief__callout-text { font-size: var(--text-sm); color: var(--color-text-primary); line-height: var(--leading-normal); }
 .contact-brief__callout--is { border-left-color: var(--color-primary); }
 .contact-brief__callout--is .contact-brief__callout-title { color: var(--color-primary); }
@@ -93,8 +140,8 @@
 .contact-brief__callout--move .contact-brief__callout-title { color: var(--color-success); }
 
 /* ── Influence scores ──────────────────────────────────────── */
-.contact-brief__scores { display: flex; flex-direction: column; gap: var(--space-4); }
-.contact-brief__score { display: flex; flex-direction: column; gap: 4px; }
+.contact-brief__scores { display: flex; flex-direction: column; gap: var(--space-3); }
+.contact-brief__score { display: flex; flex-direction: column; gap: 3px; }
 .contact-brief__score-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
 .contact-brief__score-dim { font-size: var(--text-sm); font-weight: var(--font-semibold); color: var(--color-text-primary); }
 .contact-brief__score-num { font-size: var(--text-sm); font-weight: var(--font-bold); font-variant-numeric: tabular-nums; }
@@ -129,9 +176,9 @@
 .contact-brief__why-text { font-size: var(--text-sm); color: var(--color-text-primary); line-height: var(--leading-normal); }
 
 /* ── Missing stakeholders ──────────────────────────────────── */
-.contact-brief__stakes { display: flex; flex-direction: column; gap: var(--space-4); }
+.contact-brief__stakes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
 .contact-brief__stake {
-  padding: var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface-hover);
@@ -183,7 +230,7 @@
 .contact-brief__org-status--missing { color: var(--color-danger); }
 
 /* ── Account risk ──────────────────────────────────────────── */
-.contact-brief__risk-head { display: flex; align-items: center; gap: var(--space-4); }
+.contact-brief__risk-head { display: flex; align-items: center; gap: var(--space-3); }
 .contact-brief__risk-label { font-size: var(--text-xs); font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted); }
 .contact-brief__risk-chip {
   font-size: var(--text-sm);
@@ -195,24 +242,23 @@
 .contact-brief__risk-chip--low { background: var(--color-success); }
 .contact-brief__risk-chip--moderate { background: var(--color-warning); }
 .contact-brief__risk-chip--high { background: var(--color-danger); }
-.contact-brief__risk-list { margin: 0; padding-left: var(--space-8); display: flex; flex-direction: column; gap: 4px; }
+.contact-brief__risk-list { margin: 0; padding-left: var(--space-6); display: flex; flex-direction: column; gap: 4px; }
 .contact-brief__risk-list li { font-size: var(--text-sm); color: var(--color-text-primary); line-height: var(--leading-normal); }
 
 /* ── Recommended next move ─────────────────────────────────── */
 .contact-brief__ask {
-  margin-top: var(--space-2);
-  padding: var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--color-primary-lighter);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
 }
-.contact-brief__ask-label { font-size: var(--text-xs); font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-primary); margin-bottom: 4px; }
+.contact-brief__ask-label { font-size: 10px; font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-primary); margin-bottom: 4px; }
 .contact-brief__ask-text { font-size: var(--text-sm); color: var(--color-text-primary); font-style: italic; line-height: var(--leading-relaxed); }
 
-/* ── Seller focus (three columns) ──────────────────────────── */
-.contact-brief__focus { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+/* ── Seller focus (three columns — spans the full board width) ── */
+.contact-brief__focus { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
 .contact-brief__focus-col {
-  padding: var(--space-4);
+  padding: var(--space-3);
   border-radius: var(--radius-sm);
   border-top: 3px solid var(--color-border);
   background: var(--color-surface-hover);
@@ -221,19 +267,22 @@
 .contact-brief__focus-col--hold { border-top-color: var(--color-warning); }
 .contact-brief__focus-col--evidence { border-top-color: var(--color-primary-light); }
 .contact-brief__focus-title { font-size: var(--text-xs); font-weight: var(--font-bold); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-2); color: var(--color-text-secondary); }
-.contact-brief__focus-list { margin: 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: 6px; }
+.contact-brief__focus-list { margin: 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: 5px; }
 .contact-brief__focus-list li { font-size: var(--text-xs); color: var(--color-text-primary); line-height: var(--leading-normal); }
 
 /* ── Sources ───────────────────────────────────────────────── */
-.contact-brief__sources { margin: 0; padding-left: var(--space-8); display: flex; flex-direction: column; gap: 4px; }
+.contact-brief__sources { margin: 0; padding-left: var(--space-6); display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px var(--space-6); }
 .contact-brief__sources li { font-size: var(--text-xs); color: var(--color-text-secondary); word-break: break-word; }
 .contact-brief__sources a { color: var(--color-primary); text-decoration: none; }
 .contact-brief__sources a:hover { text-decoration: underline; }
 
 /* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .contact-brief__grid { columns: 1; }
+  .contact-brief__section--wide { column-span: none; }
+}
 @media (max-width: 768px) {
-  .contact-brief__kv-grid { grid-template-columns: 1fr; }
-  .contact-brief__kv { grid-template-columns: 130px 1fr; }
+  .contact-brief__kv { grid-template-columns: 104px 1fr; gap: var(--space-2); }
   .contact-brief__focus { grid-template-columns: 1fr; }
-  .contact-brief__section { padding: var(--space-4); }
+  .contact-brief__section { padding: var(--space-3) var(--space-4); }
 }
