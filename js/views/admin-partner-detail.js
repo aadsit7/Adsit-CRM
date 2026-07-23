@@ -328,12 +328,14 @@ function buildPartnerStatCell(label, value) {
 // ============================================
 // Every contact shown here was either verified verbatim against this
 // partner's own sources (see js/utils/partner-contacts.js for the accuracy
-// contract) or entered manually. The section is collapsed by default —
-// clicking the header reveals the table matrix.
+// contract) or entered manually. The section is expanded by default on
+// every partner page — the roster is the point of visiting — and clicking
+// the header collapses it.
 
-// Which partners' contact tables are expanded, surviving the full-page
-// re-renders every mutation in this view performs.
-const expandedContactSections = new Set();
+// Which partners' contact tables the user has collapsed, surviving the
+// full-page re-renders every mutation in this view performs. Absence means
+// open — the default for every partner.
+const collapsedContactSections = new Set();
 
 // The in-flight load-time company backfill, if any. Deleting a contact
 // awaits it first: a delete shifts the row indexes beneath it, and a
@@ -440,7 +442,7 @@ function buildContactsTable(partner, contacts) {
 }
 
 function buildPartnerContactsSection(partner, contacts) {
-  const isOpen = expandedContactSections.has(partner.partner_id);
+  const isOpen = !collapsedContactSections.has(partner.partner_id);
 
   const chevron = el('span', {
     class: `partner-contacts__chevron${isOpen ? ' partner-contacts__chevron--open' : ''}`,
@@ -475,8 +477,8 @@ function buildPartnerContactsSection(partner, contacts) {
     onClick: () => {
       const nowOpen = body.classList.toggle('partner-contacts__body--collapsed') === false;
       chevron.classList.toggle('partner-contacts__chevron--open', nowOpen);
-      if (nowOpen) expandedContactSections.add(partner.partner_id);
-      else expandedContactSections.delete(partner.partner_id);
+      if (nowOpen) collapsedContactSections.delete(partner.partner_id);
+      else collapsedContactSections.add(partner.partner_id);
     },
   },
     el('div', { class: 'partner-detail-page__section-title' },
@@ -491,7 +493,7 @@ function buildPartnerContactsSection(partner, contacts) {
         onClick: (e) => {
           e.stopPropagation();
           openContactModal(partner, null, () => {
-            expandedContactSections.add(partner.partner_id);
+            collapsedContactSections.delete(partner.partner_id);
             reRender(partner.partner_id);
           });
         },
@@ -826,7 +828,7 @@ async function handleScanContacts(partner, btn) {
       showToast('Scan complete — no new contacts found in the sources', 'info');
     }
 
-    expandedContactSections.add(partner.partner_id);
+    collapsedContactSections.delete(partner.partner_id);
     // A scan with attachments can run for minutes — only re-render if the
     // user is still looking at THIS partner's detail page. The results are
     // already persisted either way.
