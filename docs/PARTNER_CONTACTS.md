@@ -9,7 +9,9 @@ Phone · Sources · Actions**.
 Contacts are identified by analyzing the partner's **description notes and
 attachments** — plus indexed meetings and partner documents — via the
 **Scan Sources** action. They can also be added or corrected by hand
-(**Add Contact** / Edit / Delete).
+(**Add Contact** / Edit / Delete), and each row has an **Analyze** action
+that verifies that individual from public professional sources — see
+[PARTNER_CONTACT_LEADCHECK.md](PARTNER_CONTACT_LEADCHECK.md).
 
 > **Accuracy is the design goal.** Nothing reaches the table unless it is
 > literally present in this partner's own sources or was typed in manually.

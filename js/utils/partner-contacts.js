@@ -38,12 +38,31 @@ import {
 // ── Sheet contract ──────────────────────────────────────────────────
 // Canonical Partner_Contacts header row. sheets.js imports this so the
 // initializer, the demo store and this module can never drift apart.
+// The three analysis_* columns hold the row-level LeadCheck result (see
+// js/utils/partner-contact-leadcheck.js): workflow state, last-verified
+// timestamp, and the full validated report as JSON. They were appended
+// AFTER the original 14 columns — ensureSheetWithHeaders() extends
+// prefix-matching header rows in place, and rows written before the
+// extension simply read these fields as empty.
 export const PARTNER_CONTACT_HEADERS = [
   'contact_id', 'partner_id', 'partner_name',
   'name', 'role', 'company', 'email', 'phone',
   'evidence', 'sources_json', 'first_seen', 'last_seen',
   'created_at', 'updated_at',
+  'analysis_state', 'analysis_last_verified', 'analysis_json',
 ];
+
+/**
+ * True when `actual` is a strict prefix of `expected` — the safe condition
+ * for extending an existing sheet's header row in place (data columns keep
+ * their positions; new columns append at the end).
+ */
+export function isHeaderPrefixOf(actual, expected) {
+  const a = (actual || []).map(h => String(h == null ? '' : h).trim());
+  while (a.length && !a[a.length - 1]) a.pop(); // ignore trailing blanks
+  if (a.length === 0 || a.length >= (expected || []).length) return false;
+  return a.every((h, i) => h === expected[i]);
+}
 
 export const PARTNER_CONTACT_SOURCE_TYPES = new Set([
   'description',       // a Transcripts row (the partner page's Descriptions)

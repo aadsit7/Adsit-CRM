@@ -28,6 +28,20 @@ import {
   sortContactsForDisplay,
 } from '../utils/partner-contacts.js';
 import { requestPartnerContactsExtraction } from '../utils/partner-contacts-client.js';
+import {
+  LEADCHECK_FRESH_DAYS,
+  NO_DIRECT_REPORTS_NOTE,
+  checklistItemLabel,
+  assessLeadCheckInput,
+  buildLeadCheckSnapshot,
+  contactFingerprint,
+  parseAnalysisRecord,
+  buildAnalysisRecord,
+  shrinkAnalysisRecordToFit,
+  leadCheckButtonState,
+  leadCheckReportToPlainText,
+} from '../utils/partner-contact-leadcheck.js';
+import { requestLeadCheckAnalysis } from '../utils/partner-contact-leadcheck-client.js';
 
 export const title = 'Partner Detail';
 
@@ -373,6 +387,7 @@ function buildContactsTable(partner, contacts) {
           el('td', {}, contactSourceChips(c)),
           el('td', { class: 'events-page__td--actions' },
             el('div', { class: 'partner-contacts__actions' },
+              buildLeadCheckButton(partner, c),
               el('button', {
                 class: 'events-page__action-link',
                 onClick: () => openContactModal(partner, c, () => reRender(partner.partner_id)),
@@ -760,6 +775,518 @@ async function handleScanContacts(partner, btn) {
     btn.disabled = false;
     btn.innerHTML = originalHtml;
   }
+}
+
+// ============================================
+// LeadCheck — row-level individual contact analysis
+// ============================================
+// One click verifies ONE contact from public professional sources (web
+// search) plus the contact's own CRM source material. The selected record
+// is identified strictly by contact_id — never by row position or name —
+// and results are written back to that id only, stored separately from the
+// user-entered values (analysis_state / analysis_last_verified /
+// analysis_json). See js/utils/partner-contact-leadcheck.js for the full
+// accuracy contract enforced on every report.
+
+// Duplicate-run control: contact record id → true while its analysis runs.
+// Survives re-renders; other rows stay analyzable in parallel.
+const leadCheckRuns = new Map();
+
+function buildLeadCheckButton(partner, contact) {
+  const hasLinkedSourceText = (contact.sources || [])
+    .some(s => s.type === 'description' || s.type === 'meeting' || s.type === 'partner_document');
+  const st = leadCheckButtonState(contact, {
+    inFlight: leadCheckRuns.has(contact.contact_id),
+    todayIso: todayISO(),
+    hasLinkedSourceText,
+  });
+  const btn = el('button', {
+    class: `events-page__action-link partner-lc__row-btn partner-lc__row-btn--${st.kind}`,
+    title: st.tooltip,
+    disabled: st.disabled || undefined,
+    onClick: () => {
+      if (st.kind === 'analyzing') return;
+      if (st.kind === 'view' || st.kind === 'review') { openLeadCheckReportModal(partner, contact); return; }
+      if (st.kind === 'add_info') { openLeadCheckAddInfoModal(partner, contact); return; }
+      runLeadCheck(partner, contact, btn);
+    },
+  }, st.label);
+  return btn;
+}
+
+/**
+ * Persist an analysis result onto the selected record. The row is located
+ * by contact_id on a FRESH read (rows may have shifted since render);
+ * nothing is ever written to a different row, and the user-entered fields
+ * are carried over untouched from that fresh row.
+ */
+async function saveContactAnalysis(partner, contactId, { state, lastVerified, record }) {
+  const rows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS, { forceRefresh: true });
+  const row = rows.find(r =>
+    String(r.contact_id || '').trim() === contactId &&
+    String(r.partner_id || '').trim() === partner.partner_id);
+  if (!row) throw new Error('This contact no longer exists — the analysis result was not saved.');
+  const hydrated = partnerContactFromRow(row);
+  hydrated.analysis_state = state;
+  hydrated.analysis_last_verified = lastVerified;
+  hydrated.analysis_json = JSON.stringify(shrinkAnalysisRecordToFit(record));
+  await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, row._rowIndex, partnerContactRowValues(hydrated));
+  return hydrated;
+}
+
+function leadCheckReRender(partner) {
+  if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
+    reRender(partner.partner_id);
+  }
+}
+
+async function runLeadCheck(partner, contact, btn) {
+  const contactId = String(contact.contact_id || '').trim();
+  if (!contactId) { showToast('This contact has no record id — re-scan or re-add it first.', 'error'); return; }
+  if (leadCheckRuns.has(contactId)) { showToast('This contact is already being analyzed.', 'info'); return; }
+  leadCheckRuns.set(contactId, true);
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+
+  try {
+    // Header extension also covers sheets created before the analysis
+    // columns existed.
+    await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_CONTACTS, PARTNER_CONTACT_HEADERS);
+
+    // Read-only snapshot of the selected record + its linked CRM sources.
+    const [transcripts, meetings, documentsRows] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_DOCUMENTS).catch(() => []),
+    ]);
+    const { snapshot, sourceMaterial, hasLinkedSourceText } = buildLeadCheckSnapshot({
+      contact, transcripts, meetings, documents: documentsRows,
+    });
+
+    // Deterministic pre-analysis validation — never guess an identity.
+    const gate = assessLeadCheckInput(contact, { hasLinkedSourceText });
+    if (!gate.sufficient) {
+      const record = buildAnalysisRecord({
+        state: 'NEEDS_MORE_INFORMATION',
+        missing: gate.missing,
+        fingerprint: contactFingerprint(contact),
+        analyzedAtIso: nowISO(),
+      });
+      await saveContactAnalysis(partner, contactId, { state: 'NEEDS_MORE_INFORMATION', lastVerified: '', record });
+      showToast('Analysis paused: the selected contact does not contain enough professional identity information to distinguish the individual reliably.', 'info');
+      leadCheckReRender(partner);
+      return;
+    }
+
+    const nowIso = nowISO();
+    const timezone = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+    })();
+    const report = await requestLeadCheckAnalysis({
+      contact, snapshot, sourceMaterial, nowIso, timezone,
+      onProgress: (round) => { btn.textContent = round > 1 ? `Analyzing… (round ${round})` : 'Analyzing…'; },
+    });
+
+    const record = buildAnalysisRecord({
+      state: report.state,
+      report,
+      missing: report.state === 'NEEDS_MORE_INFORMATION' ? report.missing_information : [],
+      fingerprint: contactFingerprint(contact),
+      analyzedAtIso: nowIso,
+    });
+    const lastVerified = report.state === 'NEEDS_MORE_INFORMATION' ? '' : (report.loop_check?.checked_at || nowIso);
+    await saveContactAnalysis(partner, contactId, { state: report.state, lastVerified, record });
+
+    const toastByState = {
+      COMPLETE: ['Analysis complete — identity and role verified.', 'success'],
+      COMPLETE_WITH_GAPS: ['Analysis complete with gaps — some items could not be publicly verified.', 'success'],
+      NEEDS_REVIEW: ['Analysis needs review — identity could not be established firmly.', 'info'],
+      CONFLICT_FOUND: ['Analysis found conflicting public information — open Review to compare.', 'info'],
+      NEEDS_MORE_INFORMATION: ['Analysis paused: more identity information is needed.', 'info'],
+    };
+    const [msg, kind] = toastByState[report.state] || ['Analysis finished.', 'success'];
+    showToast(msg, kind);
+    leadCheckReRender(partner);
+  } catch (err) {
+    console.error('[LeadCheck]', err);
+    // Persist the failure so the row shows a retryable state — but never
+    // let the failure-write mask the original error.
+    try {
+      const record = buildAnalysisRecord({
+        state: 'FAILED', error: err.message || 'Analysis failed',
+        fingerprint: contactFingerprint(contact), analyzedAtIso: nowISO(),
+      });
+      await saveContactAnalysis(partner, contactId, { state: 'FAILED', lastVerified: '', record });
+    } catch { /* ignore secondary failures */ }
+    showToast(err.message || 'Contact analysis failed', 'error');
+    leadCheckReRender(partner);
+  } finally {
+    leadCheckRuns.delete(contactId);
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+// ── Add Info modal (NEEDS MORE INFORMATION) ──────────────────────────
+function openLeadCheckAddInfoModal(partner, contact) {
+  const record = parseAnalysisRecord(contact.analysis_json);
+  const missing = (record?.missing || []).length
+    ? record.missing
+    : assessLeadCheckInput(contact).missing;
+
+  openModal({
+    title: 'More Information Needed',
+    content: el('div', { class: 'partner-lc' },
+      el('p', { class: 'partner-lc__paragraph' },
+        'Analysis paused: the selected contact does not contain enough professional identity information to distinguish the individual reliably.'),
+      el('p', { class: 'partner-lc__paragraph' }, 'Add at least one of the following, then run Analyze again:'),
+      el('ul', { class: 'partner-lc__missing-list' },
+        ...missing.map(m => el('li', {}, m)),
+      ),
+    ),
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
+      el('button', {
+        class: 'btn btn--primary',
+        onClick: () => {
+          closeModal();
+          openContactModal(partner, contact, () => reRender(partner.partner_id));
+        },
+      }, 'Edit Contact'),
+    ],
+  });
+}
+
+// ── Report modal (VIEW ANALYSIS / REVIEW) ────────────────────────────
+const LC_BADGE_TONES = {
+  ok: ['CONFIRMED', 'PUBLICLY_CONFIRMED', 'COMPLETE', 'PASS', 'HIGH', 'SUPPORTED', 'CONFIRMED_PEER', 'CONFIRMED_TEAM_RELATIONSHIP', 'CURRENT'],
+  soft: ['CORROBORATED', 'PROBABLE', 'COMPLETE_WITH_GAPS', 'MEDIUM', 'RECENT', 'LIKELY_PEER', 'LIKELY_COLLABORATOR', 'PATTERN_CONSISTENT', 'PARTIAL', 'FUNCTIONAL_OWNER'],
+  warn: ['SINGLE_SOURCE', 'TENTATIVE', 'NEEDS_REVIEW', 'NEEDS_MORE_INFORMATION', 'AMBIGUOUS', 'LOW', 'HISTORICAL', 'ENGAGEMENT_ONLY', 'GENERIC_INFERENCE'],
+  danger: ['CONFLICTING', 'CONFLICT_FOUND', 'FAILED', 'FLAGGED', 'FAIL', 'NOT_VERIFIED'],
+};
+
+function lcBadgeTone(value) {
+  for (const [tone, values] of Object.entries(LC_BADGE_TONES)) {
+    if (values.includes(value)) return tone;
+  }
+  return 'muted';
+}
+
+function lcBadge(value) {
+  const v = String(value || '').trim();
+  if (!v) return el('span', { class: 'partner-contacts__muted' }, '—');
+  return el('span', { class: `partner-lc__badge partner-lc__badge--${lcBadgeTone(v)}` }, v.replace(/_/g, ' '));
+}
+
+function lcLink(url, label) {
+  if (!url) return el('span', { class: 'partner-contacts__muted' }, '—');
+  return el('a', { class: 'partner-lc__link', href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url);
+}
+
+function lcKV(label, value) {
+  return el('div', { class: 'partner-lc__kv' },
+    el('div', { class: 'partner-lc__kv-label' }, label),
+    el('div', { class: 'partner-lc__kv-value' },
+      value == null || value === '' ? el('span', { class: 'partner-contacts__muted' }, '—')
+        : (typeof value === 'string' ? value : value)),
+  );
+}
+
+function lcSection(title, ...children) {
+  const kids = children.filter(Boolean);
+  if (!kids.length) return null;
+  return el('div', { class: 'partner-lc__section' },
+    el('div', { class: 'partner-lc__section-title' }, title),
+    ...kids,
+  );
+}
+
+function lcPerson(p, extraBadge) {
+  if (!p || (!p.name && !p.title && !p.label)) return null;
+  return el('div', { class: 'partner-lc__person' },
+    el('div', { class: 'partner-lc__person-main' },
+      el('span', { class: 'partner-lc__person-name' }, p.name || '(no named individual)'),
+      p.title ? el('span', { class: 'partner-lc__person-title' }, p.title) : null,
+      lcBadge(extraBadge || p.label || p.relationship),
+      p.confidence ? lcBadge(p.confidence) : null,
+    ),
+    el('div', { class: 'partner-lc__person-links' },
+      p.linkedin_url ? lcLink(p.linkedin_url, 'LinkedIn') : null,
+      p.evidence_url ? lcLink(p.evidence_url, 'Evidence') : null,
+      p.note ? el('span', { class: 'partner-lc__note' }, p.note) : null,
+    ),
+  );
+}
+
+// Original row values vs verified findings — the row itself is never
+// changed by an analysis, so this comparison is the write-back surface.
+function lcOriginalVsVerified(contact, report) {
+  const rows = [
+    ['Name', contact.name, report.profile?.full_name],
+    ['Role', contact.role, report.profile?.current_title],
+    ['Company', contact.company, report.profile?.current_employer],
+    ['Email', contact.email, report.email_evaluation?.email],
+  ].filter(([, a, b]) => (a || b));
+  if (!rows.length) return null;
+  return el('div', { class: 'partner-lc__compare' },
+    el('div', { class: 'partner-lc__compare-head' },
+      el('span', {}, 'Field'), el('span', {}, 'On file'), el('span', {}, 'Verified'),
+    ),
+    ...rows.map(([label, orig, verified]) => {
+      const differs = orig && verified && orig.trim().toLowerCase() !== verified.trim().toLowerCase();
+      return el('div', { class: `partner-lc__compare-row${differs ? ' partner-lc__compare-row--differs' : ''}` },
+        el('span', { class: 'partner-lc__compare-label' }, label),
+        el('span', {}, orig || el('span', { class: 'partner-contacts__muted' }, '—')),
+        el('span', {}, verified || el('span', { class: 'partner-contacts__muted' }, '—')),
+      );
+    }),
+  );
+}
+
+function openLeadCheckReportModal(partner, contact) {
+  const record = parseAnalysisRecord(contact.analysis_json);
+  const report = record?.report;
+
+  if (!report) {
+    // FAILED or corrupted record — offer a re-run.
+    openModal({
+      title: 'Contact Analysis',
+      content: el('div', { class: 'partner-lc' },
+        el('p', { class: 'partner-lc__paragraph' },
+          record?.error ? `The last analysis failed: ${record.error}` : 'No analysis is stored for this contact yet.'),
+      ),
+      footer: [
+        el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
+        el('button', {
+          class: 'btn btn--primary',
+          onClick: () => { closeModal(); triggerReAnalyze(partner, contact); },
+        }, 'Analyze'),
+      ],
+    });
+    return;
+  }
+
+  const banners = [];
+  if (record.fingerprint && record.fingerprint !== contactFingerprint(contact)) {
+    banners.push('The contact\'s name, role, company, or email changed after this analysis — re-analyze to refresh it.');
+  }
+  const lastVerified = contact.analysis_last_verified || record.analyzed_at || '';
+  if (lastVerified) {
+    const ageMs = Date.now() - Date.parse(lastVerified);
+    if (Number.isFinite(ageMs) && ageMs / 86_400_000 > LEADCHECK_FRESH_DAYS) {
+      banners.push(`This analysis is older than ${LEADCHECK_FRESH_DAYS} days — consider re-analyzing.`);
+    }
+  }
+
+  const conf = report.confidence || {};
+  const content = el('div', { class: 'partner-lc' },
+    el('div', { class: 'partner-lc__header' },
+      el('div', { class: 'partner-lc__header-badges' },
+        lcBadge(report.state),
+        lcBadge(report.identity?.match),
+        lcBadge(conf.label),
+      ),
+      el('div', { class: 'partner-lc__header-meta' },
+        `Coverage ${conf.coverage_pct ?? '—'}% · Confidence ${conf.overall_score ?? '—'}/10`
+        + (lastVerified ? ` · Last verified ${String(lastVerified).slice(0, 10)}` : ''),
+      ),
+    ),
+    ...banners.map(b => el('div', { class: 'partner-lc__banner' }, b)),
+
+    lcOriginalVsVerified(contact, report),
+
+    lcSection('Individual Profile',
+      lcKV('Full name', report.profile?.full_name),
+      lcKV('Current employer', report.profile?.current_employer),
+      el('div', { class: 'partner-lc__kv' },
+        el('div', { class: 'partner-lc__kv-label' }, 'Current title'),
+        el('div', { class: 'partner-lc__kv-value' },
+          report.profile?.current_title || el('span', { class: 'partner-contacts__muted' }, '—'),
+          ' ', lcBadge(report.profile?.title_status)),
+      ),
+      lcKV('LinkedIn', report.profile?.linkedin_url ? lcLink(report.profile.linkedin_url) : ''),
+      lcKV('Official bio', report.profile?.official_bio_url ? lcLink(report.profile.official_bio_url) : ''),
+      lcKV('Location', report.profile?.location),
+      lcKV('Role start', [report.profile?.role_start_date, report.profile?.tenure].filter(Boolean).join(' · ')),
+      lcKV('Prior role', report.profile?.prior_role),
+      lcKV('Useful info', report.profile?.useful_info),
+      report.identity?.notes ? lcKV('Identity notes', report.identity.notes) : null,
+      (report.identity?.sources || []).length
+        ? el('div', { class: 'partner-lc__links-row' },
+            ...(report.identity.sources || []).map(s => lcLink(s.url, s.title || 'Source')))
+        : null,
+    ),
+
+    lcSection('Email Evaluation',
+      el('div', { class: 'partner-lc__kv' },
+        el('div', { class: 'partner-lc__kv-label' }, 'Address'),
+        el('div', { class: 'partner-lc__kv-value' },
+          report.email_evaluation?.email || el('span', { class: 'partner-contacts__muted' }, '—'),
+          ' ', lcBadge(report.email_evaluation?.status)),
+      ),
+      lcKV('Dominant format', report.email_evaluation?.dominant_format),
+      lcKV('Rationale', report.email_evaluation?.rationale),
+      lcKV('Limitation', report.email_evaluation?.limitation),
+    ),
+
+    lcSection('Reporting Structure',
+      el('div', { class: 'partner-lc__sub-label' }, 'Reports to'),
+      lcPerson(report.reporting?.reports_to),
+      el('div', { class: 'partner-lc__sub-label' }, 'Functional owner'),
+      lcPerson(report.reporting?.functional_owner),
+      report.reporting?.one_level_up?.generic_role
+        ? el('div', { class: 'partner-lc__kv' },
+            el('div', { class: 'partner-lc__kv-label' }, 'One level up (generic)'),
+            el('div', { class: 'partner-lc__kv-value' },
+              report.reporting.one_level_up.generic_role, ' ', lcBadge(report.reporting.one_level_up.status)),
+          )
+        : null,
+    ),
+
+    (report.peers || []).length
+      ? lcSection('Peers & Collaborators', ...(report.peers || []).map(p => lcPerson(p)))
+      : null,
+
+    lcSection('Direct Reports',
+      ...((report.direct_reports?.people || []).length
+        ? (report.direct_reports.people).map(p => lcPerson(p))
+        : [el('div', { class: 'partner-lc__note' }, report.direct_reports?.note || NO_DIRECT_REPORTS_NOTE)]),
+    ),
+
+    (report.upward_mapping || []).length
+      ? lcSection('Upward Mapping', ...(report.upward_mapping || []).map(u => lcPerson({
+          name: u.person_or_role, title: u.title, label: u.relationship_type,
+          linkedin_url: u.linkedin_url, evidence_url: u.evidence_url, confidence: u.confidence,
+        })))
+      : null,
+
+    lcSection('Role in the B2B Buying Process',
+      el('div', { class: 'partner-lc__kv' },
+        el('div', { class: 'partner-lc__kv-label' }, 'Classification'),
+        el('div', { class: 'partner-lc__kv-value' },
+          lcBadge(report.buying_role?.classification), ' ', lcBadge(report.buying_role?.confidence)),
+      ),
+      lcKV('Rationale', report.buying_role?.rationale),
+      (report.buying_role?.purchase_relevance || []).length
+        ? lcKV('Potential purchase relevance', (report.buying_role.purchase_relevance || []).join(' · '))
+        : null,
+      lcKV('Limitation', report.buying_role?.limitation),
+    ),
+
+    lcSection('Function & Responsibilities',
+      lcKV('Primary function', report.function_profile?.primary_function),
+      (report.function_profile?.verified_responsibilities || []).length
+        ? lcKV('Verified', (report.function_profile.verified_responsibilities || []).join(' · '))
+        : null,
+      (report.function_profile?.interpreted_responsibilities || []).length
+        ? lcKV('Interpreted (cautious)', (report.function_profile.interpreted_responsibilities || []).join(' · '))
+        : null,
+    ),
+
+    (report.content_footprint || []).length
+      ? lcSection('Content Footprint',
+          ...(report.content_footprint || []).map(c => el('div', { class: 'partner-lc__item' },
+            el('div', { class: 'partner-lc__item-main' },
+              lcLink(c.url, c.title), ' ', lcBadge(c.recency),
+            ),
+            el('div', { class: 'partner-lc__item-sub' },
+              [c.type, c.publication, c.date, c.role].filter(Boolean).join(' · ')),
+            c.relevance ? el('div', { class: 'partner-lc__item-sub' }, c.relevance) : null,
+          )))
+      : null,
+
+    (report.themes || []).length
+      ? lcSection('Recurring Professional Themes',
+          ...(report.themes || []).map(t => el('div', { class: 'partner-lc__item' },
+            el('div', { class: 'partner-lc__item-main' }, t.name, ' ', lcBadge(t.confidence)),
+            t.explanation ? el('div', { class: 'partner-lc__item-sub' }, t.explanation) : null,
+            el('div', { class: 'partner-lc__links-row' }, ...(t.urls || []).map(u => lcLink(u, 'Source'))),
+          )))
+      : null,
+
+    report.post_insights && (report.post_insights.posts_reviewed > 0 || (report.post_insights.colleagues || []).length)
+      ? lcSection('Public Post & Comment Insights',
+          lcKV('Posts reviewed', String(report.post_insights.posts_reviewed || 0)
+            + (report.post_insights.date_range ? ` (${report.post_insights.date_range})` : '')),
+          (report.post_insights.topics || []).length ? lcKV('Main topics', report.post_insights.topics.join(' · ')) : null,
+          ...(report.post_insights.colleagues || []).map(c2 => lcPerson({
+            name: c2.name, title: c2.title, relationship: c2.relationship, evidence_url: c2.evidence_url,
+          })),
+          lcKV('Limitation', report.post_insights.limitation),
+        )
+      : null,
+
+    (report.timing_signals || []).length
+      ? lcSection('Individual Timing Signals',
+          ...(report.timing_signals || []).map(t => el('div', { class: 'partner-lc__item' },
+            el('div', { class: 'partner-lc__item-main' }, lcLink(t.url, t.event)),
+            el('div', { class: 'partner-lc__item-sub' }, [t.date, t.relevance].filter(Boolean).join(' · ')),
+          )))
+      : null,
+
+    report.checklist
+      ? lcSection('Verification Checklist',
+          el('div', { class: 'partner-lc__checklist' },
+            ...(report.checklist || []).map(c => el('div', { class: 'partner-lc__check' },
+              el('span', { class: 'partner-lc__check-label' }, checklistItemLabel(c)),
+              lcBadge(c.result),
+            ))),
+        )
+      : null,
+
+    lcSection('Confidence Summary',
+      lcKV('Verification coverage', conf.coverage_calc),
+      lcKV('Overall confidence', `${conf.overall_score}/10 (${conf.label})`),
+      lcKV('Rationale', conf.rationale),
+      lcKV('Sources summary', conf.sources_summary),
+      (conf.gaps || []).length ? lcKV('Gaps', conf.gaps.join(' · ')) : null,
+      (conf.flagged || []).length
+        ? el('div', { class: 'partner-lc__banner partner-lc__banner--danger' }, conf.flagged.join(' '))
+        : null,
+    ),
+
+    report.loop_check
+      ? lcSection('Final Loop Check',
+          lcKV('Result', report.loop_check.result),
+          lcKV('Checked at', report.loop_check.checked_at),
+        )
+      : null,
+
+    el('div', { class: 'partner-lc__compliance' }, report.compliance_note || ''),
+  );
+
+  openModal({
+    title: `Contact Analysis — ${contact.name || contact.email || 'Contact'}`,
+    content,
+    className: 'modal--wide',
+    footer: [
+      el('button', {
+        class: 'btn btn--ghost',
+        onClick: () => {
+          const text = leadCheckReportToPlainText(report, contact);
+          navigator.clipboard.writeText(text).then(
+            () => showToast('Report copied to clipboard', 'success'),
+            () => showToast('Failed to copy', 'error'),
+          );
+        },
+      }, 'Copy Report'),
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
+      el('button', {
+        class: 'btn btn--primary',
+        onClick: () => { closeModal(); triggerReAnalyze(partner, contact); },
+      }, 'Re-analyze'),
+    ],
+  });
+}
+
+// Re-run from the modal: the table button for this row (if rendered) shows
+// the in-flight state; a detached placeholder button is used otherwise so
+// runLeadCheck always has a label target.
+function triggerReAnalyze(partner, contact) {
+  const placeholder = el('button', {}, 'Analyze');
+  runLeadCheck(partner, contact, placeholder);
+  reRender(partner.partner_id);
 }
 
 // ============================================
