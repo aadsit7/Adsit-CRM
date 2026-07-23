@@ -725,6 +725,12 @@ async function handleScanContacts(partner, btn) {
           today: todayISO(),
         });
         extracted.push(...result.contacts);
+        if (result.partial) {
+          // The AI reply was cut off at its output limit even after source
+          // splitting. Everything recovered is verified and still saved —
+          // this only means the roster may not be complete.
+          warnings.push(`Note scan: the AI reply was cut off — kept ${result.contacts.length} verified contact(s); some people may be missing.`);
+        }
         if (result.dropped.length) {
           console.info('[Partner Contacts] proposals rejected by verbatim verification:', result.dropped);
         }

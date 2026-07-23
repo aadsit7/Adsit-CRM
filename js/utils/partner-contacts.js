@@ -605,6 +605,54 @@ function looksLikeEmail(s) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim());
 }
 
+// ── Truncated-response salvage ──────────────────────────────────────
+// A reply cut off at the model's output-token limit (stop_reason
+// "max_tokens") loses the tail of the JSON — Safari reports it as
+// `JSON Parse error: Expected ']'`. Instead of failing the whole scan,
+// walk the contacts array and recover every complete `{...}` object,
+// parsing each in isolation so one malformed entry can't sink the rest.
+// Safe by construction: every recovered contact still goes through the
+// full verbatim validation, so a salvaged parse can never save anything
+// a clean parse wouldn't have.
+export function salvageContactsFromTruncatedJson(body) {
+  const s = String(body || '');
+  const key = s.search(/"contacts"\s*:/);
+  if (key === -1) return null;
+  const arrStart = s.indexOf('[', key);
+  if (arrStart === -1) return null;
+
+  const out = [];
+  let inString = false;
+  let escaped = false;
+  let depth = 0;
+  let objStart = -1;
+  for (let i = arrStart + 1; i < s.length; i += 1) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') { if (depth === 0) objStart = i; depth += 1; continue; }
+    if (ch === '}') {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && objStart !== -1) {
+        try {
+          const obj = JSON.parse(s.slice(objStart, i + 1));
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) out.push(obj);
+        } catch { /* malformed entry — skip it, keep scanning */ }
+        objStart = -1;
+      }
+      continue;
+    }
+    if (ch === ']' && depth === 0) break; // the array closed cleanly
+  }
+  return out.length ? out : null;
+}
+
 /**
  * Parse and validate the model's raw text into verified contacts.
  * Every kept contact is grounded in the supplied sources (see the module
@@ -614,14 +662,21 @@ function looksLikeEmail(s) {
  * works_for_partner:"no", anyone whose VERIFIED company doesn't match
  * `partnerName`, and anyone whose verified company is the CRM owner's own.
  *
+ * Resilience: when the payload doesn't parse (typically a response cut
+ * off at the output-token limit), complete contact objects are salvaged
+ * from the broken array instead of failing the scan, and the result is
+ * flagged `partial: true` so callers can warn that people may be missing.
+ *
  * @param {string} rawText
  * @param {object} options
  * @param {Array}  options.sources      The exact sources given to the prompt.
  * @param {string} [options.partnerName] Enables the company↔partner check.
  * @param {string} [options.ownCompany]  Defaults to CRM_OWNER_COMPANY.
- * @returns {{ contacts: Array, note: string, dropped: Array<{name, reason}> }}
+ * @param {boolean} [options.truncated]  Caller saw stop_reason "max_tokens";
+ *   marks the result partial and clarifies the error if nothing is usable.
+ * @returns {{ contacts: Array, note: string, dropped: Array<{name, reason}>, partial: boolean }}
  */
-export function parsePartnerContactsResponse(rawText, { sources = [], partnerName = '', ownCompany = CRM_OWNER_COMPANY } = {}) {
+export function parsePartnerContactsResponse(rawText, { sources = [], partnerName = '', ownCompany = CRM_OWNER_COMPANY, truncated = false } = {}) {
   if (typeof rawText !== 'string' || !rawText.trim()) {
     const err = new Error('The contact extraction returned an empty response.');
     err.code = 'PARTNER_CONTACTS_EMPTY';
@@ -636,12 +691,20 @@ export function parsePartnerContactsResponse(rawText, { sources = [], partnerNam
   if (first >= 0 && last > first) body = body.slice(first, last + 1);
 
   let parsed;
+  let salvaged = false;
   try {
     parsed = JSON.parse(body);
   } catch (e) {
-    const err = new Error(`Contact extraction JSON parse failed: ${e.message}`);
-    err.code = 'PARTNER_CONTACTS_INVALID';
-    throw err;
+    const recovered = salvageContactsFromTruncatedJson(body);
+    if (recovered) {
+      parsed = { contacts: recovered, note: '' };
+      salvaged = true;
+    } else {
+      const hint = truncated ? ' (the reply was cut off at the output-token limit)' : '';
+      const err = new Error(`Contact extraction JSON parse failed: ${e.message}${hint}`);
+      err.code = 'PARTNER_CONTACTS_INVALID';
+      throw err;
+    }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     const err = new Error('Contact extraction response is not a JSON object.');
@@ -735,6 +798,10 @@ export function parsePartnerContactsResponse(rawText, { sources = [], partnerNam
     contacts: dedupeExtracted(contacts),
     note: cleanStr(parsed.note, 300),
     dropped,
+    // Partial means "people may be missing": the reply was cut off at the
+    // output-token limit and/or contacts had to be salvaged from broken
+    // JSON. What IS here is fully verified either way.
+    partial: salvaged || !!truncated,
   };
 }
 

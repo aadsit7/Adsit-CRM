@@ -444,6 +444,77 @@ test('parse: spelling variants and bare first names collapse into one contact', 
 test('parse: malformed payloads throw coded errors', () => {
   assert.throws(() => parsePartnerContactsResponse('', { sources: [] }), /PARTNER_CONTACTS_EMPTY|empty/i);
   assert.throws(() => parsePartnerContactsResponse('not json at all', { sources: [] }), (e) => e.code === 'PARTNER_CONTACTS_INVALID');
+  // With the truncation hint the error explains itself instead of leaking
+  // a bare engine message ("JSON Parse error: Expected ']'").
+  assert.throws(
+    () => parsePartnerContactsResponse('not json at all', { sources: [], truncated: true }),
+    /cut off at the output-token limit/
+  );
+});
+
+// ── Truncated / broken JSON salvage ──────────────────────────────────
+// The screenshot bug: a reply cut off at max_tokens loses the JSON tail
+// (Safari: "JSON Parse error: Expected ']'") and the whole note scan used
+// to fail. Complete contacts must be recovered — and still fully verified.
+test('parse: reply cut off mid-contact salvages the complete ones and flags partial', () => {
+  const full = respond({
+    contacts: [
+      { name: 'Jane Doe', role: 'Director of IT', company: '', email: 'jane.doe@acme.com', phone: '', source_ids: ['t1'], context: '' },
+      { name: 'John Smith', role: '', company: '', email: '', phone: '', source_ids: ['t2'], context: '' },
+      { name: 'Priya Nair', role: '', company: '', email: '', phone: '', source_ids: ['d1'], context: '' },
+    ],
+    note: 'x',
+  });
+  // Cut inside the third contact's name — exactly what max_tokens does.
+  const cut = full.slice(0, full.lastIndexOf('Priya') + 3);
+  assert.throws(() => JSON.parse(cut)); // sanity: genuinely broken JSON
+
+  const { contacts, dropped, partial } = parsePartnerContactsResponse(cut, { sources: p1Sources(), truncated: true });
+  assert.equal(partial, true);
+  assert.deepEqual(contacts.map(c => c.name).sort(), ['Jane Doe', 'John Smith']);
+  // Salvaged contacts still pass the normal grounding pipeline.
+  assert.equal(contacts.find(c => c.name === 'Jane Doe').email, 'jane.doe@acme.com');
+  assert.equal(dropped.length, 0);
+});
+
+test('parse: salvage verifies verbatim — a hallucinated contact in a truncated reply is still dropped', () => {
+  const full = respond({
+    contacts: [
+      { name: 'Carlos Rivera', role: '', company: '', email: '', phone: '', source_ids: ['t1'], context: '' },
+      { name: 'Jane Doe', role: '', company: '', email: '', phone: '', source_ids: ['t1'], context: '' },
+      { name: 'Priya Nair', role: '', company: '', email: '', phone: '', source_ids: ['d1'], context: '' },
+    ],
+    note: '',
+  });
+  const cut = full.slice(0, full.lastIndexOf('Priya') + 3);
+  const { contacts, dropped, partial } = parsePartnerContactsResponse(cut, { sources: p1Sources() });
+  assert.equal(partial, true); // salvage alone marks the result partial
+  assert.deepEqual(contacts.map(c => c.name), ['Jane Doe']);
+  assert.equal(dropped[0].name, 'Carlos Rivera');
+});
+
+test('parse: one malformed contact object is skipped; intact neighbors survive', () => {
+  const raw = '{"contacts":['
+    + '{"name":"Jane Doe","role":"","company":"","email":"","phone":"","source_ids":["t1"],"context":""},'
+    + '{"name":"Broken "Quote" Entry","role":"","company":"","email":"","phone":"","source_ids":["t1"],"context":""},'
+    + '{"name":"John Smith","role":"","company":"","email":"","phone":"","source_ids":["t2"],"context":""}'
+    + '],"note":""}';
+  assert.throws(() => JSON.parse(raw)); // sanity: unescaped quotes break it
+
+  const { contacts, partial } = parsePartnerContactsResponse(raw, { sources: p1Sources() });
+  assert.equal(partial, true);
+  assert.deepEqual(contacts.map(c => c.name).sort(), ['Jane Doe', 'John Smith']);
+});
+
+test('parse: clean payloads report partial only under the truncation hint', () => {
+  const payload = respond({
+    contacts: [{ name: 'Jane Doe', role: '', company: '', email: '', phone: '', source_ids: ['t1'], context: '' }],
+    note: '',
+  });
+  assert.equal(parsePartnerContactsResponse(payload, { sources: p1Sources() }).partial, false);
+  // stop_reason "max_tokens" means the tail was cut even if what remains
+  // happens to parse — the roster may be incomplete either way.
+  assert.equal(parsePartnerContactsResponse(payload, { sources: p1Sources(), truncated: true }).partial, true);
 });
 
 // ── Attachment (attendee pipeline) mapping ───────────────────────────
