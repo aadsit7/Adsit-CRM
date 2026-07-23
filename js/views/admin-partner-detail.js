@@ -45,6 +45,7 @@ import {
   leadCheckReportToPlainText,
 } from '../utils/partner-contact-leadcheck.js';
 import { requestLeadCheckAnalysis } from '../utils/partner-contact-leadcheck-client.js';
+import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 
 export const title = 'Partner Detail';
 
@@ -316,9 +317,13 @@ function buildPartnerDocumentsSection(partner) {
       file.analyzed = 'TRUE';
       showToast('Document analyzed and added to descriptions', 'success');
       // Reload so the new description appears (with a real row index) and the
-      // document shows as analyzed — the same full re-render every other
-      // mutation in this view uses.
-      reRender(partner.partner_id);
+      // document shows as analyzed — but only if the user is still on THIS
+      // partner's page. The analysis is persisted regardless, and the floating
+      // Randy pill reports completion if they have navigated away (guarding
+      // this prevents a late re-render from clobbering another view).
+      if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
+        reRender(partner.partner_id);
+      }
     },
   });
 
@@ -472,15 +477,21 @@ function buildPartnerContactsSection(partner, contacts) {
         )
   );
 
+  // A scan started here keeps running in the background even if the view
+  // re-renders (or the user leaves and comes back), so a freshly built button
+  // reflects that in-flight state instead of looking idle. The floating Randy
+  // pill is the primary, always-visible progress indicator.
+  const scanning = contactScanInFlight === partner.partner_id;
   const scanBtn = el('button', {
     class: 'partner-detail-page__section-cta',
+    disabled: scanning,
     onClick: (e) => {
       e.stopPropagation();
       handleScanContacts(partner, scanBtn);
     },
   },
-    el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 8.8L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
-    'Scan Sources',
+    scanning ? null : el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 8.8L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
+    scanning ? 'Scanning…' : 'Scan Sources',
   );
 
   const header = el('div', {
@@ -660,7 +671,10 @@ async function handleDeleteContact(contact, partner) {
 //      always survive; new people become new rows.
 // Each stage degrades independently — one broken attachment or a missing AI
 // key never discards what the other stages found.
-let contactScanInFlight = false;
+// Holds the partner_id whose contact scan is currently running (or null).
+// A partner id — rather than a bare boolean — lets a re-rendered Scan button
+// show the correct per-partner state.
+let contactScanInFlight = null;
 
 // Bounds for the scan's file-API calls, so a wedged connection turns into a
 // per-stage warning instead of a button stuck on "Preparing…" forever.
@@ -677,10 +691,17 @@ function scanTimeoutSignal(ms) {
 
 async function handleScanContacts(partner, btn) {
   if (contactScanInFlight) return;
-  contactScanInFlight = true;
+  contactScanInFlight = partner.partner_id;
   const originalHtml = btn.innerHTML;
   btn.disabled = true;
-  const setLabel = (text) => { btn.textContent = text; };
+  // Progress rides the global Randy pill so it stays visible after the user
+  // leaves this partner page; setLabel also mirrors the current stage onto the
+  // button while it is still on-screen.
+  const pill = createPill('Preparing…', { label: partner.display_name || 'Partner' });
+  const setLabel = (text) => {
+    updatePillStage(pill, text);
+    if (btn.isConnected) btn.textContent = text;
+  };
   const warnings = [];
 
   try {
@@ -831,27 +852,33 @@ async function handleScanContacts(partner, btn) {
       if (merge.updated) bits.push(`${merge.updated} updated`);
       if (skipped.length) bits.push(`${skipped.length} skipped (no partner email)`);
       showToast(`Contacts scan: ${bits.join(', ')}${warnings.length ? ` · ${warnings.length} warning(s) — see console` : ''}`, 'success');
+      markPillSuccess(pill, bits.join(', '));
     } else if (warnings.length) {
       showToast(`Contacts scan finished with warnings: ${warnings[0]}`, 'error');
+      markPillFailure(pill, `Finished with ${warnings.length} warning(s)`);
     } else if (skipped.length) {
       showToast(`Scan complete — ${skipped.length} ${skipped.length === 1 ? 'person' : 'people'} found but not added: new contacts need an email at the partner's domain`, 'info');
+      markPillSuccess(pill, `${skipped.length} found · none added`);
     } else {
       showToast('Scan complete — no new contacts found in the sources', 'info');
+      markPillSuccess(pill, 'No new contacts found');
     }
 
     collapsedContactSections.delete(partner.partner_id);
-    // A scan with attachments can run for minutes — only re-render if the
-    // user is still looking at THIS partner's detail page. The results are
-    // already persisted either way.
+  } catch (err) {
+    showToast(err.message || 'Contact scan failed', 'error');
+    markPillFailure(pill, 'Scan failed');
+  } finally {
+    contactScanInFlight = null;
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    // A scan with attachments can run for minutes — only re-render if the user
+    // is still looking at THIS partner's detail page (results are persisted
+    // either way). Runs after the in-flight flag is cleared so the rebuilt
+    // Scan button shows its idle state; the Randy pill has already settled.
     if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
       reRender(partner.partner_id);
     }
-  } catch (err) {
-    showToast(err.message || 'Contact scan failed', 'error');
-  } finally {
-    contactScanInFlight = false;
-    btn.disabled = false;
-    btn.innerHTML = originalHtml;
   }
 }
 
@@ -932,6 +959,13 @@ async function runLeadCheck(partner, contact, btn) {
   const originalLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Analyzing…';
+  // Global Randy pill = the always-visible progress indicator, so the user can
+  // leave this partner page and still watch the contact's analysis run.
+  const pill = createPill('Analyzing…', { label: contact.name || 'Contact' });
+  const setStage = (text) => {
+    updatePillStage(pill, text);
+    if (btn.isConnected) btn.textContent = text;
+  };
 
   try {
     // Header extension also covers sheets created before the analysis
@@ -959,7 +993,7 @@ async function runLeadCheck(partner, contact, btn) {
       });
       await saveContactAnalysis(partner, contactId, { state: 'NEEDS_MORE_INFORMATION', lastVerified: '', record });
       showToast('Analysis paused: the selected contact does not contain enough professional identity information to distinguish the individual reliably.', 'info');
-      leadCheckReRender(partner);
+      markPillFailure(pill, 'Needs more info');
       return;
     }
 
@@ -969,7 +1003,7 @@ async function runLeadCheck(partner, contact, btn) {
     })();
     const report = await requestLeadCheckAnalysis({
       contact, snapshot, sourceMaterial, nowIso, timezone,
-      onProgress: (round) => { btn.textContent = round > 1 ? `Analyzing… (round ${round})` : 'Analyzing…'; },
+      onProgress: (round) => setStage(round > 1 ? `Verifying… (round ${round})` : 'Analyzing…'),
     });
 
     const record = buildAnalysisRecord({
@@ -991,7 +1025,19 @@ async function runLeadCheck(partner, contact, btn) {
     };
     const [msg, kind] = toastByState[report.state] || ['Analysis finished.', 'success'];
     showToast(filledRole ? `${msg} Verified role "${filledRole}" filled the empty Role field.` : msg, kind);
-    leadCheckReRender(partner);
+
+    // Settle the pill to match the verdict — green tick for a clean verify,
+    // amber for outcomes that still want the user's eyes.
+    const pillByState = {
+      COMPLETE:               { text: 'Identity & role verified', ok: true },
+      COMPLETE_WITH_GAPS:     { text: 'Verified with gaps',       ok: true },
+      NEEDS_REVIEW:           { text: 'Needs review',             ok: false },
+      CONFLICT_FOUND:         { text: 'Conflicts found',          ok: false },
+      NEEDS_MORE_INFORMATION: { text: 'Needs more info',          ok: false },
+    };
+    const outcome = pillByState[report.state] || { text: 'Analysis finished', ok: true };
+    if (outcome.ok) markPillSuccess(pill, outcome.text);
+    else markPillFailure(pill, outcome.text);
   } catch (err) {
     console.error('[LeadCheck]', err);
     // Persist the failure so the row shows a retryable state — but never
@@ -1004,11 +1050,16 @@ async function runLeadCheck(partner, contact, btn) {
       await saveContactAnalysis(partner, contactId, { state: 'FAILED', lastVerified: '', record });
     } catch { /* ignore secondary failures */ }
     showToast(err.message || 'Contact analysis failed', 'error');
-    leadCheckReRender(partner);
+    markPillFailure(pill, 'Analysis failed');
   } finally {
     leadCheckRuns.delete(contactId);
     btn.disabled = false;
     btn.textContent = originalLabel;
+    // Re-render after the in-flight flag clears so the rebuilt row button
+    // reflects the settled state instead of a stuck "Analyzing…". Guarded to
+    // this partner's page; the result is persisted regardless of where the
+    // user navigated.
+    leadCheckReRender(partner);
   }
 }
 
