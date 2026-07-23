@@ -392,10 +392,16 @@ function buildModeToggle(label, stateKey) {
   const grp = document.createElement('div');
   grp.className = 'qf-toggle-group';
 
+  // Reflect the persisted mode so a re-render (e.g. the dashboard rebuilds
+  // when a type filter changes) keeps the toggle in sync with the body,
+  // which postRenderSetup draws from modeIsNew.
+  const isNewNow = !!modeIsNew[stateKey];
+
   ['No', 'Yes'].forEach(val => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'qf-toggle-btn' + (val === 'No' ? ' qf-toggle-btn--active' : '');
+    const active = (val === 'Yes') === isNewNow;
+    btn.className = 'qf-toggle-btn' + (active ? ' qf-toggle-btn--active' : '');
     btn.textContent = val;
 
     btn.addEventListener('click', () => {
