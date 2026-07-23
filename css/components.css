@@ -7697,3 +7697,304 @@
   gap: 14px;
   white-space: nowrap;
 }
+
+/* ============================================
+   LeadCheck — row-level contact analysis (Partner Contacts)
+   ============================================
+   Row button variants plus the report modal. Same Recast idiom as the
+   contacts table: sharp corners, brand blue, uppercase micro-labels. */
+
+.partner-lc__row-btn--view,
+.partner-lc__row-btn--review {
+  color: #0A8F82;
+}
+
+.partner-lc__row-btn--review {
+  color: #B97A1A;
+}
+
+.partner-lc__row-btn--add_info {
+  color: #B97A1A;
+}
+
+.partner-lc__row-btn--analyzing {
+  color: #8A93A8;
+  cursor: default;
+}
+
+.partner-lc {
+  font-size: 13px;
+  color: #171D2B;
+}
+
+.partner-lc__paragraph {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.partner-lc__missing-list {
+  margin: 0 0 6px 18px;
+  line-height: 1.7;
+}
+
+.partner-lc__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #DCE1EC;
+}
+
+.partner-lc__header-badges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.partner-lc__header-meta {
+  font-size: 12px;
+  color: #4A5468;
+  font-variant-numeric: tabular-nums;
+}
+
+.partner-lc__banner {
+  background: #FDF6E8;
+  border: 1px solid #EAD9B0;
+  color: #7A5A16;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.partner-lc__banner--danger {
+  background: #FDECEE;
+  border-color: #F3C2C8;
+  color: #A83A44;
+}
+
+.partner-lc__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 0;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+.partner-lc__badge--ok { background: #E4F3F1; color: #0A8F82; }
+.partner-lc__badge--soft { background: #E8EFFD; color: #2456D4; }
+.partner-lc__badge--warn { background: #FDF6E8; color: #B97A1A; }
+.partner-lc__badge--danger { background: #FDECEE; color: #EF4E5B; }
+.partner-lc__badge--muted { background: #F1F4FA; color: #4A5468; }
+
+.partner-lc__section {
+  margin-bottom: 16px;
+  border: 1px solid #DCE1EC;
+  background: #FFFFFF;
+  padding: 12px 14px;
+}
+
+.partner-lc__section-title {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #2F6BFF;
+  margin-bottom: 10px;
+}
+
+.partner-lc__sub-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #4A5468;
+  margin: 8px 0 4px;
+}
+
+.partner-lc__kv {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 10px;
+  padding: 4px 0;
+  align-items: baseline;
+}
+
+.partner-lc__kv-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4A5468;
+}
+
+.partner-lc__kv-value {
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.partner-lc__link {
+  color: #2F6BFF;
+  text-decoration: none;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.partner-lc__link:hover {
+  text-decoration: underline;
+}
+
+.partner-lc__links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.partner-lc__person {
+  padding: 6px 0;
+  border-bottom: 1px dashed #F1F4FA;
+}
+
+.partner-lc__person:last-child {
+  border-bottom: 0;
+}
+
+.partner-lc__person-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.partner-lc__person-name {
+  font-weight: 600;
+}
+
+.partner-lc__person-title {
+  color: #4A5468;
+  font-size: 12px;
+}
+
+.partner-lc__person-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.partner-lc__note {
+  color: #4A5468;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.partner-lc__item {
+  padding: 6px 0;
+  border-bottom: 1px dashed #F1F4FA;
+}
+
+.partner-lc__item:last-child {
+  border-bottom: 0;
+}
+
+.partner-lc__item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.partner-lc__item-sub {
+  font-size: 12px;
+  color: #4A5468;
+  padding-top: 1px;
+}
+
+.partner-lc__compare {
+  border: 1px solid #DCE1EC;
+  margin-bottom: 16px;
+  background: #FFFFFF;
+}
+
+.partner-lc__compare-head,
+.partner-lc__compare-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #F1F4FA;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.partner-lc__compare-head {
+  background: #F1F4FA;
+  color: #2F6BFF;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.partner-lc__compare-row:last-child {
+  border-bottom: 0;
+}
+
+.partner-lc__compare-row--differs {
+  background: #FDF6E8;
+}
+
+.partner-lc__compare-label {
+  font-weight: 700;
+  color: #4A5468;
+}
+
+.partner-lc__checklist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 18px;
+}
+
+.partner-lc__check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.partner-lc__check-label {
+  color: #171D2B;
+}
+
+.partner-lc__compliance {
+  font-size: 11px;
+  color: #4A5468;
+  font-style: italic;
+  border-top: 1px solid #DCE1EC;
+  padding-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .partner-lc__kv {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .partner-lc__checklist {
+    grid-template-columns: 1fr;
+  }
+  .partner-lc__compare-head,
+  .partner-lc__compare-row {
+    grid-template-columns: 70px 1fr 1fr;
+  }
+}

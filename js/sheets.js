@@ -5,7 +5,7 @@
 import { CONFIG, getRuntimeConfig } from './config.js';
 import { getAccessToken, getCurrentUser, clearAccessToken } from './auth.js';
 import { normalizeProvider } from './utils/ai-providers.js';
-import { PARTNER_CONTACT_HEADERS } from './utils/partner-contacts.js';
+import { PARTNER_CONTACT_HEADERS, isHeaderPrefixOf } from './utils/partner-contacts.js';
 
 /**
  * Get the effective Spreadsheet ID (runtime override or hardcoded).
@@ -514,9 +514,12 @@ export async function initializeSheet() {
  * Ensure one sheet tab exists with its header row, creating it when missing.
  * Used by features whose backing tab may post-date the spreadsheet's original
  * initialization (e.g. Partner_Contacts) so their first write can't fail on a
- * missing range. No-op in demo mode and when the tab already exists. Creating
- * a tab requires an OAuth token; without one this throws a readable error
- * pointing at Setup → Initialize Sheet.
+ * missing range. When the tab exists but its header row is a strict PREFIX of
+ * the expected headers (the schema gained columns), the header row is
+ * extended in place — data columns keep their positions, so this is safe.
+ * A header row that diverges in any other way is left untouched.
+ * No-op in demo mode. Creating or extending requires an OAuth token; without
+ * one this throws a readable error pointing at Setup → Initialize Sheet.
  */
 export async function ensureSheetWithHeaders(sheetName, headerRow) {
   if (!isConfigured()) return { created: false };
@@ -531,7 +534,39 @@ export async function ensureSheetWithHeaders(sheetName, headerRow) {
   if (!metaRes.ok) await throwWriteError(metaRes, 'Failed to read spreadsheet metadata');
   const meta = await metaRes.json();
   const exists = (meta.sheets || []).some(s => s.properties?.title === sheetName);
-  if (exists) return { created: false };
+
+  const writeHeaderRow = async (label) => {
+    const token = getAccessToken();
+    if (!token) {
+      throw new Error(`The "${sheetName}" tab ${label}. `
+        + 'Log in with Google SSO and run Setup → Initialize Sheet to fix it.');
+    }
+    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+    const headerRes = await fetch(`${base}/values/${encodeURIComponent(sheetName)}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ values: [headerRow] }),
+    });
+    if (!headerRes.ok) await throwWriteError(headerRes, `Failed to write headers for "${sheetName}"`);
+  };
+
+  if (exists) {
+    // Read the actual header row; extend it only when it is a strict prefix
+    // of the expected schema (i.e. columns were appended in a newer version).
+    const token = getAccessToken();
+    const headerUrl = `${base}/values/${encodeURIComponent(`${sheetName}!1:1`)}${authParam ? '?' + authParam : ''}`;
+    const headerRes = await fetch(headerUrl, token ? { headers: { 'Authorization': `Bearer ${token}` } } : undefined);
+    if (headerRes.ok) {
+      const headerData = await headerRes.json();
+      const actual = (headerData.values && headerData.values[0]) || [];
+      if (isHeaderPrefixOf(actual, headerRow)) {
+        await writeHeaderRow('needs new columns added to its header row');
+        invalidateSheetCache(sheetName);
+        return { created: false, extended: true };
+      }
+    }
+    return { created: false };
+  }
 
   const token = getAccessToken();
   if (!token) {
@@ -547,12 +582,7 @@ export async function ensureSheetWithHeaders(sheetName, headerRow) {
   });
   if (!batchRes.ok) await throwWriteError(batchRes, `Failed to create the "${sheetName}" tab`);
 
-  const headerRes = await fetch(`${base}/values/${encodeURIComponent(sheetName)}!A1?valueInputOption=RAW`, {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({ values: [headerRow] }),
-  });
-  if (!headerRes.ok) await throwWriteError(headerRes, `Failed to write headers for "${sheetName}"`);
+  await writeHeaderRow('is missing its header row');
 
   invalidateSheetCache(sheetName);
   return { created: true };
@@ -766,7 +796,7 @@ let demoPartnerContacts = [
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 18; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 19; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {
