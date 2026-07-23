@@ -681,8 +681,12 @@ async function handleScanContacts(partner, btn) {
         }
 
         if (Array.isArray(data.contacts)) {
+          // partnerName arms the affiliation filter: attendee rows whose
+          // stated company is ours or some other non-partner company are
+          // not partner contacts.
           extracted.push(...attendeeContactsToExtracted(data.contacts, {
             docId: file.doc_id, fileName, date: dateISO,
+            partnerName: partner.display_name || '',
           }));
         } else {
           // Older deployed Apps Script without the attendee pipeline — feed
