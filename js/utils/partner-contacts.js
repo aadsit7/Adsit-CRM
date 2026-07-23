@@ -20,10 +20,27 @@
 //     treated as worse than empty);
 //   • cited source ids that don't exist, or that don't actually contain the
 //     person, are dropped; a contact with no surviving source is discarded.
+//
+// AFFILIATION RULE (partner-side people only):
+// A row in this table means "a person working for / representing THIS
+// partner". The model judges affiliation per person (works_for_partner);
+// anyone it ties to a different employer — our own team, a customer,
+// another vendor — is excluded. Deterministic backstops: a contact whose
+// VERIFIED company doesn't match the partner is dropped, and the CRM
+// owner's own company (CRM_OWNER_COMPANY) is never a partner contact.
+//
+// DUPLICATE RULE (similar-name reasoning):
+// One human must never become two rows. Dedupe and merge match by email,
+// then by name — exact first, then conservative similarity: a one-character
+// insertion/deletion ("Jack Smith" ↔ "Jack Smiths", "Jon" ↔ "John"),
+// initials ("J. Smith" ↔ "Jack Smith"), and subset names ("Aaron" ↔
+// "Aaron Adsit") count as the same person when unambiguous and the emails
+// don't contradict; substitutions never match ("Mark" ≠ "Mary").
+//
 // Attachment (Drive file) contacts arrive from the Apps Script attendee
 // pipeline, which is deterministic for spreadsheets and strictly grounded
-// for documents — they are mapped, not re-validated, and carry their file
-// as provenance.
+// for documents — they are mapped (and affiliation-filtered), not
+// re-validated, and carry their file as provenance.
 //
 // No DOM, no network — fully testable under Node.
 // ============================================================
@@ -71,6 +88,12 @@ export const PARTNER_CONTACT_SOURCE_TYPES = new Set([
   'attachment',        // a Drive file attached to the partner (file API)
   'manual',            // added/edited by hand in the portal
 ]);
+
+// The CRM owner's own organization. People on OUR side of the relationship
+// (the folks writing these notes) are never partner contacts, no matter
+// which partner record mentions them. Matches the branding hardcoded across
+// the app (PDF footers, event stages).
+export const CRM_OWNER_COMPANY = 'Recast Software';
 
 // ── Source-collection limits (named so they can be tuned in one place) ─
 export const CONTACT_SOURCE_LIMITS = {
@@ -140,6 +163,160 @@ export function nameFoundInText(name, text) {
   return perWord[0].some(anchor =>
     perWord.every(list => list.some(pos => Math.abs(pos - anchor) <= NAME_WINDOW_CHARS))
   );
+}
+
+// ── Similar-name reasoning (duplicate prevention) ───────────────────
+// "Jack Smith" vs "Jack Smiths", "Jon" vs "John Smith", "J. Smith" vs
+// "Jack Smith" — one human, spelled slightly differently, must never
+// become two contact rows. Matching is deliberately conservative:
+//   • a token may differ by ONE inserted/deleted character (typo, plural,
+//     Jon/John) but never by substitution — "Mark" and "Mary" are one
+//     substitution apart and stay two people;
+//   • a single-letter token acts as an initial ("J." matches "Jack"), but
+//     initials alone can never link two names;
+//   • a shorter name folds into a fuller one ("Aaron" → "Aaron Adsit")
+//     only when every one of its tokens is accounted for — and callers
+//     additionally require the fuzzy match to be UNambiguous (exactly one
+//     candidate) and the emails not to contradict.
+const FUZZY_TOKEN_MIN_LEN = 4;
+
+function nameTokens(name) {
+  return normalizeForMatch(name).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+// One-character insertion/deletion equality ("smith"/"smiths",
+// "jon"/"john"). Substitutions and transpositions intentionally fail.
+function oneInsertDeleteApart(a, b) {
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  if (l.length - s.length !== 1 || l.length < FUZZY_TOKEN_MIN_LEN) return false;
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < s.length) {
+    if (s[i] === l[j]) { i += 1; j += 1; continue; }
+    if (skipped) return false;
+    skipped = true;
+    j += 1;
+  }
+  return true;
+}
+
+function tokensNearlyEqual(a, b) { return a === b || oneInsertDeleteApart(a, b); }
+
+function tokenMatchesAllowingInitial(a, b) {
+  if (tokensNearlyEqual(a, b)) return true;
+  if (a.length === 1 && b.length > 1 && b[0] === a) return true;
+  if (b.length === 1 && a.length > 1 && a[0] === b) return true;
+  return false;
+}
+
+function substantiveTokenCount(name) {
+  return nameTokens(name).filter(t => t.length >= 2).length;
+}
+
+/**
+ * Are these two names plausibly the same individual? Every token of the
+ * shorter name must claim a DISTINCT token of the longer one (exact claims
+ * first, then one-insert/delete fuzzy or initial), and at least one claimed
+ * pair must be a real word on both sides — initials alone never link names.
+ * Word order is ignored ("Smith, Jack" ↔ "Jack Smiths").
+ */
+export function namesLikelySamePerson(a, b) {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (!ta.length || !tb.length) return false;
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  const used = new Array(long.length).fill(false);
+  const claim = (tok, matcher) => {
+    for (let j = 0; j < long.length; j += 1) {
+      if (!used[j] && matcher(tok, long[j])) { used[j] = true; return j; }
+    }
+    return -1;
+  };
+  // Exact claims run first so a fuzzy token can't steal another token's
+  // exact partner.
+  const pending = [];
+  let substantive = false;
+  for (const tok of short) {
+    const j = claim(tok, (x, y) => x === y);
+    if (j === -1) { pending.push(tok); continue; }
+    if (tok.length >= 2) substantive = true;
+  }
+  for (const tok of pending) {
+    const j = claim(tok, tokenMatchesAllowingInitial);
+    if (j === -1) return false;
+    if (tok.length >= 2 && long[j].length >= 2) substantive = true;
+  }
+  return substantive;
+}
+
+/**
+ * Like nameFoundInText, but each word tolerates a one-character
+ * insertion/deletion ("Jack Smith" verifies against a source that wrote
+ * "Jack Smiths"). The exact check runs first; the tight co-occurrence
+ * window still applies, so names can never be stitched from two people
+ * mentioned apart, and single-word names still require the exact phrase.
+ */
+export function nameFoundInTextFuzzy(name, text) {
+  if (nameFoundInText(name, text)) return true;
+  const n = normalizeForMatch(name);
+  const t = normalizeForMatch(text);
+  if (!n || !t) return false;
+  const words = n.split(' ').filter(w => w.length >= 2);
+  if (words.length < 2) return false;
+  const perWord = words.map(w => fuzzyWordPositions(t, w));
+  if (perWord.some(p => p.length === 0)) return false;
+  return perWord[0].some(anchor =>
+    perWord.every(list => list.some(pos => Math.abs(pos - anchor) <= NAME_WINDOW_CHARS))
+  );
+}
+
+// Positions of text tokens that nearly equal `word` (no initials here —
+// verification against sources stays tighter than record-vs-record dedupe).
+function fuzzyWordPositions(hayNormalized, word) {
+  const positions = [];
+  const clean = word.replace(/[^a-z0-9]/g, '');
+  if (clean.length < 2) return positions;
+  const re = /[a-z0-9]+/g;
+  let m;
+  while ((m = re.exec(hayNormalized)) !== null) {
+    if (tokensNearlyEqual(clean, m[0])) positions.push(m.index);
+  }
+  return positions;
+}
+
+// ── Company ↔ partner matching (the affiliation rule) ───────────────
+// Legal/structural suffix tokens that don't identify a company.
+const COMPANY_STOP_TOKENS = new Set([
+  'inc', 'incorporated', 'llc', 'llp', 'lp', 'ltd', 'limited', 'corp',
+  'corporation', 'co', 'company', 'plc', 'gmbh', 'sa', 'ag', 'bv', 'nv',
+  'pty', 'the',
+]);
+
+function companyTokens(s) {
+  const all = normalizeForMatch(s).split(/[^a-z0-9]+/).filter(Boolean);
+  const core = all.filter(t => !COMPANY_STOP_TOKENS.has(t));
+  return core.length ? core : all;
+}
+
+/**
+ * Does this stated company plausibly name the partner organization?
+ * Case, punctuation and legal suffixes are ignored, and one side may be a
+ * token-subset of the other — "Insight" ↔ "Insight Enterprises, Inc.",
+ * "CDW Canada" ↔ "CDW" — so a subsidiary or short form never reads as a
+ * different company.
+ */
+export function companyMatchesPartner(company, partnerName) {
+  const a = companyTokens(company);
+  const b = companyTokens(partnerName);
+  if (!a.length || !b.length) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.every(tok => long.includes(tok));
+}
+
+function isCrmOwnerCompany(company, ownCompany) {
+  const c = String(company || '').trim();
+  return !!c && companyMatchesPartner(c, ownCompany || CRM_OWNER_COMPANY);
 }
 
 // Characters legal inside an email token — used to boundary-check so
@@ -314,6 +491,7 @@ export const PARTNER_CONTACTS_SCHEMA_EXAMPLE = `{
       "company": "string — company copied verbatim from a cited source, or \\"\\"",
       "email": "string — email copied verbatim from a cited source, or \\"\\"",
       "phone": "string — phone copied verbatim from a cited source, or \\"\\"",
+      "works_for_partner": "string — \\"yes\\" | \\"no\\" | \\"unknown\\": does this person work for / represent the partner organization?",
       "source_ids": ["string — EVERY supplied source id where this person appears"],
       "context": "string — one short phrase (<140 chars) copied verbatim from a cited source showing this person"
     }
@@ -325,8 +503,9 @@ export const PARTNER_CONTACTS_SCHEMA_EXAMPLE = `{
  * Build the extraction prompt. The rules mirror what the parser enforces —
  * the model is told the truth about how its output will be verified.
  */
-export function buildPartnerContactsPrompt({ partnerName, sources = [], today } = {}) {
+export function buildPartnerContactsPrompt({ partnerName, sources = [], today, ownCompany = CRM_OWNER_COMPANY } = {}) {
   const name = String(partnerName || 'this partner').trim() || 'this partner';
+  const us = String(ownCompany || '').trim() || CRM_OWNER_COMPANY;
   const blocks = sources.map(s => (
     `[src id=${s.source_id} | type=${s.source_type} | date=${s.date || 'undated'} | label=${s.label || ''}]\n<<<\n${s.text}\n>>>`
   )).join('\n\n');
@@ -334,19 +513,20 @@ export function buildPartnerContactsPrompt({ partnerName, sources = [], today } 
   return `You are a meticulous CRM data steward for a partner-management portal.
 
 TASK
-The sources below are the complete CRM record for the partner "${name}" — description/call notes, indexed meetings, and partner documents. Extract the roster of individual PEOPLE named in these sources: the human contacts connected to this partnership record.
+The sources below are the complete CRM record for the partner "${name}" — description/call notes, indexed meetings, and partner documents. Extract the roster of individual PEOPLE named in these sources: the human contacts on the partner's side of this relationship.
 
 THE GOLDEN RULE — ACCURACY OVER COMPLETENESS
 Every value you output will be verified verbatim against the cited source text; anything that is not literally present will be discarded. A wrong or invented value is a failure; an empty field is correct. Use only the supplied sources — never outside knowledge, memory of companies, or plausible guessing.
 
 RULES
 1. Extract individual people only. Skip bare companies, teams, and unnamed role references ("their CTO", "the SE team").
-2. Copy each person's name EXACTLY as written in the source — same spelling, casing, accents, and word order. Never expand, shorten, or normalize a name.
-3. Fill role, company, email, and phone ONLY when the source text states that value explicitly for that person; otherwise use "". Copy the value verbatim. Never infer a company from an email domain. Never complete a partial email or phone number.
-4. source_ids must list EVERY supplied source id in which the person's name appears, and ONLY supplied ids. A person "appears" in a source only when their name is written in that source's text.
-5. If the same person appears in multiple sources, output ONE contact carrying all of their source_ids. If two different people share a name, output them separately with their own source_ids.
-6. context: one short phrase (under 140 characters) copied verbatim from one cited source that shows this person being mentioned.
-7. If the sources name no people at all, return an empty contacts array.
+2. PARTNER-SIDE PEOPLE ONLY. This roster is for people who work for or represent "${name}" itself. For EVERY person, reason carefully about their affiliation from the sources — stated employer, email domain, job-title context, and how they are referred to — and set works_for_partner: "yes" (the sources show they work for ${name}), "no" (the sources show they work for a DIFFERENT company — for example ${us}, which is us, the team writing these notes; or a customer, prospect, or another vendor), or "unknown" (the sources do not say). Anyone marked "no" is excluded from the saved roster, so never mark "no" on a hunch — but a person the sources tie to another employer must be "no".
+3. Copy each person's name EXACTLY as written in the source — same spelling, casing, accents, and word order. Never expand, shorten, or normalize a name.
+4. Fill role, company, email, and phone ONLY when the source text states that value explicitly for that person; otherwise use "". Copy the value verbatim. You may use an email domain to reason about works_for_partner, but never to fill the company field. Never complete a partial email or phone number.
+5. source_ids must list EVERY supplied source id in which the person's name appears, and ONLY supplied ids. A person "appears" in a source only when their name is written in that source's text.
+6. If the same person appears in multiple sources, output ONE contact carrying all of their source_ids. Minor spelling variants of one person ("Jack Smith" vs "Jack Smiths", "Jon Smith" vs "John Smith") are the SAME person — never output them as two contacts; use the most complete correctly-spelled form that appears in a cited source, and cite every source where any variant appears. Only when the sources show two genuinely DIFFERENT people sharing a name (e.g. different companies or emails) output them separately with their own source_ids.
+7. context: one short phrase (under 140 characters) copied verbatim from one cited source that shows this person being mentioned.
+8. If the sources name no people at all, return an empty contacts array.
 
 OUTPUT
 Respond with STRICT JSON only — no prose, no markdown fences — in exactly this shape:
@@ -385,14 +565,19 @@ function looksLikeEmail(s) {
  * Parse and validate the model's raw text into verified contacts.
  * Every kept contact is grounded in the supplied sources (see the module
  * header for the exact guarantees). Ungroundable fields are blanked;
- * ungroundable contacts are dropped and reported in `dropped`.
+ * ungroundable contacts are dropped and reported in `dropped` — as are
+ * people who fail the affiliation rule: anyone the model marks
+ * works_for_partner:"no", anyone whose VERIFIED company doesn't match
+ * `partnerName`, and anyone whose verified company is the CRM owner's own.
  *
  * @param {string} rawText
  * @param {object} options
- * @param {Array}  options.sources  The exact sources given to the prompt.
+ * @param {Array}  options.sources      The exact sources given to the prompt.
+ * @param {string} [options.partnerName] Enables the company↔partner check.
+ * @param {string} [options.ownCompany]  Defaults to CRM_OWNER_COMPANY.
  * @returns {{ contacts: Array, note: string, dropped: Array<{name, reason}> }}
  */
-export function parsePartnerContactsResponse(rawText, { sources = [] } = {}) {
+export function parsePartnerContactsResponse(rawText, { sources = [], partnerName = '', ownCompany = CRM_OWNER_COMPANY } = {}) {
   if (typeof rawText !== 'string' || !rawText.trim()) {
     const err = new Error('The contact extraction returned an empty response.');
     err.code = 'PARTNER_CONTACTS_EMPTY';
@@ -438,7 +623,9 @@ export function parsePartnerContactsResponse(rawText, { sources = [] } = {}) {
       .map(id => String(id == null ? '' : id).trim())
       .filter(id => sourceById.has(id));
 
-    // Keep only cited sources that literally contain this person.
+    // Keep only cited sources that literally contain this person (a one-
+    // character spelling variant of the name still counts — "Jack Smith"
+    // verifies against a source that wrote "Jack Smiths").
     const email = dropPlaceholder(cleanStr(raw.email, MAX_EMAIL_LEN));
     const verified = [];
     const seenIds = new Set();
@@ -446,7 +633,7 @@ export function parsePartnerContactsResponse(rawText, { sources = [] } = {}) {
       if (seenIds.has(id)) continue;
       seenIds.add(id);
       const src = sourceById.get(id);
-      if (nameFoundInText(name, src.text) || (email && emailFoundInText(email, src.text))) {
+      if (nameFoundInTextFuzzy(name, src.text) || (email && emailFoundInText(email, src.text))) {
         verified.push(src);
       }
     }
@@ -466,6 +653,23 @@ export function parsePartnerContactsResponse(rawText, { sources = [] } = {}) {
     const groundedCompany = (rawCompany && inAnyVerified(fieldFoundInText, rawCompany)) ? rawCompany : '';
     const rawContext = cleanStr(raw.context, MAX_EVIDENCE_LEN);
     const groundedContext = (rawContext && inAnyVerified(fieldFoundInText, rawContext)) ? rawContext : '';
+
+    // Affiliation rule — partner-side people only. The model's judgment
+    // can only EXCLUDE (never invent data), so it is safe to honor; the
+    // company checks are deterministic and run on the VERIFIED value.
+    const affiliation = String(raw.works_for_partner || '').trim().toLowerCase();
+    if (affiliation === 'no') {
+      dropped.push({ name, reason: `sources indicate they work for another company${rawCompany ? ` (${rawCompany})` : ''}, not the partner` });
+      continue;
+    }
+    if (groundedCompany && isCrmOwnerCompany(groundedCompany, ownCompany)) {
+      dropped.push({ name, reason: `works for ${groundedCompany} — the CRM owner's own team, not a partner contact` });
+      continue;
+    }
+    if (groundedCompany && partnerName && !companyMatchesPartner(groundedCompany, partnerName)) {
+      dropped.push({ name, reason: `works for "${groundedCompany}", not ${partnerName}` });
+      continue;
+    }
 
     contacts.push({
       name,
@@ -499,27 +703,46 @@ function emailsCompatible(a, b) {
   return !ea || !eb || ea === eb;
 }
 
+// Completeness order for duplicate matching: more real name tokens first,
+// then longer names — so bare "Aaron" folds into "Aaron Adsit" no matter
+// which order the mentions arrived in, and the fuller spelling is the one
+// that survives as the record's name.
+function nameCompleteness(c) {
+  return substantiveTokenCount(c.name) * 1000 + String(c.name || '').length;
+}
+
+// The one place duplicate-candidate selection lives: an exact normalized
+// name always wins; a similar name (namesLikelySamePerson) is trusted only
+// when it is UNambiguous — exactly one candidate — so a bare "Aaron" with
+// both "Aaron Adsit" and "Aaron Miller" on file stays separate rather than
+// guessing. Emails must never contradict.
+function findSamePersonTarget(candidates, contact) {
+  const nameKey = normalizeForMatch(contact.name);
+  if (!nameKey) return null;
+  const same = candidates.filter(c =>
+    emailsCompatible(c.email, contact.email) && namesLikelySamePerson(c.name, contact.name));
+  const exact = same.find(c => normalizeForMatch(c.name) === nameKey);
+  if (exact) return exact;
+  return same.length === 1 ? same[0] : null;
+}
+
 // Collapse duplicate extracted contacts into one, unioning sources and
-// filling blank fields. Match by email first, then by normalized name (a
-// mention that lost its email during grounding still folds into the fuller
-// record) — but never across two different emails.
+// filling blank fields. Match by email first, then by name — exact or
+// similar ("Aaron" / "Aaron Adsit", "Jack Smith" / "Jack Smiths") — but
+// never across two different emails, and never when a similar name could
+// mean more than one already-seen person.
 function dedupeExtracted(contacts) {
   const byEmail = new Map();
-  const byName = new Map();
   const out = [];
-  for (const c of contacts) {
+  const ordered = [...contacts].sort((a, b) => nameCompleteness(b) - nameCompleteness(a));
+  for (const c of ordered) {
     const emailKey = String(c.email || '').trim().toLowerCase();
-    const nameKey = normalizeForMatch(c.name);
 
     let target = (emailKey && byEmail.get(emailKey)) || null;
-    if (!target && nameKey) {
-      const cand = byName.get(nameKey);
-      if (cand && emailsCompatible(cand.email, c.email)) target = cand;
-    }
+    if (!target) target = findSamePersonTarget(out, c);
 
     if (!target) {
       if (emailKey) byEmail.set(emailKey, c);
-      if (nameKey && !byName.has(nameKey)) byName.set(nameKey, c);
       out.push(c);
       continue;
     }
@@ -529,8 +752,6 @@ function dedupeExtracted(contacts) {
     target.sources = unionSources(target.sources, c.sources);
     const mergedEmail = String(target.email || '').trim().toLowerCase();
     if (mergedEmail && !byEmail.has(mergedEmail)) byEmail.set(mergedEmail, target);
-    const mergedName = normalizeForMatch(target.name);
-    if (mergedName && !byName.has(mergedName)) byName.set(mergedName, target);
   }
   return out;
 }
@@ -555,10 +776,14 @@ function unionSources(a, b) {
  * Map the contacts array returned by the Apps Script attendee-list analysis
  * of one Drive attachment into the extracted-contact shape. That pipeline
  * reads spreadsheets deterministically and extracts documents under a strict
- * no-fabrication prompt, so rows are trusted as-is; this only normalizes
- * placeholders and attaches the file as provenance.
+ * no-fabrication prompt, so rows are trusted as-is; this normalizes
+ * placeholders, attaches the file as provenance, and applies the
+ * affiliation rule: attendee lists routinely mix in our own team and
+ * customer attendees, so a row whose stated company is the CRM owner's —
+ * or, when `partnerName` is given, any company other than the partner's —
+ * is not a partner contact and is skipped.
  */
-export function attendeeContactsToExtracted(rawContacts, { docId, fileName, date } = {}) {
+export function attendeeContactsToExtracted(rawContacts, { docId, fileName, date, partnerName = '', ownCompany = CRM_OWNER_COMPANY } = {}) {
   const source = {
     type: 'attachment',
     id: String(docId || '').trim(),
@@ -571,10 +796,13 @@ export function attendeeContactsToExtracted(rawContacts, { docId, fileName, date
     const name = dropPlaceholder(cleanStr(raw.name, MAX_NAME_LEN));
     const email = dropPlaceholder(cleanStr(raw.email, MAX_EMAIL_LEN));
     if (!name && !email) continue;
+    const company = dropPlaceholder(cleanStr(raw.company, MAX_FIELD_LEN));
+    if (company && isCrmOwnerCompany(company, ownCompany)) continue;
+    if (company && partnerName && !companyMatchesPartner(company, partnerName)) continue;
     out.push({
       name,
       role: dropPlaceholder(cleanStr(raw.role, MAX_FIELD_LEN)),
-      company: dropPlaceholder(cleanStr(raw.company, MAX_FIELD_LEN)),
+      company,
       email: looksLikeEmail(email) ? email : '',
       phone: dropPlaceholder(cleanStr(raw.phone, MAX_PHONE_LEN)),
       evidence: '',
@@ -649,9 +877,14 @@ function defaultMakeId() {
  * Merge freshly extracted contacts into the partner's saved rows.
  *
  * Matching: primary key is the email (case-insensitive); fallback is the
- * normalized name. Merging only FILLS BLANK fields and unions sources — it
+ * name — exact first, then similar-name reasoning ("Aaron" / "Aaron Adsit",
+ * "Jack Smith" / "Jack Smiths") when it is unambiguous and the emails don't
+ * contradict — so a spelling variant of a saved person can never mint a
+ * second row. Merging only FILLS BLANK fields and unions sources — it
  * never overwrites a saved value, so manual corrections always survive a
- * re-scan. Unmatched contacts become new rows.
+ * re-scan. The one exception is deliberate: a strictly FULLER form of the
+ * same name upgrades the record ("Aaron" → "Aaron Adsit"); equal-length
+ * variants keep the saved spelling. Unmatched contacts become new rows.
  *
  * @param {object} params
  * @param {Array} params.existing   partnerContactFromRow() objects.
@@ -667,12 +900,11 @@ export function mergeExtractedContacts({
 } = {}) {
   const mkId = typeof makeId === 'function' ? makeId : defaultMakeId;
   const byEmail = new Map();
-  const byName = new Map();
+  const registry = [];
   const register = (c) => {
     const e = String(c.email || '').trim().toLowerCase();
-    const n = normalizeForMatch(c.name);
     if (e && !byEmail.has(e)) byEmail.set(e, c);
-    if (n && !byName.has(n)) byName.set(n, c);
+    registry.push(c);
   };
   existing.forEach(register);
 
@@ -680,16 +912,13 @@ export function mergeExtractedContacts({
   const changedRows = new Set();
   let unchanged = 0;
 
-  for (const x of extracted) {
+  // Fuller names first, so "Aaron Adsit" lands before a bare "Aaron" that
+  // should fold into it.
+  const ordered = [...extracted].sort((a, b) => nameCompleteness(b) - nameCompleteness(a));
+  for (const x of ordered) {
     const email = String(x.email || '').trim().toLowerCase();
-    const nameKey = normalizeForMatch(x.name);
     let target = (email && byEmail.get(email)) || null;
-    if (!target && nameKey) {
-      // Name-only match — allowed only when the emails don't contradict, so
-      // two people sharing a name but with different emails stay separate.
-      const cand = byName.get(nameKey);
-      if (cand && emailsCompatible(cand.email, x.email)) target = cand;
-    }
+    if (!target) target = findSamePersonTarget(registry, x);
 
     if (!target) {
       const { lo, hi } = sourceDateRange(x.sources);
@@ -718,10 +947,18 @@ export function mergeExtractedContacts({
     for (const f of ['name', 'role', 'company', 'email', 'phone', 'evidence']) {
       if (!target[f] && x[f]) {
         target[f] = x[f];
-        if (f === 'email') byEmail.set(String(x.email).toLowerCase(), target);
-        if (f === 'name') { const nk = normalizeForMatch(x.name); if (nk && !byName.has(nk)) byName.set(nk, target); }
+        if (f === 'email') { const ek = String(x.email).toLowerCase(); if (!byEmail.has(ek)) byEmail.set(ek, target); }
         changed = true;
       }
+    }
+    // Upgrade to a strictly fuller form of the same name ("Aaron" →
+    // "Aaron Adsit"). Equal completeness never overwrites, so a manual
+    // "Jack Smith" still wins over a scanned "Jack Smiths".
+    if (x.name && target.name
+        && substantiveTokenCount(x.name) > substantiveTokenCount(target.name)
+        && namesLikelySamePerson(target.name, x.name)) {
+      target.name = x.name;
+      changed = true;
     }
     const before = (target.sources || []).length;
     target.sources = unionSources(target.sources, x.sources);

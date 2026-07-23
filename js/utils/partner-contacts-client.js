@@ -90,5 +90,8 @@ export async function requestPartnerContactsExtraction({ partnerName, sources = 
     .map(b => b.text)
     .join('\n');
 
-  return parsePartnerContactsResponse(text, { sources });
+  // partnerName arms the validator's affiliation checks: people the model
+  // flags as working for another company, and people whose verified company
+  // isn't the partner's, are dropped instead of saved.
+  return parsePartnerContactsResponse(text, { sources, partnerName });
 }

@@ -17,7 +17,10 @@ that verifies that individual from public professional sources — see
 > literally present in this partner's own sources or was typed in manually.
 > The model only *proposes*; application code *verifies* — the same
 > philosophy as the Analyzer family. An empty cell means "not stated in the
-> sources"; it is never a guess.
+> sources"; it is never a guess. Two further scan rules: a row must be a
+> person on **the partner's side** of the relationship (the affiliation
+> rule), and one person must never become two rows (similar-name duplicate
+> collapse) — both below.
 
 ---
 
@@ -69,18 +72,71 @@ then **verified verbatim** by `parsePartnerContactsResponse`:
   dropped; a contact with no surviving source is discarded (and logged to
   the console as rejected).
 
-Duplicate mentions collapse into one contact (email first, then name — but
-never across two *different* emails, so two people sharing a name stay
-separate).
+## Who qualifies — the affiliation rule
+
+A row in this table means "a person working for or representing **this
+partner**" — not our own team, not a customer, not another vendor. The
+scan enforces that in three layers:
+
+- **Model reasoning.** The prompt asks the model to judge, for every
+  person, whether the sources show them working for the partner
+  (`works_for_partner: yes | no | unknown`), reasoning from the stated
+  employer, email domain, title context and how they're referred to.
+  Anyone marked `no` is excluded (an exclusion can only omit, never
+  invent — so the model's judgment is safe to honor). `unknown` people
+  are kept: partner notes rarely restate the employer.
+- **Deterministic company check.** A contact whose *verified* company
+  doesn't match the partner name is dropped. Matching is normalized —
+  case, punctuation and legal suffixes ignored, short forms accepted
+  ("Insight" ↔ "Insight Enterprises, Inc.", "CDW Canada" ↔ "CDW") — so a
+  legal-name variant never reads as a different company.
+- **Own-company backstop.** A verified company matching **Recast
+  Software** (the CRM owner's own organization) is never saved as a
+  partner contact, even if the model mislabels it `yes`, and with or
+  without a partner name.
+
+The same company filters apply to attendee rows from attachments, which
+routinely mix in our own team and customer attendees. Every drop is
+reported in the scan's `dropped` list (logged to the console).
+
+## One person, one row — similar-name duplicate collapse
+
+Duplicate mentions collapse into one contact: email first, then name —
+exact first, then *similar-name reasoning*, so a spelling variant can
+never mint a second row. Two names count as the same person when every
+token of the shorter name accounts for a distinct token of the longer
+one, where a token pair may differ by **one inserted/deleted character**
+("Jack Smith" ↔ "Jack Smiths", "Jon" ↔ "John") or be an initial
+("J. Smith" ↔ "Jack Smith"), and subset names fold into the fuller form
+("Aaron" ↔ "Aaron Adsit"). Guard rails keep distinct people apart:
+
+- substitutions never match — "Mark" / "Mary", "Dan" / "Don" stay two
+  people;
+- initials alone are never enough to link two names;
+- a fuzzy match must be **unambiguous**: a bare "Aaron" with both
+  "Aaron Adsit" and "Aaron Miller" on file stays separate rather than
+  guessing;
+- it never applies across two *different* emails, so two people sharing
+  a name stay separate.
+
+Source verification gets the same one-character tolerance per name word
+("Jack Smith" verifies against a source that wrote "Jack Smiths") while
+keeping the tight co-occurrence window that stops names being stitched
+from two different people.
 
 ## Merge semantics (why manual edits survive)
 
 Scan results merge into `Partner_Contacts` via `mergeExtractedContacts`:
 
-- match by email (case-insensitive), else by name (only when emails don't
-  contradict);
+- match by email (case-insensitive), else by name — exact first, then the
+  similar-name reasoning above (unambiguous only, never when emails
+  contradict) — so "Jack Smiths" updates the saved "Jack Smith" row
+  instead of duplicating it;
 - matches **fill blank fields only** and union `sources_json` — a saved
-  value, including a manual correction, is never overwritten by a scan;
+  value, including a manual correction, is never overwritten by a scan.
+  One deliberate exception: a strictly *fuller* form of the same name
+  upgrades the record ("Aaron" → "Aaron Adsit"); equal-length variants
+  keep the saved spelling;
 - unmatched people become new rows; `first_seen`/`last_seen` track the
   source dates; re-running a scan with nothing new is a no-op.
 
@@ -118,5 +174,6 @@ client-side path against older deployments.
 
 Tests: `tests/partner-contacts.test.mjs` — most are adversarial
 (hallucinated people, invented emails, paraphrased titles, truncated
-phones, cross-person stitching, name collisions) plus scoping, merge and
-round-trip coverage. Run with `npm test`.
+phones, cross-person stitching, name collisions, other-company and
+own-company contacts, look-alike names that must NOT merge) plus scoping,
+similar-name collapse, merge and round-trip coverage. Run with `npm test`.
