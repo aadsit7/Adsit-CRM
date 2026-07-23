@@ -349,7 +349,8 @@
    Section Headers — accent bar + clear hierarchy
    ----------------------------------------------- */
 #dashboard-activity-view .section-header,
-#dashboard-partners-view .section-header {
+#dashboard-partners-view .section-header,
+.dashboard-page__events-panel .section-header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -361,12 +362,14 @@
 }
 
 #dashboard-activity-view .section-header:first-child,
-#dashboard-partners-view .section-header:first-child {
+#dashboard-partners-view .section-header:first-child,
+.dashboard-page__events-panel .section-header:first-child {
   margin-top: 0;
 }
 
 #dashboard-activity-view .section-header__title,
-#dashboard-partners-view .section-header__title {
+#dashboard-partners-view .section-header__title,
+.dashboard-page__events-panel .section-header__title {
   font-size: 17px;
   font-weight: 700;
   color: var(--color-text-primary);
@@ -379,7 +382,8 @@
 }
 
 #dashboard-activity-view .section-header__title::before,
-#dashboard-partners-view .section-header__title::before {
+#dashboard-partners-view .section-header__title::before,
+.dashboard-page__events-panel .section-header__title::before {
   content: '';
   display: inline-block;
   width: 4px;
@@ -390,7 +394,8 @@
 }
 
 #dashboard-activity-view .section-header__subtitle,
-#dashboard-partners-view .section-header__subtitle {
+#dashboard-partners-view .section-header__subtitle,
+.dashboard-page__events-panel .section-header__subtitle {
   font-size: 12.5px;
   color: var(--color-text-muted);
   margin: 0;
@@ -400,7 +405,9 @@
 
 #dashboard-activity-view .section-header + .activity-grid,
 #dashboard-activity-view .section-header + .empty-state,
-#dashboard-activity-view .section-header + .timeline-list {
+#dashboard-activity-view .section-header + .timeline-list,
+.dashboard-page__events-panel .section-header + .timeline-list,
+.dashboard-page__events-panel .section-header + .empty-state {
   margin-top: 0;
 }
 
@@ -852,7 +859,8 @@
 }
 
 /* -----------------------------------------------
-   Top split — Opportunity Source chart (left half)
+   Top split — left column (Opportunity Source chart
+   stacked above the Upcoming Joint Events timeline)
    beside the embedded Quick Add form (right half)
    ----------------------------------------------- */
 .dashboard-page__split {
@@ -861,9 +869,12 @@
   gap: 20px;
 }
 
-.dashboard-page__split > .dashboard-page__chart-card {
+.dashboard-page__split > .dashboard-page__split-left {
   flex: 1 1 50%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .dashboard-page__quickform-host {
@@ -884,12 +895,12 @@
   border-radius: 0 !important;
 }
 
-/* Stack the split (chart above form) once the columns get too narrow. */
+/* Stack the split (left column above form) once the columns get too narrow. */
 @media (max-width: 900px) {
   .dashboard-page__split {
     flex-direction: column;
   }
-  .dashboard-page__split > .dashboard-page__chart-card,
+  .dashboard-page__split > .dashboard-page__split-left,
   .dashboard-page__quickform-host {
     flex: 1 1 auto;
     width: 100%;

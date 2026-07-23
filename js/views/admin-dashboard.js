@@ -232,8 +232,10 @@ function renderDashboard(container, partners, opportunities, events) {
     }
   }
 
-  // Build activity view content
-  buildActivityView(activityView, partnerStats, tfUpcoming, tfEvents, tfOpps, container);
+  // Build activity view content (partner activity cards). The Upcoming
+  // Joint Events timeline now lives in the top split's left column, so it
+  // is no longer rendered inside the Activity Hub tab.
+  buildActivityView(activityView, partnerStats, container);
 
   // Interactive stat card handlers
   let activeStatKey = '';
@@ -245,11 +247,10 @@ function renderDashboard(container, partners, opportunities, events) {
     if (activeStatKey === 'partners') { switchTab('partners'); }
     else if (activeStatKey === 'pipeline') { switchTab('activity'); }
     else if (activeStatKey === 'events') {
-      switchTab('activity');
-      setTimeout(() => {
-        const headers = document.querySelectorAll('.section-header__title');
-        for (const h of headers) { if (h.textContent.includes('Joint Events')) { h.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; } }
-      }, 100);
+      // The Upcoming Joint Events panel lives in the top split (always
+      // visible), so just scroll it into view — no tab switch needed.
+      const panel = document.querySelector('.dashboard-page__events-panel');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (activeStatKey) {
       const keyMap = { partners: 0, pipeline: 1, won: 2, events: 3 };
@@ -292,8 +293,10 @@ function renderDashboard(container, partners, opportunities, events) {
   const quickFormHost = el('div', { class: 'dashboard-page__quickform-host' });
 
   const content = el('div', { class: 'dashboard-page' },
-    // Top zone: full-width KPI strip, then a 50/50 split with the flat
-    // Opportunity Source chart (left) and the Quick Add form (right).
+    // Top zone: full-width KPI strip, then a 50/50 split. The left column
+    // stacks the flat Opportunity Source chart above the Upcoming Joint
+    // Events timeline, so it fills the height evenly beside the taller
+    // Quick Add form on the right.
     el('div', { class: 'dashboard-page__top' },
       el('div', { class: 'dashboard-page__stat-strip stagger' },
         buildDashboardStatCell('Total Partners', tfPartners.length, () => toggleStat('partners')),
@@ -302,7 +305,10 @@ function renderDashboard(container, partners, opportunities, events) {
         buildDashboardStatCell('Upcoming Events', tfUpcoming.length, () => toggleStat('events')),
       ),
       el('div', { class: 'dashboard-page__split' },
-        buildPartnerSourceChart(tfOpps, tfPartners, onBarClick),
+        el('div', { class: 'dashboard-page__split-left' },
+          buildPartnerSourceChart(tfOpps, tfPartners, onBarClick),
+          buildUpcomingEventsPanel(tfUpcoming, partnerStats, container),
+        ),
         quickFormHost,
       ),
     ),
@@ -325,7 +331,7 @@ function renderDashboard(container, partners, opportunities, events) {
 // Activity Hub View
 // ============================================
 
-function buildActivityView(container, partnerStats, upcomingEvents, allEvents, opportunities, viewContainer) {
+function buildActivityView(container, partnerStats, viewContainer) {
   const activePartners = partnerStats.filter(ps => ps.stats.totalDeals > 0 || ps.upcomingEvents.length > 0);
 
   // Partner Activity Cards
@@ -415,6 +421,26 @@ function buildActivityView(container, partnerStats, upcomingEvents, allEvents, o
       );
     });
 
+  container.appendChild(partnerHubTitle);
+
+  if (partnerCards.length > 0) {
+    container.appendChild(el('div', { class: 'activity-grid' }, ...partnerCards));
+  } else {
+    container.appendChild(el('div', { class: 'empty-state' },
+      el('div', { class: 'empty-state__title' }, 'No partner activity yet'),
+      el('div', { class: 'empty-state__description' }, 'Deals and events will appear here.')
+    ));
+  }
+}
+
+// ============================================
+// Upcoming Joint Events Panel
+// Rendered in the dashboard top split's left column, stacked beneath the
+// Opportunity Source chart (previously lived at the bottom of the
+// Activity Hub tab).
+// ============================================
+
+function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
   const now = new Date();
   const sixtyDaysOut = new Date(now);
   sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
@@ -426,7 +452,6 @@ function buildActivityView(container, partnerStats, upcomingEvents, allEvents, o
     })
     .sort((a, b) => new Date(a.event_date) - new Date(b.event_date));
 
-  // Upcoming Events Timeline
   const timelineTitle = el('div', { class: 'section-header' },
     el('div', {},
       el('h3', { class: 'section-header__title' }, 'Upcoming Joint Events'),
@@ -473,27 +498,14 @@ function buildActivityView(container, partnerStats, upcomingEvents, allEvents, o
     );
   });
 
-  container.appendChild(partnerHubTitle);
+  const body = timelineCards.length > 0
+    ? el('div', { class: 'timeline-list' }, ...timelineCards)
+    : el('div', { class: 'empty-state' },
+        el('div', { class: 'empty-state__title' }, 'No upcoming events'),
+        el('div', { class: 'empty-state__description' }, 'Events in the next 60 days will appear here.')
+      );
 
-  if (partnerCards.length > 0) {
-    container.appendChild(el('div', { class: 'activity-grid' }, ...partnerCards));
-  } else {
-    container.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state__title' }, 'No partner activity yet'),
-      el('div', { class: 'empty-state__description' }, 'Deals and events will appear here.')
-    ));
-  }
-
-  container.appendChild(timelineTitle);
-
-  if (timelineCards.length > 0) {
-    container.appendChild(el('div', { class: 'timeline-list' }, ...timelineCards));
-  } else {
-    container.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state__title' }, 'No upcoming events'),
-      el('div', { class: 'empty-state__description' }, 'Events in the next 60 days will appear here.')
-    ));
-  }
+  return el('div', { class: 'dashboard-page__events-panel' }, timelineTitle, body);
 }
 
 // ============================================
