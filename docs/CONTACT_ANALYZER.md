@@ -22,6 +22,14 @@ matches the reference layout.
 > the `Partner_Contacts` row is separate — see
 > [PARTNER_CONTACT_LEADCHECK.md](PARTNER_CONTACT_LEADCHECK.md) — and is *read* by
 > this mode as one of its evidence inputs, never overwritten.)
+>
+> **Exporting the brief attaches it to the contact.** Clicking **Create PDF**
+> files the Account Intelligence Brief onto that contact's record (keyed on
+> `contact_id`) and downloads a local copy — the same auto-attach every Analyzer
+> mode now performs. Contacts gained a Drive-backed **Documents** panel (on the
+> Edit Contact modal) for exactly this, matching the capability opportunities,
+> events and partners already had. See
+> [ANALYZER_PDF_AUTOATTACH.md](ANALYZER_PDF_AUTOATTACH.md).
 
 ---
 

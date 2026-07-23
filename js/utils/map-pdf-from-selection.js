@@ -17,24 +17,12 @@
 
 import { requestMapPdfJsonFromMultiple } from './ai.js';
 import { buildMapPdf, mapFilename, blobToBase64 } from './map-pdf-builder.js';
-import { fileApiRequest } from './file-api.js';
+import { fileApiRequest, resolveDriveUrl } from './file-api.js';
 
-// Same 8-path resolution the voice flow uses. Apps Script deployments
-// have surfaced slight variations across environments — cover every
-// observed shape and take the first non-empty string.
-export function resolveDriveUrl(uploadResp) {
-  return (
-    uploadResp?.file?.drive_url ||
-    uploadResp?.drive_url ||
-    uploadResp?.file?.driveUrl ||
-    uploadResp?.driveUrl ||
-    uploadResp?.file?.webViewLink ||
-    uploadResp?.webViewLink ||
-    uploadResp?.file?.url ||
-    uploadResp?.url ||
-    ''
-  );
-}
+// resolveDriveUrl now lives in file-api.js (the canonical home shared with
+// the analyzer auto-attach flow); re-exported here so existing importers and
+// the __mapFromSelectionInternals test surface keep working unchanged.
+export { resolveDriveUrl };
 
 function normalizeOpportunity(opportunity) {
   if (!opportunity || typeof opportunity !== 'object') {

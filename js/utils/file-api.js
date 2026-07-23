@@ -34,6 +34,26 @@ export async function fileApiRequest(payload, { signal } = {}) {
   return data;
 }
 
+// ── Drive URL resolver (shared) ─────────────────────────────────────
+// Apps Script deployments have surfaced slight variations in the shape of
+// the uploadFile response across environments. Walk every observed shape
+// and take the first non-empty string. Canonical home for this resolver so
+// every upload caller (the MAP PDF flows and the analyzer auto-attach) reads
+// the Drive link the same way. Returns '' when no link is present.
+export function resolveDriveUrl(uploadResp) {
+  return (
+    uploadResp?.file?.drive_url ||
+    uploadResp?.drive_url ||
+    uploadResp?.file?.driveUrl ||
+    uploadResp?.driveUrl ||
+    uploadResp?.file?.webViewLink ||
+    uploadResp?.webViewLink ||
+    uploadResp?.file?.url ||
+    uploadResp?.url ||
+    ''
+  );
+}
+
 // ── AI key from Apps Script ─────────────────────────────────────────
 // The Anthropic key now lives as a Script Property (ANTHROPIC_API_KEY)
 // on the Apps Script web app instead of being pasted into the Setup

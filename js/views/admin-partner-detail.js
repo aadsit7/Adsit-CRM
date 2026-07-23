@@ -565,6 +565,29 @@ function openContactModal(partner, existingContact, onSaved) {
     el('div', { class: 'form-row' }, email.group, phone.group),
   );
 
+  // Documents panel — contacts now get the same drag-and-drop, Drive-backed
+  // uploader that Opportunities, Events and Partners already have. Files key on
+  // contact_id (whose `pct_` prefix is distinct from opportunity `opp_`, event
+  // `evt_` and partner `p_` ids, so a contact's documents never cross-list with
+  // those entities even though all four share one backing sheet). This is also
+  // where the Analyzer's Contacts "Create PDF" files its Account Intelligence
+  // Brief automatically. A brand-new, unsaved contact has no id to attach to
+  // yet, so the dropzone shows a save-first note; existing contacts open in a
+  // loading state and fetch their list in the background (docsHandle.refresh()
+  // after openModal) so the Apps Script round-trip doesn't block the modal.
+  const contactIdForDocs = isEdit ? existingContact.contact_id : null;
+  const docsHandle = buildDocumentsPanel({
+    entityId: contactIdForDocs,
+    // Drive folder name — the contact's own name, matching the Analyzer's
+    // contact auto-attach so manual uploads and exported briefs share a folder.
+    getContextName: () => name.input.value.trim() || (isEdit ? (existingContact.name || '') : ''),
+    initialFiles: [],
+    loading: isEdit,
+    savePrompt: 'Save this contact first to attach documents',
+  });
+
+  const modalContent = el('div', {}, formContent, docsHandle.panel);
+
   const saveBtn = el('button', {
     class: 'btn btn--primary',
     onClick: async () => {
@@ -629,12 +652,20 @@ function openContactModal(partner, existingContact, onSaved) {
 
   openModal({
     title: isEdit ? 'Edit Contact' : 'Add Contact',
-    content: formContent,
+    content: modalContent,
+    // Wider layout to match the other documents-bearing modals (Opportunity /
+    // Event), now that the contact modal hosts a Documents panel too.
+    className: 'modal--wide',
     footer: [
       el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
       saveBtn,
     ],
   });
+
+  // Kick off the documents fetch only after the modal is on screen so the form
+  // shows immediately, then the document list fills in. refresh() self-guards
+  // its errors and is a no-op for a new (unsaved) contact with no id.
+  if (isEdit) docsHandle.refresh();
 }
 
 async function handleDeleteContact(contact, partner) {
