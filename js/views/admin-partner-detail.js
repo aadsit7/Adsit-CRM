@@ -2,11 +2,11 @@
 // Admin Partner Detail View
 // ============================================
 
-import { readSheetAsObjects, appendRow, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow, ensureSheetWithHeaders } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, uuid } from '../utils/dom.js';
 import { formatDate, todayISO, nowISO } from '../utils/date.js';
-import { navigate } from '../router.js';
+import { navigate, getCurrentPath, getQueryParams } from '../router.js';
 import { tierSlug } from '../utils/tiers.js';
 import { dealCard } from '../components/card.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
@@ -16,8 +16,18 @@ import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { filterOpportunities, filterEvents } from '../utils/filters.js';
 import { stripHtml, ensureHtml, initQuillEditor } from '../components/quill-editor.js';
-import { buildDocumentsPanel } from '../components/documents-panel.js';
+import { buildDocumentsPanel, listEntityDocuments } from '../components/documents-panel.js';
 import { fileApiRequest } from '../utils/file-api.js';
+import {
+  PARTNER_CONTACT_HEADERS,
+  collectPartnerContactSources,
+  attendeeContactsToExtracted,
+  mergeExtractedContacts,
+  partnerContactRowValues,
+  partnerContactFromRow,
+  sortContactsForDisplay,
+} from '../utils/partner-contacts.js';
+import { requestPartnerContactsExtraction } from '../utils/partner-contacts-client.js';
 
 export const title = 'Partner Detail';
 
@@ -33,11 +43,15 @@ export async function render(container, params) {
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
-    const [partners, opportunities, events, transcripts] = await Promise.all([
+    // Partner_Contacts may not exist yet in older spreadsheets (it is created
+    // on first scan / via Setup → Initialize Sheet), so its read — like the
+    // optional Meeting_Index — must never take down the whole page.
+    const [partners, opportunities, events, transcripts, contactRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_PARTNERS),
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
       readSheetAsObjects(CONFIG.SHEET_EVENTS),
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(() => []),
     ]);
 
     const partner = partners.find(p => p.partner_id === partnerId);
@@ -54,8 +68,13 @@ export async function render(container, params) {
     const partnerTranscripts = transcripts
       .filter(t => t.partner_id === partnerId)
       .sort((a, b) => new Date(b.conversation_date || b.created_at) - new Date(a.conversation_date || a.created_at));
+    const partnerContacts = sortContactsForDisplay(
+      contactRows
+        .filter(c => String(c.partner_id || '').trim() === partnerId)
+        .map(partnerContactFromRow)
+    );
 
-    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts);
+    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading data'),
@@ -69,7 +88,7 @@ function reRender(partnerId) {
   render(viewContainer, { id: partnerId });
 }
 
-function renderDetail(container, partner, opportunities, partnerEvents, transcripts) {
+function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = []) {
   const tierClass = tierSlug(partner.tier);
   const pipelineValue = opportunities.filter(o => o.status !== 'Won').reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
   const wonDeals = opportunities.filter(o => o.status === 'Won');
@@ -193,12 +212,16 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
           )
     ),
 
-    // Section 3: Call Transcripts
+    // Section 3: Contacts — extracted from this partner's description notes
+    // and attachments, shown as a branded table matrix on click.
+    buildPartnerContactsSection(partner, partnerContacts),
+
+    // Section 4: Call Transcripts
     el('div', { class: 'partner-detail-page__section' },
       buildTranscriptsPanel(partner, transcripts),
     ),
 
-    // Section 4: Documents (file uploader + AI Analyze)
+    // Section 5: Documents (file uploader + AI Analyze)
     documentsSection,
   );
 
@@ -271,6 +294,472 @@ function buildPartnerStatCell(label, value) {
     el('div', { class: 'partner-detail-page__stat-label' }, label),
     el('div', { class: 'partner-detail-page__stat-value' }, value),
   );
+}
+
+// ============================================
+// Contacts Section — extracted from descriptions & attachments
+// ============================================
+// Every contact shown here was either verified verbatim against this
+// partner's own sources (see js/utils/partner-contacts.js for the accuracy
+// contract) or entered manually. The section is collapsed by default —
+// clicking the header reveals the table matrix.
+
+// Which partners' contact tables are expanded, surviving the full-page
+// re-renders every mutation in this view performs.
+const expandedContactSections = new Set();
+
+const CONTACT_SOURCE_TYPE_LABELS = {
+  description: 'Description',
+  meeting: 'Meeting',
+  partner_document: 'Document',
+  attachment: 'Attachment',
+  manual: 'Manual',
+};
+
+function contactSourceChips(contact) {
+  const sources = contact.sources || [];
+  if (sources.length === 0) {
+    return el('span', { class: 'partner-contacts__muted' }, '—');
+  }
+  return el('div', { class: 'partner-contacts__sources' },
+    ...sources.map(s => {
+      const typeLabel = CONTACT_SOURCE_TYPE_LABELS[s.type] || 'Source';
+      // Attachments and documents are identified by file/doc title; the
+      // dated note types read better as "Description · Jun 10".
+      const text = (s.type === 'attachment' || s.type === 'partner_document')
+        ? (s.label || typeLabel)
+        : (s.date ? `${typeLabel} · ${formatDate(s.date)}` : typeLabel);
+      const tooltip = [typeLabel, s.label && s.label !== typeLabel ? s.label : '', s.date ? formatDate(s.date) : '']
+        .filter(Boolean).join(' · ');
+      return el('span', { class: 'partner-contacts__source-chip', title: tooltip }, text);
+    })
+  );
+}
+
+function contactCell(value, { muted = 'partner-contacts__muted' } = {}) {
+  const v = String(value || '').trim();
+  return v ? v : el('span', { class: muted }, '—');
+}
+
+function buildContactsTable(partner, contacts) {
+  return el('div', { class: 'events-page__table-wrapper partner-contacts__table-wrapper' },
+    el('table', { class: 'events-page__table events-page__table--compact partner-contacts__table' },
+      el('thead', {},
+        el('tr', {},
+          el('th', {}, 'Name'),
+          el('th', {}, 'Role'),
+          el('th', {}, 'Company'),
+          el('th', {}, 'Email'),
+          el('th', {}, 'Phone'),
+          el('th', {}, 'Sources'),
+          el('th', {}, 'Actions'),
+        )
+      ),
+      el('tbody', {},
+        ...contacts.map(c => el('tr', {},
+          el('td', {},
+            el('div', {
+              class: 'partner-contacts__name',
+              // The verbatim source snippet that evidences this contact.
+              title: c.evidence ? `“${c.evidence}”` : undefined,
+            }, c.name || el('span', { class: 'partner-contacts__muted' }, '(no name — from attachment)')),
+          ),
+          el('td', {}, contactCell(c.role)),
+          el('td', {}, contactCell(c.company)),
+          el('td', {}, c.email
+            ? el('a', { class: 'partner-contacts__email-link', href: `mailto:${c.email}` }, c.email)
+            : el('span', { class: 'partner-contacts__muted' }, '—')),
+          el('td', {}, contactCell(c.phone)),
+          el('td', {}, contactSourceChips(c)),
+          el('td', { class: 'events-page__td--actions' },
+            el('div', { class: 'partner-contacts__actions' },
+              el('button', {
+                class: 'events-page__action-link',
+                onClick: () => openContactModal(partner, c, () => reRender(partner.partner_id)),
+              }, 'Edit'),
+              el('button', {
+                class: 'events-page__action-link events-page__action-link--danger',
+                onClick: () => handleDeleteContact(c, partner),
+              }, 'Delete'),
+            )
+          ),
+        ))
+      )
+    )
+  );
+}
+
+function buildPartnerContactsSection(partner, contacts) {
+  const isOpen = expandedContactSections.has(partner.partner_id);
+
+  const chevron = el('span', {
+    class: `partner-contacts__chevron${isOpen ? ' partner-contacts__chevron--open' : ''}`,
+    html: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  });
+
+  const body = el('div', {
+    class: `partner-contacts__body${isOpen ? '' : ' partner-contacts__body--collapsed'}`,
+  },
+    contacts.length > 0
+      ? buildContactsTable(partner, contacts)
+      : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
+          el('div', { class: 'empty-state__title' }, 'No contacts yet'),
+          el('div', { class: 'empty-state__description' },
+            'Click "Scan Sources" to extract the people named in this partner\'s descriptions and attachments.'),
+        )
+  );
+
+  const scanBtn = el('button', {
+    class: 'partner-detail-page__section-cta',
+    onClick: (e) => {
+      e.stopPropagation();
+      handleScanContacts(partner, scanBtn);
+    },
+  },
+    el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 8.8L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
+    'Scan Sources',
+  );
+
+  const header = el('div', {
+    class: 'partner-detail-page__section-header partner-contacts__header',
+    onClick: () => {
+      const nowOpen = body.classList.toggle('partner-contacts__body--collapsed') === false;
+      chevron.classList.toggle('partner-contacts__chevron--open', nowOpen);
+      if (nowOpen) expandedContactSections.add(partner.partner_id);
+      else expandedContactSections.delete(partner.partner_id);
+    },
+  },
+    el('div', { class: 'partner-detail-page__section-title' },
+      'Contacts',
+      el('span', { class: 'partner-detail-page__section-count' }, String(contacts.length)),
+      el('span', { class: 'partner-detail-page__section-subtitle' }, 'from descriptions & attachments'),
+      chevron,
+    ),
+    el('div', { class: 'partner-detail-page__section-actions' },
+      el('button', {
+        class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+        onClick: (e) => {
+          e.stopPropagation();
+          openContactModal(partner, null, () => {
+            expandedContactSections.add(partner.partner_id);
+            reRender(partner.partner_id);
+          });
+        },
+      },
+        el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
+        'Add Contact',
+      ),
+      scanBtn,
+    ),
+  );
+
+  return el('div', { class: 'partner-detail-page__section partner-contacts' }, header, body);
+}
+
+// ── Add / Edit contact modal ─────────────────────────────────────────
+function openContactModal(partner, existingContact, onSaved) {
+  const isEdit = !!existingContact;
+
+  const field = (label, id, value, type = 'text', placeholder = '') => {
+    const input = el('input', { class: 'form-input', type, id, placeholder });
+    input.value = value || '';
+    return { input, group: el('div', { class: 'form-group' }, el('label', { class: 'form-label', for: id }, label), input) };
+  };
+
+  const name = field('Name *', 'contact-name', isEdit ? existingContact.name : '');
+  const role = field('Role / Title', 'contact-role', isEdit ? existingContact.role : '');
+  const company = field('Company', 'contact-company', isEdit ? existingContact.company : '');
+  const email = field('Email', 'contact-email', isEdit ? existingContact.email : '', 'email');
+  const phone = field('Phone', 'contact-phone', isEdit ? existingContact.phone : '', 'tel');
+
+  const formContent = el('div', {},
+    el('div', { class: 'form-group' },
+      el('label', { class: 'form-label' }, 'Partner'),
+      el('input', {
+        class: 'form-input', type: 'text', value: partner.display_name, readOnly: true,
+        style: { background: 'var(--color-bg)', cursor: 'default' },
+      })
+    ),
+    name.group,
+    el('div', { class: 'form-row' }, role.group, company.group),
+    el('div', { class: 'form-row' }, email.group, phone.group),
+  );
+
+  const saveBtn = el('button', {
+    class: 'btn btn--primary',
+    onClick: async () => {
+      const nameVal = name.input.value.trim();
+      const emailVal = email.input.value.trim();
+      if (!nameVal) { showToast('Please enter a name', 'error'); return; }
+      if (emailVal && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
+        showToast('That email address doesn\'t look valid', 'error');
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      try {
+        const now = nowISO();
+        if (isEdit) {
+          const updated = {
+            ...existingContact,
+            name: nameVal,
+            role: role.input.value.trim(),
+            company: company.input.value.trim(),
+            email: emailVal,
+            phone: phone.input.value.trim(),
+            updated_at: now,
+          };
+          await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, existingContact._rowIndex, partnerContactRowValues(updated));
+          showToast('Contact updated', 'success');
+        } else {
+          await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_CONTACTS, PARTNER_CONTACT_HEADERS);
+          const fresh = {
+            contact_id: uuid('pct'),
+            partner_id: partner.partner_id,
+            partner_name: partner.display_name || '',
+            name: nameVal,
+            role: role.input.value.trim(),
+            company: company.input.value.trim(),
+            email: emailVal,
+            phone: phone.input.value.trim(),
+            evidence: '',
+            sources: [{ type: 'manual', id: '', label: 'Added manually', date: todayISO() }],
+            first_seen: todayISO(),
+            last_seen: todayISO(),
+            created_at: now,
+            updated_at: now,
+          };
+          await appendRow(CONFIG.SHEET_PARTNER_CONTACTS, partnerContactRowValues(fresh));
+          showToast('Contact added', 'success');
+        }
+        closeModal();
+        if (onSaved) onSaved();
+      } catch (err) {
+        showToast(err.message || 'Failed to save contact', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = isEdit ? 'Save Changes' : 'Add Contact';
+      }
+    },
+  }, isEdit ? 'Save Changes' : 'Add Contact');
+
+  openModal({
+    title: isEdit ? 'Edit Contact' : 'Add Contact',
+    content: formContent,
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
+      saveBtn,
+    ],
+  });
+}
+
+async function handleDeleteContact(contact, partner) {
+  const label = contact.name || contact.email || 'this contact';
+  const confirmed = await confirmDialog(
+    'Delete Contact',
+    `Remove "${label}" from ${partner.display_name}'s contacts? A future scan may re-add it if it still appears in the sources.`
+  );
+  if (!confirmed) return;
+
+  try {
+    await deleteRow(CONFIG.SHEET_PARTNER_CONTACTS, contact._rowIndex);
+    showToast('Contact removed', 'success');
+    reRender(partner.partner_id);
+  } catch (err) {
+    showToast(err.message || 'Failed to delete', 'error');
+  }
+}
+
+// ── Scan orchestration ───────────────────────────────────────────────
+// Reads every partner-scoped source, extracts contacts, verifies them, and
+// merges them into Partner_Contacts:
+//   1. Drive attachments not yet analyzed run through the Apps Script
+//      attendee pipeline (deterministic for spreadsheets); the extraction
+//      record is appended to Descriptions — exactly like the Events flow —
+//      and the file is marked analyzed so it is never re-processed.
+//   2. Description notes, indexed meetings and partner documents go through
+//      the client-side extraction, strictly validated verbatim against the
+//      sources (js/utils/partner-contacts.js).
+//   3. Results merge fill-blanks-only into existing rows, so manual edits
+//      always survive; new people become new rows.
+// Each stage degrades independently — one broken attachment or a missing AI
+// key never discards what the other stages found.
+let contactScanInFlight = false;
+
+// Bounds for the scan's file-API calls, so a wedged connection turns into a
+// per-stage warning instead of a button stuck on "Preparing…" forever.
+// Attendee analysis legitimately runs minutes (Apps Script caps it at 6).
+const SCAN_LIST_FILES_TIMEOUT_MS = 30_000;
+const SCAN_ANALYZE_FILE_TIMEOUT_MS = 300_000;
+
+function scanTimeoutSignal(ms) {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(new DOMException('Request timed out', 'TimeoutError')), ms);
+  return c.signal;
+}
+
+async function handleScanContacts(partner, btn) {
+  if (contactScanInFlight) return;
+  contactScanInFlight = true;
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  const setLabel = (text) => { btn.textContent = text; };
+  const warnings = [];
+
+  try {
+    setLabel('Preparing…');
+    await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_CONTACTS, PARTNER_CONTACT_HEADERS);
+
+    // Snapshot sources BEFORE attachment analysis appends new description
+    // rows, so the AI pass never re-reads content whose contacts were just
+    // captured structurally from the file itself.
+    const [transcripts, meetings, documentsRows, contactRows] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS, { forceRefresh: true }),
+      readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_DOCUMENTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS, { forceRefresh: true }).catch(() => []),
+    ]);
+    const existing = contactRows
+      .filter(c => String(c.partner_id || '').trim() === partner.partner_id)
+      .map(partnerContactFromRow);
+
+    const extracted = [];
+    const attachmentTextSources = [];
+
+    // ── Stage 1: attachments (Drive files) ──────────────────────────
+    let files = [];
+    try {
+      files = await listEntityDocuments(partner.partner_id, { signal: scanTimeoutSignal(SCAN_LIST_FILES_TIMEOUT_MS) });
+    } catch (err) {
+      warnings.push(`Could not list attachments: ${err.message}`);
+    }
+    const pendingFiles = files.filter(f => String(f.analyzed || '').toUpperCase() !== 'TRUE');
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      setLabel(`Attachment ${i + 1}/${pendingFiles.length}…`);
+      try {
+        const data = await fileApiRequest({
+          action: 'analyzeDocument',
+          docId: file.doc_id,
+          driveUrl: file.drive_url,
+          analysisType: 'attendee_list',
+          entityType: 'partner',
+          eventTitle: partner.display_name || '',
+        }, { signal: scanTimeoutSignal(SCAN_ANALYZE_FILE_TIMEOUT_MS) });
+        const fileName = data.fileName || file.file_name || 'Attachment';
+        const dateISO = todayISO();
+        const htmlParts = Array.isArray(data.htmlParts) && data.htmlParts.length
+          ? data.htmlParts
+          : [data.html || ''];
+
+        // Persist the extraction record as dated Description card(s) — the
+        // same durable, visible audit trail the Events flow leaves.
+        for (let p = 0; p < htmlParts.length; p++) {
+          if (!htmlParts[p]) continue;
+          const partLabel = p > 0 ? ` (part ${p + 1} of ${htmlParts.length})` : '';
+          const descriptionHtml =
+            `<h4>📇 ${escapeHtml(fileName)} — Contacts scanned ${escapeHtml(formatDate(dateISO))}${escapeHtml(partLabel)}</h4>` +
+            ensureHtml(htmlParts[p]);
+          await appendRow(CONFIG.SHEET_TRANSCRIPTS,
+            [uuid('trn'), partner.partner_id, partner.display_name, dateISO, descriptionHtml, nowISO()]);
+        }
+
+        if (Array.isArray(data.contacts)) {
+          extracted.push(...attendeeContactsToExtracted(data.contacts, {
+            docId: file.doc_id, fileName, date: dateISO,
+          }));
+        } else {
+          // Older deployed Apps Script without the attendee pipeline — feed
+          // its generic analysis text to the strict client-side extraction.
+          const text = stripHtml(htmlParts.join('\n'));
+          if (text.trim()) {
+            attachmentTextSources.push({
+              source_id: `att_${file.doc_id}`,
+              source_type: 'attachment',
+              label: fileName,
+              date: dateISO,
+              text,
+            });
+          }
+        }
+        file.analyzed = 'TRUE'; // server persists the flag; mirror locally
+      } catch (err) {
+        warnings.push(`${file.file_name || 'Attachment'}: ${err.message}`);
+      }
+    }
+
+    // ── Stage 2: descriptions / meetings / partner documents ────────
+    setLabel('Scanning notes…');
+    const { sources, coverage } = collectPartnerContactSources({
+      partnerId: partner.partner_id,
+      transcripts,
+      meetings,
+      documents: documentsRows,
+    });
+    const allSources = [...sources, ...attachmentTextSources];
+    if (allSources.length > 0) {
+      try {
+        const result = await requestPartnerContactsExtraction({
+          partnerName: partner.display_name || '',
+          sources: allSources,
+          today: todayISO(),
+        });
+        extracted.push(...result.contacts);
+        if (result.dropped.length) {
+          console.info('[Partner Contacts] proposals rejected by verbatim verification:', result.dropped);
+        }
+      } catch (err) {
+        warnings.push(`Note scan: ${err.message}`);
+      }
+    }
+    if (coverage.truncatedItems > 0) {
+      warnings.push(`${coverage.truncatedItems} long source(s) were truncated for the note scan.`);
+    }
+
+    // ── Stage 3: merge + persist ────────────────────────────────────
+    setLabel('Saving…');
+    const merge = mergeExtractedContacts({
+      existing,
+      extracted,
+      partnerId: partner.partner_id,
+      partnerName: partner.display_name || '',
+      nowIso: nowISO(),
+      makeId: () => uuid('pct'),
+    });
+    if (merge.toAppend.length) {
+      await appendRows(CONFIG.SHEET_PARTNER_CONTACTS, merge.toAppend.map(partnerContactRowValues));
+    }
+    for (const changed of merge.toUpdate) {
+      await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, changed._rowIndex, partnerContactRowValues(changed));
+    }
+
+    warnings.forEach(w => console.warn('[Partner Contacts]', w));
+    if (merge.added || merge.updated) {
+      const bits = [];
+      if (merge.added) bits.push(`${merge.added} added`);
+      if (merge.updated) bits.push(`${merge.updated} updated`);
+      showToast(`Contacts scan: ${bits.join(', ')}${warnings.length ? ` · ${warnings.length} warning(s) — see console` : ''}`, 'success');
+    } else if (warnings.length) {
+      showToast(`Contacts scan finished with warnings: ${warnings[0]}`, 'error');
+    } else {
+      showToast('Scan complete — no new contacts found in the sources', 'info');
+    }
+
+    expandedContactSections.add(partner.partner_id);
+    // A scan with attachments can run for minutes — only re-render if the
+    // user is still looking at THIS partner's detail page. The results are
+    // already persisted either way.
+    if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
+      reRender(partner.partner_id);
+    }
+  } catch (err) {
+    showToast(err.message || 'Contact scan failed', 'error');
+  } finally {
+    contactScanInFlight = false;
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
 }
 
 // ============================================

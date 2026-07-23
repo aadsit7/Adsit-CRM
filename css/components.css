@@ -7614,3 +7614,86 @@
     padding: 0 9px;
   }
 }
+
+/* ============================================
+   Partner Contacts section (Partner Detail)
+   ============================================
+   The table itself reuses the Recast events-page table chrome
+   (.events-page__table*), so contacts inherit the exact same branding —
+   and the mobile stacked-card treatment — as every other data table.
+   These styles cover only what is contact-specific. */
+
+.partner-contacts__header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.partner-contacts__chevron {
+  display: inline-flex;
+  align-items: center;
+  color: #2F6BFF;
+  transition: transform var(--transition-fast);
+  align-self: center;
+}
+
+.partner-contacts__chevron--open {
+  transform: rotate(180deg);
+}
+
+.partner-contacts__body--collapsed {
+  display: none;
+}
+
+.partner-contacts__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #171D2B;
+  line-height: 1.3;
+}
+
+.partner-contacts__email-link {
+  color: #2F6BFF;
+  text-decoration: none;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.partner-contacts__email-link:hover {
+  text-decoration: underline;
+}
+
+.partner-contacts__muted {
+  color: #B0B0BC;
+  font-weight: 500;
+}
+
+.partner-contacts__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 260px;
+}
+
+/* Neutral sharp chip — same geometry as .events-page__tag but muted, since
+   provenance is metadata (labels are file names, not statuses). */
+.partner-contacts__source-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #F1F4FA;
+  color: #4A5468;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 0;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.6;
+}
+
+.partner-contacts__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+}
