@@ -73,6 +73,16 @@ then **verified verbatim** by `parsePartnerContactsResponse`:
   dropped; a contact with no surviving source is discarded (and logged to
   the console as rejected).
 
+**Truncation resilience.** A reply that hits the model's output-token
+limit (`stop_reason: "max_tokens"`) used to fail the whole note scan with
+`JSON Parse error: Expected ']'` — the JSON tail was cut off mid-array.
+Now the client detects the stop reason and re-extracts the sources as two
+half-size requests (up to a 4-way split); if a reply is still cut off or
+otherwise malformed, the parser salvages every complete contact object
+from the broken array (each still passes the full verbatim verification)
+and flags the result `partial`, which the scan surfaces as a warning
+("some people may be missing") instead of discarding everything.
+
 ## Who qualifies — the affiliation rule
 
 A row in this table means "a person working for or representing **this
