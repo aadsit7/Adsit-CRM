@@ -170,17 +170,54 @@ organization, rendered org‑chart style (a connector‑line tree of node cards)
 on the board and in the PDF — the Partner‑mode analogue of the Contact
 Analyzer's "Likely Organizational Map".
 
+> **Governing rule: truth over completeness.** A verified partial chart beats
+> a plausible complete one. The parser holds the *same* bounded evidence and
+> roster the model was shown, so every identity claim on the chart is
+> verified in application code — never taken on the model's word.
+
 - **Where the people come from:** the saved **Partner_Contacts** roster
   (names + roles only) plus partner‑side people explicitly **named in the
   supplied evidence**. The prompt forbids inventing named people; unnamed
   *role* placeholders (e.g. "CTO (not yet identified)") are allowed for
   structural gaps.
-- **Node shape:** `{ name, status, depth, contact_id }` in a flat top‑down
-  list. `depth` 0 is the most senior known person; statuses share the Contact
+- **Person verification (enforced, not just requested):** any node claiming
+  to be a person (any status except a `missing` gap) must be traceable to the
+  saved roster — by `contact_id` or by name — or literally named in the
+  supplied evidence text (diacritic‑ and word‑order‑insensitive matching, so
+  "Böb Ünger" matches "Bob Unger" and "Nair, Priya" matches "Priya Nair").
+  Anything else — including the model's outside knowledge of who publicly
+  runs a company with this name — is a fabrication and is **removed**. The
+  removal count is returned in `org_map_meta.removed_unverified` and stated
+  on the board and in the PDF, so a trimmed chart never silently poses as
+  the whole picture.
+- **Person vs reporting line — scored separately.** A confirmed person never
+  implies a confirmed line. Each non‑root node carries `line_confidence` on
+  an explicit ladder — `explicit` (a source states the line outright) ·
+  `observed` (deference/sign‑off/cc patterns imply it) · `inferred` (title
+  seniority + shared function only; the default) · `scaffold` (shape only) —
+  plus a visible `line_basis` phrase saying what earned the rung.
+  Deterministic clamps: a *roster‑only* person (the roster stores no
+  reporting info) can never carry `explicit`/`observed` — it clamps to
+  `inferred`; every gap's line is `scaffold`; a root has no line.
+- **Cross‑source corroboration + freshness (app‑computed):** a person found
+  in **both** the saved roster and the narrative evidence is marked
+  `corroborated` (two different source *types*, not one source repeated),
+  and `last_seen_date` is the newest supplied source naming the person —
+  org structure is perishable, so every sighting is dated.
+- **Gaps are data:** a `missing` node (or a "(not yet identified)" name,
+  whatever status the model claimed) stays on the chart as a scaffold
+  question — a prospecting target, never a guessed answer. A valid saved
+  `contact_id` contradicts "missing" and the primary CRM record wins.
+- **Node shape:** `{ name, status, depth, contact_id, line_confidence,
+  line_basis, person_source, corroborated, last_seen_date }` in a flat
+  top‑down list (`person_source`: `roster` · `evidence` · `both` · `gap`).
+  `depth` 0 is the most senior known person; statuses share the Contact
   Analyzer's canonical set — `engaged` · `introduced` · `identified` ·
   `missing` (same colors on both boards).
 - **Validation (structural, like the Contact brief):** statuses are
-  canonicalized, depth is clamped (0–6), the list is bounded (30 nodes), and
+  canonicalized, depth is clamped (0–6), the list is bounded (30 nodes),
+  duplicates collapse (one person, one box), an unlinked node whose name
+  exactly matches exactly one saved contact is auto‑linked, and
   — the partner‑specific guarantee — a node's `contact_id` survives **only**
   when it names a roster row that was actually sent (`anchors.contactIds`),
   so a fabricated contact_id can never masquerade as a saved CRM record.

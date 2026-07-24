@@ -130,6 +130,9 @@ export function preparePartnerAnalysis({
     // Only ids actually SENT in the roster may be cited or carried by an
     // org-chart node — same "cite only what you were shown" rule as narrative.
     contactIds: contactRoster.included.map(c => c.contact_id),
+    // Names too (already in the prompt), so the org-chart validator can
+    // verify/auto-link a roster person the model named without the id.
+    contacts: contactRoster.included,
   });
 
   const healthSignals = computeHealthSignals({

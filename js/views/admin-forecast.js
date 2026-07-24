@@ -2144,12 +2144,15 @@ const ORG_ROW_MAX = 4;
 function buildPartnerOrgChart(analysis, partner) {
   const nodes = (analysis && analysis.org_map) || [];
   const stats = derivePartnerOrgStats(nodes);
+  const meta = (analysis && analysis.org_map_meta) || {};
   const partnerName = String((analysis && analysis.partner_name) || (partner && partner.display_name) || '').trim();
 
   const head = el('div', { class: 'partner-org__head' },
     el('div', { class: 'partner-org__heading' },
       el('div', { class: 'partner-org__title' }, 'Likely Org Chart'),
-      el('div', { class: 'partner-org__sub' }, 'Inferred from saved contacts and CRM evidence — not an official org chart'),
+      el('div', { class: 'partner-org__sub' },
+        'Inferred from saved contacts and CRM evidence — not an official org chart. '
+        + 'Each person and each reporting line carries its own provenance.'),
     ),
     stats.total ? el('div', { class: 'partner-org__tools' },
       buildPartnerOrgLegend(stats),
@@ -2161,15 +2164,24 @@ function buildPartnerOrgChart(analysis, partner) {
     ) : null,
   );
 
+  // Truth over completeness: when the validator removed names it could not
+  // find in the saved roster or the supplied evidence, say so — a smaller
+  // verified chart must never silently pose as the whole picture.
+  const removed = Number(meta.removed_unverified) || 0;
+  const verifyNote = removed > 0
+    ? el('p', { class: 'partner-org__note' },
+        `${removed} unverifiable name${removed === 1 ? ' was' : 's were'} removed — only people found in the saved contacts or this partner’s own evidence are shown.`)
+    : null;
+
   if (!stats.total) {
-    return el('section', { class: 'partner-org' }, head,
+    return el('section', { class: 'partner-org' }, head, verifyNote,
       el('p', { class: 'forecast-list__empty' },
         'No partner-side people surfaced from the evidence yet. Save contacts on the partner record '
         + '(or capture notes and meetings that name people), then re-run the analysis.'),
     );
   }
 
-  return el('section', { class: 'partner-org' }, head,
+  return el('section', { class: 'partner-org' }, head, verifyNote,
     el('div', { class: 'partner-org__scroll' }, buildPartnerOrgTreeEl(nodes)),
   );
 }
@@ -2183,13 +2195,21 @@ function buildPartnerOrgTreeEl(nodes) {
     class: `partner-org__tree${hangRoots ? ' partner-org__tree--hang' : ''}`,
     role: 'tree',
     'aria-label': 'Likely partner org chart',
-  }, ...roots.map(b => buildPartnerOrgBranch(b, hangRoots)));
+  }, ...roots.map(b => buildPartnerOrgBranch(b, hangRoots, false)));
 }
 
-function buildPartnerOrgBranch(branch, inHang) {
+function buildPartnerOrgBranch(branch, inHang, isChild) {
   const n = branch.node;
   const [personName, personTitle] = splitOrgNodeName(n.name);
-  const card = el('div', { class: `partner-org__node partner-org__node--${n.status}` },
+  const prov = orgNodeProvenance(n);
+  // The connector line above this card is a CLAIM — show how it was earned.
+  // Rendered only where a line is actually drawn (a child in the tree), and
+  // not on gaps ("Missing" already says the whole node is scaffold).
+  const lineConf = (isChild && n.status !== 'missing' && n.line_confidence) ? String(n.line_confidence) : '';
+  const card = el('div', {
+    class: `partner-org__node partner-org__node--${n.status}`,
+    title: orgNodeHoverTitle(n, lineConf) || null,
+  },
     el('div', { class: 'partner-org__node-name' },
       el('span', { class: `partner-org__dot partner-org__dot--${n.status}` }),
       el('span', {}, personName),
@@ -2197,7 +2217,13 @@ function buildPartnerOrgBranch(branch, inHang) {
     personTitle ? el('div', { class: 'partner-org__node-title' }, personTitle) : null,
     el('div', { class: 'partner-org__node-meta' },
       el('span', { class: `partner-org__status partner-org__status--${n.status}` }, orgNodeStatusLabel(n.status)),
-      n.contact_id ? el('span', { class: 'partner-org__saved', title: 'Saved partner contact' }, 'Saved') : null,
+      n.contact_id ? el('span', { class: 'partner-org__saved', title: 'Saved partner contact (CRM record)' }, 'Saved') : null,
+      prov ? el('span', { class: `partner-org__prov partner-org__prov--${prov.kind}`, title: prov.title }, prov.label) : null,
+      lineConf ? el('span', {
+        class: `partner-org__line partner-org__line--${lineConf}`,
+        title: orgLineTitle(n),
+      }, `Line: ${orgLineLabel(lineConf)}`) : null,
+      n.last_seen_date ? el('span', { class: 'partner-org__seen', title: 'Newest supplied source naming this person' }, `Seen ${n.last_seen_date}`) : null,
     ),
   );
   const li = el('li', {
@@ -2214,7 +2240,7 @@ function buildPartnerOrgBranch(branch, inHang) {
     li.appendChild(el('ul', {
       class: `partner-org__children${hangChildren ? ' partner-org__children--hang' : ''}`,
       role: 'group',
-    }, ...branch.children.map(c => buildPartnerOrgBranch(c, hangChildren))));
+    }, ...branch.children.map(c => buildPartnerOrgBranch(c, hangChildren, true))));
   }
   return li;
 }
@@ -2241,7 +2267,9 @@ function openPartnerOrgFullscreen({ nodes, stats, partnerName }) {
     el('div', { class: 'partner-org-overlay__bar' },
       el('div', { class: 'partner-org__heading' },
         el('div', { class: 'partner-org__title' }, partnerName ? `Likely Org Chart — ${partnerName}` : 'Likely Org Chart'),
-        el('div', { class: 'partner-org__sub' }, 'Inferred from saved contacts and CRM evidence — not an official org chart'),
+        el('div', { class: 'partner-org__sub' },
+          'Inferred from saved contacts and CRM evidence — not an official org chart. '
+          + 'Each person and each reporting line carries its own provenance.'),
       ),
       el('div', { class: 'partner-org-overlay__tools' },
         buildPartnerOrgLegend(stats),
@@ -2277,6 +2305,71 @@ function orgNodeStatusLabel(status) {
   }
 }
 
+// Where the PERSON came from (computed by the validator, never by the model).
+// The "Saved" chip already covers a roster-only person; a gap is covered by
+// its "Missing" status — so only the evidence-backed cases need a chip.
+function orgNodeProvenance(n) {
+  switch (n && n.person_source) {
+    case 'both':
+      return {
+        kind: 'both', label: 'Corroborated',
+        title: 'Corroborated across source types: a saved CRM contact AND named in this partner’s own evidence.',
+      };
+    case 'evidence':
+      return {
+        kind: 'evidence', label: 'In evidence',
+        title: 'Named in this partner’s supplied evidence, but not yet saved as a partner contact.',
+      };
+    case 'roster':
+      // A linked roster person already shows the "Saved" chip; only the
+      // name-matched-but-unlinked case needs its own flag.
+      return n.contact_id ? null : {
+        kind: 'roster', label: 'Roster match',
+        title: 'Matches a saved partner contact by name, but could not be uniquely linked to one record.',
+      };
+    default:
+      return null;
+  }
+}
+
+function orgLineLabel(conf) {
+  switch (conf) {
+    case 'explicit': return 'Explicit';
+    case 'observed': return 'Observed';
+    case 'scaffold': return 'Scaffold';
+    default: return 'Inferred';
+  }
+}
+
+// The rung used IS the line's confidence — spell out what each rung means so
+// an "unexplained certainty" can never render.
+function orgLineRungExplanation(conf) {
+  switch (conf) {
+    case 'explicit': return 'A supplied source states this reporting line outright.';
+    case 'observed': return 'Deference, sign-off or cc patterns in the evidence imply this line.';
+    case 'scaffold': return 'Structural scaffold only — no source asserts this line.';
+    default: return 'Inferred from title seniority and shared function — no source states this line.';
+  }
+}
+
+function orgLineTitle(n) {
+  const base = orgLineRungExplanation(n && n.line_confidence);
+  const basis = String(n && n.line_basis || '').trim();
+  return basis ? `${base} Basis: ${basis}` : base;
+}
+
+// One hover string that assembles the node's whole provenance story.
+function orgNodeHoverTitle(n, lineConf) {
+  const bits = [];
+  if (n.status === 'missing') bits.push('Known gap — no person identified for this role yet (a prospecting target, not a guess).');
+  if (n.contact_id) bits.push('Saved partner contact.');
+  const prov = orgNodeProvenance(n);
+  if (prov) bits.push(prov.title);
+  if (n.last_seen_date) bits.push(`Last seen in the evidence on ${n.last_seen_date}.`);
+  if (lineConf) bits.push(`Reporting line — ${orgLineLabel(lineConf).toLowerCase()}: ${orgLineTitle(n)}`);
+  return bits.join(' ');
+}
+
 function buildPartnerOrgLegend(stats) {
   const chip = (status, count) => (count ? el('span', { class: 'partner-org__legend-chip' },
     el('span', { class: `partner-org__dot partner-org__dot--${status}` }),
@@ -2288,6 +2381,10 @@ function buildPartnerOrgLegend(stats) {
     chip('missing', stats.missing),
     stats.saved ? el('span', { class: 'partner-org__legend-chip partner-org__legend-chip--saved' },
       `${stats.saved} saved contact${stats.saved === 1 ? '' : 's'}`) : null,
+    stats.corroborated ? el('span', {
+      class: 'partner-org__legend-chip partner-org__legend-chip--corr',
+      title: 'People found in BOTH the saved contacts and this partner’s evidence — the strongest identity claim on the chart.',
+    }, `${stats.corroborated} corroborated`) : null,
   );
 }
 

@@ -301,10 +301,18 @@ SCORING GUIDANCE (subordinate to the Golden Rule):
 - Echo the given Partner ID and name back in "partner_id" and "partner_name".
 
 ORG CHART ("org_map") — a LIKELY org chart of the partner organization (separate from criterion scoring; it never makes a criterion met):
-- Sketch the partner-side reporting structure from the SAVED PARTNER CONTACTS roster plus any partner-side people explicitly NAMED in the evidence above. It is an inferred, best-effort map of who we know and who we are missing — NOT an official org chart.
-- Return a flat top-down list. "depth" 0 is the most senior person known; a report’s depth is one more than its likely manager’s, and it must appear AFTER its manager in the list. Peers share a depth under the same manager.
-- "name": "Name — Title" when the role is known, otherwise just the name. For a structural gap you may add an UNNAMED role node such as "CTO (not yet identified)" — never invent a named person, and use people from the roster or the evidence only.
-- "status": "engaged" (an active working relationship is evidenced) | "introduced" (met at least once, no active thread) | "identified" (known to exist, not yet met) | "missing" (an unfilled structural gap worth closing).
+- TRUTH OVER COMPLETENESS: a verified partial chart beats a plausible complete one. Sketch the partner-side reporting structure from the SAVED PARTNER CONTACTS roster plus any partner-side people explicitly NAMED in the evidence above. It is an inferred, best-effort map of who we know and who we are missing — NOT an official org chart.
+- PEOPLE — never invent a named person. Use ONLY people from the roster or the evidence. The app removes any named node it cannot find in the saved roster or the supplied evidence text, so an invented or remembered name will not survive. What you know about who publicly runs a company with this name is NOT usable here.
+- Return a flat top-down list, each person listed ONCE. "depth" 0 is the most senior person known; a report’s depth is one more than its likely manager’s, and it must appear AFTER its manager in the list. Peers share a depth under the same manager.
+- "name": "Name — Title" when the role is known, otherwise just the name. For a structural gap add an UNNAMED role node such as "CTO (not yet identified)" with status "missing" — a known gap is useful data (a prospecting target), never a place for a guessed name.
+- "status" rates the PERSON relationship: "engaged" (an active working relationship is evidenced) | "introduced" (met at least once, no active thread) | "identified" (known to exist, not yet met) | "missing" (an unfilled structural gap worth closing).
+- THE PERSON AND THE REPORTING LINE ARE RATED SEPARATELY — a confirmed person never implies a confirmed line. "line_confidence" rates ONLY the line to the manager above, on this ladder; stop at the HIGHEST rung the supplied evidence actually earns:
+  * "explicit" — a supplied source states the line outright ("reports to", "her team", "my boss").
+  * "observed" — deference, sign-off, approval or cc patterns in the evidence imply it.
+  * "inferred" — only title seniority + shared function suggest it. This is the honest default; most lines land here.
+  * "scaffold" — shape only, from how comparable partner orgs are typically structured. Every "missing" gap node is scaffold.
+  A saved contact's title alone can never earn "explicit" or "observed" — those require the evidence text. Leave "" for a depth-0 root.
+- "line_basis": one short phrase saying what earned that rung, naming the source date when you can (e.g. "reports to Dana — 2026-05-12 transcript"). Prefer the most RECENT evidence — org structure goes stale. Empty for a root or when nothing supports the line.
 - "contact_id": the contact_id from the roster when the node IS that saved contact; "" for everyone else. Never fabricate a contact_id.
 - If neither the roster nor the evidence names any partner-side person, return [].
 

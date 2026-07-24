@@ -1070,6 +1070,17 @@
   white-space: nowrap;
 }
 .partner-org__legend-chip--saved { color: var(--color-primary); border-color: var(--color-primary-lighter); }
+.partner-org__legend-chip--corr { color: var(--color-success); border-color: var(--color-success); }
+
+/* Validator read-out: unverifiable names were removed rather than rendered.
+   Kept quiet (muted, small) but always visible — a smaller verified chart
+   must never silently pose as the whole picture. */
+.partner-org__note {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin: var(--space-2) 0 0;
+}
 
 /* ── Connector-line tree (hybrid row / hanging layout) ───────
    Nested flex <ul>s. A sibling set of up to ORG_ROW_MAX (see
@@ -1295,6 +1306,40 @@
   border: 1px solid var(--color-primary-lighter);
   border-radius: var(--radius-full);
   padding: 0 6px;
+}
+
+/* Person provenance — where the identity claim came from (validator-computed). */
+.partner-org__prov {
+  font-size: 10px;
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+}
+.partner-org__prov--both { color: var(--color-success); }
+.partner-org__prov--evidence { color: var(--color-primary); }
+.partner-org__prov--roster { color: var(--color-text-muted); }
+
+/* Reporting-line confidence — the rung on the explicit→observed→inferred→
+   scaffold ladder that the line to the manager above actually earned. */
+.partner-org__line {
+  font-size: 10px;
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.partner-org__line--explicit { color: var(--color-success); }
+.partner-org__line--observed { color: var(--color-primary); }
+.partner-org__line--inferred { color: var(--color-text-muted); }
+.partner-org__line--scaffold { color: var(--color-warning); }
+
+/* Freshness of the newest supplied source naming this person. */
+.partner-org__seen {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 640px) {
