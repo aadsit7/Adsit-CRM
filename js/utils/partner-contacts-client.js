@@ -13,7 +13,7 @@
 import { getRuntimeConfig } from '../config.js';
 import { buildPartnerContactsPrompt, parsePartnerContactsResponse } from './partner-contacts.js';
 
-const CONTACTS_MODEL = 'claude-opus-4-7';
+const CONTACTS_MODEL = 'claude-opus-4-8';
 const CONTACTS_MAX_TOKENS = 16000;
 const CONTACTS_TIMEOUT_MS = 120_000;
 // When a reply is cut off at CONTACTS_MAX_TOKENS (stop_reason "max_tokens"),

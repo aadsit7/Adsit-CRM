@@ -15,7 +15,7 @@ import { getRuntimeConfig } from '../config.js';
 import { buildForecastPrompt, stripHtml } from './forecast-prompts.js';
 import { parseForecastJsonResponse } from './forecast-schema.js';
 
-const FORECAST_MODEL      = 'claude-opus-4-7';
+const FORECAST_MODEL      = 'claude-opus-4-8';
 const FORECAST_MAX_TOKENS = 16000;
 const FORECAST_TIMEOUT_MS = 120_000;
 

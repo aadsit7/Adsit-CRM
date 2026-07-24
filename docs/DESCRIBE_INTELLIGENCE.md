@@ -6,7 +6,7 @@ Each description entry in the Opportunity detail modal now has a **✨ Standardi
 
 When clicked, the button:
 
-1. Sends the raw description text to Claude (claude-opus-4-7 via the Anthropic Messages API).
+1. Sends the raw description text to Claude (claude-opus-4-8 via the Anthropic Messages API).
 2. Claude classifies the description as either `meeting_recap` or `opportunity_note` and reformats it into the standardized structure for that category.
 3. The standardized text is written back to the `Opportunity_Descriptions` sheet (via the Apps Script endpoint).
 4. The description card updates in place — no page reload needed.

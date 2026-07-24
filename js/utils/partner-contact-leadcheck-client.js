@@ -15,7 +15,7 @@
 import { getRuntimeConfig } from '../config.js';
 import { buildLeadCheckPrompt, parseLeadCheckResponse } from './partner-contact-leadcheck.js';
 
-const LEADCHECK_MODEL = 'claude-opus-4-7';
+const LEADCHECK_MODEL = 'claude-opus-4-8';
 const LEADCHECK_MAX_TOKENS = 16000;
 const LEADCHECK_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
 const LEADCHECK_MAX_ROUNDS = 6;               // pause_turn continuations

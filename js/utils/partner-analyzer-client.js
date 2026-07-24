@@ -31,7 +31,7 @@ import {
   buildPartnerCriteriaFacts, collectPartnerAnchors, computeHealthSignals,
 } from './partner-analyzer-evidence.js';
 
-const PARTNER_MODEL = 'claude-opus-4-7';
+const PARTNER_MODEL = 'claude-opus-4-8';
 const PARTNER_MAX_TOKENS = 16000;
 const PARTNER_TIMEOUT_MS = 120_000;
 
