@@ -1791,9 +1791,11 @@ function renderPartnerBoard({ analysis, board, kpis, health, partner, coverage }
     buildPartnerGrid({ board, partner }),
   ));
 
-  frag.appendChild(buildPartnerOrgChart(analysis));
-
   frag.appendChild(buildPartnerLists(analysis));
+
+  // The org chart reads best as the closing section — full width, below the
+  // action/gap/risk lists, with its own full-screen view for big rosters.
+  frag.appendChild(buildPartnerOrgChart(analysis, partner));
 
   return frag;
 }
@@ -2129,16 +2131,34 @@ function buildPartnerListCard(title, subtitle, items) {
 // connector-line tree of node cards. Nodes carrying a contact_id are saved
 // Partner_Contacts rows; everything else was inferred from the evidence. The
 // chart is presentational only — it never feeds criterion scoring.
-function buildPartnerOrgChart(analysis) {
+//
+// LAYOUT — a hybrid, the way professional org-chart tools draw big teams:
+// a sibling set of up to ORG_ROW_MAX renders side-by-side under the classic
+// horizontal rail; a bigger set switches that subtree to a vertical
+// "hanging" list (spine + elbow connectors). A real 30-person roster
+// therefore grows DOWN the page like a directory instead of sprawling
+// thousands of pixels sideways behind a scrollbar. The Full screen button
+// opens the same tree in a viewport-filling overlay for close reading.
+const ORG_ROW_MAX = 4;
+
+function buildPartnerOrgChart(analysis, partner) {
   const nodes = (analysis && analysis.org_map) || [];
   const stats = derivePartnerOrgStats(nodes);
+  const partnerName = String((analysis && analysis.partner_name) || (partner && partner.display_name) || '').trim();
 
   const head = el('div', { class: 'partner-org__head' },
     el('div', { class: 'partner-org__heading' },
       el('div', { class: 'partner-org__title' }, 'Likely Org Chart'),
       el('div', { class: 'partner-org__sub' }, 'Inferred from saved contacts and CRM evidence — not an official org chart'),
     ),
-    stats.total ? buildPartnerOrgLegend(stats) : null,
+    stats.total ? el('div', { class: 'partner-org__tools' },
+      buildPartnerOrgLegend(stats),
+      el('button', {
+        type: 'button',
+        class: 'btn btn--secondary btn--sm partner-org__expand',
+        onClick: () => openPartnerOrgFullscreen({ nodes, stats, partnerName }),
+      }, 'Full screen'),
+    ) : null,
   );
 
   if (!stats.total) {
@@ -2149,16 +2169,24 @@ function buildPartnerOrgChart(analysis) {
     );
   }
 
-  const roots = buildOrgChartTree(nodes);
   return el('section', { class: 'partner-org' }, head,
-    el('div', { class: 'partner-org__scroll' },
-      el('ul', { class: 'partner-org__tree', role: 'tree', 'aria-label': 'Likely partner org chart' },
-        ...roots.map(buildPartnerOrgBranch)),
-    ),
+    el('div', { class: 'partner-org__scroll' }, buildPartnerOrgTreeEl(nodes)),
   );
 }
 
-function buildPartnerOrgBranch(branch) {
+// The tree element itself — shared by the in-page card and the full-screen
+// overlay so the two views can never drift apart.
+function buildPartnerOrgTreeEl(nodes) {
+  const roots = buildOrgChartTree(nodes);
+  const hangRoots = roots.length > ORG_ROW_MAX;
+  return el('ul', {
+    class: `partner-org__tree${hangRoots ? ' partner-org__tree--hang' : ''}`,
+    role: 'tree',
+    'aria-label': 'Likely partner org chart',
+  }, ...roots.map(b => buildPartnerOrgBranch(b, hangRoots)));
+}
+
+function buildPartnerOrgBranch(branch, inHang) {
   const n = branch.node;
   const [personName, personTitle] = splitOrgNodeName(n.name);
   const card = el('div', { class: `partner-org__node partner-org__node--${n.status}` },
@@ -2172,12 +2200,61 @@ function buildPartnerOrgBranch(branch) {
       n.contact_id ? el('span', { class: 'partner-org__saved', title: 'Saved partner contact' }, 'Saved') : null,
     ),
   );
-  const li = el('li', { class: 'partner-org__branch', role: 'treeitem' }, card);
+  const li = el('li', {
+    class: `partner-org__branch${inHang ? ' partner-org__branch--hang' : ''}`,
+    role: 'treeitem',
+  }, card);
   if (branch.children.length) {
-    li.appendChild(el('ul', { class: 'partner-org__children', role: 'group' },
-      ...branch.children.map(buildPartnerOrgBranch)));
+    // Once a subtree hangs it stays hanging — mixing a horizontal rail into
+    // a vertical list reads as noise, and the indent already shows depth.
+    const hangChildren = inHang || branch.children.length > ORG_ROW_MAX;
+    // A hanging team's spine drops from under its manager's card, so the
+    // manager card left-aligns with the list instead of centering over it.
+    if (hangChildren) li.classList.add('partner-org__branch--hangparent');
+    li.appendChild(el('ul', {
+      class: `partner-org__children${hangChildren ? ' partner-org__children--hang' : ''}`,
+      role: 'group',
+    }, ...branch.children.map(c => buildPartnerOrgBranch(c, hangChildren))));
   }
   return li;
+}
+
+// Full-screen view: the same tree in a viewport-filling overlay. Closes on
+// the button, Escape, or an in-app navigation (so it can never outlive the
+// Analyzer view underneath it).
+function openPartnerOrgFullscreen({ nodes, stats, partnerName }) {
+  const prevOverflow = document.body.style.overflow;
+  const closeAll = () => {
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('hashchange', closeAll);
+    document.body.style.overflow = prevOverflow;
+    overlay.remove();
+  };
+  const onKey = (e) => { if (e.key === 'Escape') closeAll(); };
+
+  const overlay = el('div', {
+    class: 'partner-org-overlay',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': 'Likely org chart — full screen',
+  },
+    el('div', { class: 'partner-org-overlay__bar' },
+      el('div', { class: 'partner-org__heading' },
+        el('div', { class: 'partner-org__title' }, partnerName ? `Likely Org Chart — ${partnerName}` : 'Likely Org Chart'),
+        el('div', { class: 'partner-org__sub' }, 'Inferred from saved contacts and CRM evidence — not an official org chart'),
+      ),
+      el('div', { class: 'partner-org-overlay__tools' },
+        buildPartnerOrgLegend(stats),
+        el('button', { type: 'button', class: 'btn btn--secondary btn--sm', onClick: closeAll }, 'Close ✕'),
+      ),
+    ),
+    el('div', { class: 'partner-org-overlay__canvas' }, buildPartnerOrgTreeEl(nodes)),
+  );
+
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('hashchange', closeAll);
+  document.body.style.overflow = 'hidden';
+  document.body.appendChild(overlay);
 }
 
 // "Jane Doe — VP Alliances" → box with a name line and a title line. Accepts

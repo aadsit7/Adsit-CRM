@@ -189,6 +189,15 @@ Analyzer's "Likely Organizational Map".
   nests the flat list — normalizing skipped depths — and is shared by the
   view and the PDF, so the two trees can never disagree;
   `derivePartnerOrgStats()` powers the legend counts.
+- **Layout & placement:** the chart is the **closing section** of the board
+  (and of the PDF), below the action/gap/risk lists. It uses a **hybrid
+  layout**: a sibling set of up to 4 renders side-by-side under the classic
+  horizontal rail, while a bigger team switches that subtree to a vertical
+  *hanging* list (spine + elbow connectors) — so a 30-person roster grows
+  down the page like a directory instead of sprawling horizontally. The
+  in-card view is height-capped with its own scrolling; a **Full screen**
+  button opens the same tree (same shared builder) in a viewport-filling
+  overlay that closes on Escape, Close, or in-app navigation.
 - **It never affects scoring.** The org chart is interpretive output; stage
   statuses, the operational/furthest stages and completion % are still
   recomputed exclusively from the validated criteria. An empty roster plus
