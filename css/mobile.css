@@ -540,6 +540,126 @@ html {
     gap: var(--space-3);
   }
 
+  /* ---------- 12. Rich-text editor (transcript / meeting notes) ----------
+     The quick-add "Transcript" field is a Quill "snow" editor. On a 390px
+     iPhone its float-based toolbar wrapped into a cramped two-row block and
+     the edit window was a tiny ~120px scroll-box — painful for pasting and
+     revising a long call transcript (the reported issue). This section turns
+     it into a comfortable, touch-first surface:
+       • toolbar → roomy 40px tap targets with breathing room (not cramped)
+       • editor  → tall, with 16px text so iOS never auto-zooms on focus
+       • a clear "Full screen" affordance + an iPhone-native full-screen mode
+     Quill inserts its toolbar as a SIBLING of the .quill-editor container
+     (both inside .quill-editor-wrapper), so toolbar rules are scoped to the
+     wrapper. Quill's own stylesheet loads AFTER mobile.css (index.html), so a
+     few rules use higher specificity (.ql-toolbar.ql-snow) or !important.
+     Applies to every rich-text field (transcript, description, deal notes). */
+
+  /* Toolbar: roomy, touch-friendly controls. Kept as a wrapping strip (not a
+     horizontal scroller) because overflow-x would clip Quill's header dropdown
+     (.ql-picker-options opens just below the bar). Bigger targets + spacing
+     turn the previously cramped block into a comfortable one. */
+  .quill-editor-wrapper .ql-toolbar.ql-snow {
+    padding: 5px 8px;
+  }
+  .quill-editor-wrapper .ql-toolbar.ql-snow .ql-formats {
+    margin-right: 11px;
+  }
+
+  /* 40px touch targets (Quill defaults to a fiddly 28×24). */
+  .quill-editor-wrapper .ql-toolbar.ql-snow button {
+    width: 40px;
+    height: 40px;
+    padding: 9px;
+  }
+  .quill-editor-wrapper .ql-toolbar.ql-snow .ql-picker.ql-header {
+    height: 40px;
+    line-height: 40px;
+  }
+
+  /* Roomy edit area; 16px text stops iOS zooming the page in on focus.
+     (.ql-editor IS a descendant of .quill-editor, so this matches directly.) */
+  .quill-editor .ql-editor {
+    min-height: 42dvh;
+    max-height: 60dvh;
+    padding: 14px 14px 56px;            /* bottom room so the mic never sits on text */
+    font-size: 16px !important;
+    line-height: 1.6;
+  }
+  .quill-editor .ql-editor.ql-blank::before {
+    font-size: 16px;
+  }
+
+  /* Match the dictation mic to the larger controls around it. */
+  .quill-editor .quill-editor-mic-btn {
+    width: 40px;
+    height: 40px;
+    right: 8px;
+    bottom: 8px;
+  }
+
+  /* "Full screen" affordance — promote the easily-missed 28px icon into an
+     obvious, thumb-sized pill for a spacious way to read/edit a long
+     transcript. It sits in a reserved strip ABOVE the toolbar (wrapper
+     padding-top) so it never overlaps the buttons or Quill's box border. */
+  .quill-editor-wrapper {
+    padding-top: 42px;
+  }
+  .quill-editor-wrapper .quill-editor-expand-btn {
+    top: 4px;
+    right: 4px;
+    width: auto;
+    height: 34px;
+    padding: 0 14px;
+    gap: 6px;
+    border: none;
+    border-radius: 999px;
+    background: var(--color-primary, #2F6BFF);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(47, 107, 255, 0.35);
+  }
+  .quill-editor-wrapper .quill-editor-expand-btn::after {
+    content: "Full screen";
+  }
+
+  /* Full-screen editor → a native iPhone writing surface. Lift it above the
+     floating quick-add sheet (z 9997) and modals, and honour the notch +
+     home-indicator safe areas so no control hides under the system UI. */
+  .quill-editor-fullscreen {
+    z-index: 10000;
+    height: 100dvh;
+  }
+  .quill-editor-fullscreen__header {
+    padding-top: calc(var(--space-4) + var(--safe-top));
+    padding-left: calc(var(--space-5) + var(--safe-left));
+    padding-right: calc(var(--space-5) + var(--safe-right));
+  }
+  .quill-editor-fullscreen .quill-editor-collapse-btn {
+    min-height: 44px;
+    padding: 0 18px;
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    border: none;
+    background: var(--color-primary, #2F6BFF);
+    color: #fff;
+  }
+  .quill-editor-fullscreen .quill-editor .ql-editor {
+    min-height: 0;
+    max-height: none;
+    height: 100%;
+    line-height: 1.7;
+    font-size: 16px !important;
+    padding: 18px calc(16px + var(--safe-right))
+             calc(28px + var(--safe-bottom))
+             calc(16px + var(--safe-left));
+  }
+  .quill-editor-fullscreen .quill-editor-mic-btn {
+    right: calc(14px + var(--safe-right));
+    bottom: calc(14px + var(--safe-bottom));
+  }
+
   /* Prevent horizontal page scroll from rogue wide elements */
   html, body {
     overflow-x: hidden;
