@@ -115,6 +115,21 @@ function buildContactsBlock(agg) {
   return lines.join('\n');
 }
 
+// ── Saved partner-contact roster (org-chart + stakeholder evidence) ──
+function buildContactRosterBlock(roster) {
+  const r = roster || { total: 0, included: [], omittedCount: 0 };
+  const rows = r.included || [];
+  if (!rows.length) {
+    return '(No saved partner contacts on file for this partner. Build the org chart only from people explicitly NAMED in the evidence above — or return an empty org_map if none are named.)';
+  }
+  const lines = [];
+  lines.push(`Saved partner-side people on this partner’s record: ${r.total} (structured CRM records — names and roles only; emails and phones are withheld by design).`);
+  lines.push('These rows may back a criterion claim (e.g. key stakeholders identified): use source_type "partner_contact" and put the contact_id in source_id.');
+  rows.forEach(c => lines.push(`- [contact_id: ${c.contact_id}] ${c.name}${c.role ? ` — ${c.role}` : ''}`));
+  if (r.omittedCount > 0) lines.push(`(+${r.omittedCount} more saved contact(s) not listed due to size limits.)`);
+  return lines.join('\n');
+}
+
 function buildSavedPlaybookBlock(saved) {
   const s = saved || { found: false, checked: {} };
   const ids = Object.keys(s.checked || {});
@@ -149,10 +164,11 @@ function buildCoverageBlock(coverage) {
  * @param {object} params.evidence      assemblePartnerEvidence() result.
  * @param {object} [params.contactsAgg] buildContactAggregates() result.
  * @param {object} [params.savedPlaybook] parseSavedPlaybook() result (partner-scoped).
+ * @param {object} [params.contactRoster] buildPartnerContactRoster() result (org-chart roster).
  * @param {string} [params.today]       Injectable YYYY-MM-DD.
  * @returns {string}
  */
-export function buildPartnerAnalyzerPrompt({ partner, kpis, evidence, contactsAgg, savedPlaybook, today } = {}) {
+export function buildPartnerAnalyzerPrompt({ partner, kpis, evidence, contactsAgg, savedPlaybook, contactRoster, today } = {}) {
   const p = partner || {};
   const name = String(p.display_name || '').trim() || 'this partner';
   const ev = evidence || {};
@@ -254,6 +270,12 @@ ${buildContactsBlock(contactsAgg)}
 
 ---
 
+SAVED PARTNER CONTACTS (Partner_Contacts — the partner-side people saved on this partner’s record; the org-chart roster):
+
+${buildContactRosterBlock(contactRoster)}
+
+---
+
 SAVED EVENT PLAYBOOK:
 
 ${buildSavedPlaybookBlock(savedPlaybook)}
@@ -272,11 +294,19 @@ SCORING GUIDANCE (subordinate to the Golden Rule):
 - For every criterion choose one status: "met", "partial", "not_met", or "no_evidence", and set "source_type" to where the support came from ("none" for no_evidence).
 - "met" = a source clearly shows the criterion is satisfied. "partial" = a source shows progress but not completion. "not_met" = a source shows it was attempted and did NOT happen (rare). "no_evidence" = the sources say nothing (the common case).
 - For a NARRATIVE "met"/"partial" (transcript, meeting_index, partner_document, opportunity_description, event_description), quote or closely paraphrase ONE source in "evidence" and set "source_id"/"source_date" to that source. A claim you cannot tie to a real supplied source id or date will be dropped.
-- For a STRUCTURED "met"/"partial" (partner_profile, opportunity, event, event_contacts, saved_event_playbook), rely on the deterministic facts above; the app validates and overlays these. Do not fabricate counts.
+- For a STRUCTURED "met"/"partial" (partner_profile, opportunity, event, event_contacts, partner_contact, saved_event_playbook), rely on the deterministic facts / structured records above; the app validates and overlays these. Do not fabricate counts.
 - A stage's "status" is "complete" only when ALL three criteria are "met"; "in_progress" if at least one is met or partial; otherwise "not_started". The app recomputes this.
 - "operational_stage_id" is the FIRST stage that is not complete; "furthest_demonstrated_stage_id" is the furthest stage with at least one met criterion. The app recomputes both — do not let a completed later stage hide an unfinished earlier one.
 - "summary" (2-3 sentences), "next_actions", "gaps", "open_questions", "risks", "momentum" describe THIS partnership. Return [] for any list you cannot support.
 - Echo the given Partner ID and name back in "partner_id" and "partner_name".
+
+ORG CHART ("org_map") — a LIKELY org chart of the partner organization (separate from criterion scoring; it never makes a criterion met):
+- Sketch the partner-side reporting structure from the SAVED PARTNER CONTACTS roster plus any partner-side people explicitly NAMED in the evidence above. It is an inferred, best-effort map of who we know and who we are missing — NOT an official org chart.
+- Return a flat top-down list. "depth" 0 is the most senior person known; a report’s depth is one more than its likely manager’s, and it must appear AFTER its manager in the list. Peers share a depth under the same manager.
+- "name": "Name — Title" when the role is known, otherwise just the name. For a structural gap you may add an UNNAMED role node such as "CTO (not yet identified)" — never invent a named person, and use people from the roster or the evidence only.
+- "status": "engaged" (an active working relationship is evidenced) | "introduced" (met at least once, no active thread) | "identified" (known to exist, not yet met) | "missing" (an unfilled structural gap worth closing).
+- "contact_id": the contact_id from the roster when the node IS that saved contact; "" for everyone else. Never fabricate a contact_id.
+- If neither the roster nor the evidence names any partner-side person, return [].
 
 Return ONLY a single valid JSON object. No prose. No markdown. No code fences. The object must match this exact shape:
 

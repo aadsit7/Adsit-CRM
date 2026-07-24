@@ -27,6 +27,7 @@ import {
   selectPartnerTranscripts, selectPartnerMeetings, selectPartnerDocuments,
   selectPartnerOpportunities, collectOpportunityIds, selectOpportunityDescriptions,
   selectPartnerEvents, collectEventIds, selectEventDescriptionsForPartner, selectEventContactsForPartner,
+  selectPartnerContacts, buildPartnerContactRoster,
   buildPartnerKpis, assemblePartnerEvidence, withCoverageFailures,
   buildPartnerCriteriaFacts, collectPartnerAnchors, computeHealthSignals,
 } from './partner-analyzer-evidence.js';
@@ -81,14 +82,15 @@ function aggregatePartnerSavedPlaybook(rows, eventIds) {
  * Pure (no network) — exported so the view can render the KPI strip / health
  * even before wiring the AI call, and so tests can assert scoping.
  *
- * @returns {{ scoped, kpis, health, contactsAgg, savedPlaybook, evidence,
- *   coverage, facts, anchors }}
+ * @returns {{ scoped, kpis, health, contactsAgg, savedPlaybook, contactRoster,
+ *   evidence, coverage, facts, anchors }}
  */
 export function preparePartnerAnalysis({
   partner,
   transcripts = [], meetings = [], documents = [],
   opportunities = [], opportunityDescriptions = [],
   events = [], eventDescriptions = [], eventContacts = [],
+  partnerContacts = [],
   savedPlaybookRows = [], readFailures = [], today,
 } = {}) {
   const id = String(partner && partner.partner_id || '').trim();
@@ -104,6 +106,10 @@ export function preparePartnerAnalysis({
   const pEventDesc = selectEventDescriptionsForPartner(eventDescriptions, eventIds);
   const pEventContacts = selectEventContactsForPartner(eventContacts, eventIds);
   const savedPlaybook = aggregatePartnerSavedPlaybook(savedPlaybookRows, eventIds);
+  // Saved Partner_Contacts → the org-chart roster (contact_id + name + role
+  // only; strictly this partner's rows).
+  const pContacts = selectPartnerContacts(partnerContacts, id);
+  const contactRoster = buildPartnerContactRoster(pContacts);
 
   const kpis = buildPartnerKpis({
     partner, transcripts: pTranscripts, meetings: pMeetings, documents: pDocuments,
@@ -118,8 +124,13 @@ export function preparePartnerAnalysis({
   const coverage = withCoverageFailures(evidence.coverage, readFailures);
   evidence.coverage = coverage;
 
-  const facts = buildPartnerCriteriaFacts({ partner, kpis, contactsAgg, savedPlaybook });
-  const anchors = collectPartnerAnchors(evidence, { opportunityIds: oppIds, eventIds, partnerId: id });
+  const facts = buildPartnerCriteriaFacts({ partner, kpis, contactsAgg, savedPlaybook, contactRoster });
+  const anchors = collectPartnerAnchors(evidence, {
+    opportunityIds: oppIds, eventIds, partnerId: id,
+    // Only ids actually SENT in the roster may be cited or carried by an
+    // org-chart node — same "cite only what you were shown" rule as narrative.
+    contactIds: contactRoster.included.map(c => c.contact_id),
+  });
 
   const healthSignals = computeHealthSignals({
     partner, kpis, transcripts: pTranscripts, opportunityDescriptions: pOppDesc,
@@ -132,9 +143,10 @@ export function preparePartnerAnalysis({
       transcripts: pTranscripts, meetings: pMeetings, documents: pDocuments,
       opportunities: pOpps, opportunityDescriptions: pOppDesc,
       events: pEvents, eventDescriptions: pEventDesc, eventContacts: pEventContacts,
+      partnerContacts: pContacts,
       oppIds, eventIds,
     },
-    kpis, health, contactsAgg, savedPlaybook, evidence, coverage, facts, anchors,
+    kpis, health, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors,
   };
 }
 
@@ -150,9 +162,9 @@ export async function requestPartnerAnalysisJson(params = {}) {
   const { partner, today, signal } = params;
 
   const prep = preparePartnerAnalysis(params);
-  const { kpis, health, contactsAgg, savedPlaybook, evidence, coverage, facts, anchors } = prep;
+  const { kpis, health, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors } = prep;
 
-  const prompt = buildPartnerAnalyzerPrompt({ partner, kpis, evidence, contactsAgg, savedPlaybook, today });
+  const prompt = buildPartnerAnalyzerPrompt({ partner, kpis, evidence, contactsAgg, savedPlaybook, contactRoster, today });
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
