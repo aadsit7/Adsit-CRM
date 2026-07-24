@@ -676,3 +676,147 @@ html {
     padding: var(--space-3);
   }
 }
+
+/* ============================================
+   13. Partner Contacts → real mobile contact cards
+   ============================================
+   The Contacts table on the partner-detail page is the panel a user opens
+   most on their phone, and the generic table→card treatment (section 9)
+   broke on it: the 7-column rows (Name, Role, Company, Email, Phone,
+   Sources, Actions) carry long values (roles, company names, emails) and a
+   three-button, no-wrap Actions row. Those forced each card wider than the
+   viewport, so values were sliced off the right edge and the Actions row
+   ran off-screen entirely — only the "…LETE" tail of DELETE wrapped back
+   into view. This section replaces that layout with a purpose-built contact
+   card: name as the title, every field stacked label-over-value so long
+   text simply wraps, and Actions as full-width, thumb-sized buttons.
+
+   Scoped under .partner-contacts__body and .partner-contacts__table so it
+   only touches this one table and out-specifies the section-9 rules
+   (.events-page__table tbody td); the desktop table is untouched. */
+@media (max-width: 768px) {
+  /* Collapse the table shell to block flow and never exceed the screen. */
+  .partner-contacts__body .partner-contacts__table,
+  .partner-contacts__body .partner-contacts__table tbody,
+  .partner-contacts__body .partner-contacts__table tbody tr,
+  .partner-contacts__body .partner-contacts__table tbody td {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .partner-contacts__body .partner-contacts__table thead {
+    display: none;
+  }
+
+  /* One contact = one card. overflow:hidden is the belt-and-suspenders
+     guarantee that nothing inside can spill past the screen again. */
+  .partner-contacts__body .partner-contacts__table tbody tr {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+
+  /* Each field: small uppercase label on its own line, value beneath it,
+     left-aligned and free to wrap (overflow-wrap breaks long emails). */
+  .partner-contacts__body .partner-contacts__table tbody td {
+    text-align: left;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--color-border-light);
+    font-size: 15px;
+    line-height: 1.45;
+    color: #171D2B;
+    overflow-wrap: anywhere;
+  }
+
+  .partner-contacts__body .partner-contacts__table tbody td:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .partner-contacts__body .partner-contacts__table tbody td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+
+  /* First cell = the card title: no label, larger, prominent name. */
+  .partner-contacts__body .partner-contacts__table tbody td:first-child {
+    padding-top: 0;
+  }
+
+  .partner-contacts__body .partner-contacts__table tbody td:first-child::before {
+    content: none;
+  }
+
+  .partner-contacts__body .partner-contacts__name {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  .partner-contacts__body .partner-contacts__email-link {
+    font-size: 15px;
+  }
+
+  /* Source chips flow full-width instead of being capped at 260px. */
+  .partner-contacts__body .partner-contacts__sources {
+    max-width: 100%;
+    margin-top: 2px;
+  }
+
+  .partner-contacts__body .partner-contacts__source-chip {
+    max-width: 100%;
+  }
+
+  /* Actions become a footer of full-width, thumb-friendly buttons that wrap
+     instead of a single no-wrap row that ran off the screen. */
+  .partner-contacts__body .partner-contacts__table tbody td[data-label="Actions"] {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border-light);
+  }
+
+  .partner-contacts__body .partner-contacts__table tbody td[data-label="Actions"]::before {
+    content: none;
+  }
+
+  .partner-contacts__body .partner-contacts__actions {
+    display: flex;
+    flex-wrap: wrap;
+    white-space: normal;
+    gap: 8px;
+  }
+
+  .partner-contacts__body .partner-contacts__actions > * {
+    flex: 1 1 auto;
+    box-sizing: border-box;
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-hover);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .partner-contacts__body .partner-contacts__actions .events-page__action-link--danger {
+    color: #EF4E5B;
+    border-color: #F3C7CC;
+    background: #FDF3F4;
+  }
+}
