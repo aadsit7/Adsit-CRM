@@ -5,17 +5,20 @@
 // board: partner identity + CRM context, the operational maturity position,
 // completion %, relationship health, a deterministic KPI strip, the
 // seven-stage / 21-criterion board with per-criterion status and source
-// dates, then Next Best Actions, Maturity Gaps, Open Questions, Risks,
-// Momentum and any coverage warnings.
+// dates, the likely org chart, then Next Best Actions, Maturity Gaps, Open
+// Questions, Risks, Momentum and any coverage warnings.
 //
 // The board is derived with derivePartnerBoard() — the SAME pure function the
-// on-screen view uses — so the PDF can never disagree with the page. Uses
-// partner vocabulary only: NO forecast probabilities and NO event countdowns.
+// on-screen view uses — so the PDF can never disagree with the page; the org
+// chart likewise nests through buildOrgChartTree(), the same helper the
+// on-screen tree uses. Uses partner vocabulary only: NO forecast
+// probabilities and NO event countdowns.
 //
 // jsPDF is loaded via <script defer> in index.html (window.jspdf).
 // ============================================================
 
 import { derivePartnerBoard, resolvePartnerPosition, resolveFurthestDemonstrated, PARTNER_STAGES } from './partner-analyzer-stages.js';
+import { buildOrgChartTree } from './partner-analyzer-schema.js';
 import { formatDate } from './date.js';
 
 // ── Palette (mirrors css/variables.css design tokens) ─────────
@@ -38,7 +41,7 @@ const MARGIN = 50;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 const FOOTER_Y = PAGE_H - 26;
 const BOTTOM_LIMIT = PAGE_H - MARGIN - 8;
-const MAX_PAGES = 4; // partners carry more evidence than the 3-page event board
+const MAX_PAGES = 5; // partners carry more evidence than the 3-page event board (+1 for the org chart)
 
 // ── Filename helper ───────────────────────────────────────────
 export function slugName(name) {
@@ -119,6 +122,16 @@ function healthColor(status) {
     case 'watch': return WARNING;
     case 'at_risk': return DANGER;
     default: return MUTED_TEXT;
+  }
+}
+// Org-chart node statuses — the same palette the Contact brief's org map
+// uses (engaged/introduced/missing/identified).
+function orgStatusColor(status) {
+  switch (status) {
+    case 'engaged': return SUCCESS;
+    case 'introduced': return PRIMARY_LIGHT;
+    case 'missing': return DANGER;
+    default: return NEUTRAL; // identified
   }
 }
 
@@ -408,6 +421,69 @@ function drawStage(doc, ctx, stage, yStart) {
   return y + 6;
 }
 
+// ── Likely org chart (indented tree with connector elbows) ───
+// The validated flat org_map is nested through buildOrgChartTree() — the
+// SAME depth normalization the on-screen chart applies — then re-flattened
+// here into indented rows. Each row draws its own connector elbow, so a
+// page break can never orphan half a line.
+function flattenOrgTree(roots, depth = 0, out = []) {
+  for (const branch of roots || []) {
+    out.push({ ...branch.node, depth });
+    flattenOrgTree(branch.children, depth + 1, out);
+  }
+  return out;
+}
+
+const ORG_INDENT = 16;
+function drawOrgChart(doc, ctx, orgMap, yStart) {
+  const rows = flattenOrgTree(buildOrgChartTree(orgMap));
+  if (!rows.length) return yStart;
+
+  let y = breakIfNeeded(doc, ctx, yStart, 56);
+  y = drawHeading(doc, 'Likely Org Chart', y) + 14;
+  setText(doc, MUTED_TEXT);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  doc.text('Inferred from saved contacts and CRM evidence — not an official org chart', MARGIN, y);
+  y += 12;
+
+  for (const node of rows) {
+    const x = MARGIN + node.depth * ORG_INDENT;
+    const tagBits = [String(node.status || 'identified').toUpperCase()];
+    if (node.contact_id) tagBits.push('SAVED');
+    const tag = tagBits.join(' · ');
+    const nameW = CONTENT_W - node.depth * ORG_INDENT - 10 - (tag.length * 4.6 + 12);
+    const nameLines = wrap(doc, node.name, Math.max(nameW, 120));
+    const need = Math.max(12, nameLines.length * 11);
+    y = breakIfNeeded(doc, ctx, y, need);
+    if (isFull(doc, y, need)) break;
+
+    // Self-contained connector elbow back to the parent's indent column.
+    if (node.depth > 0) {
+      setStroke(doc, BORDER);
+      doc.setLineWidth(0.9);
+      const elbowX = x - ORG_INDENT + 2.4;
+      doc.line(elbowX, y - 9.5, elbowX, y - 2.6);
+      doc.line(elbowX, y - 2.6, x - 1.6, y - 2.6);
+    }
+
+    setFill(doc, orgStatusColor(node.status));
+    doc.circle(x + 2.4, y - 2.6, 2.4, 'F');
+    setText(doc, INK);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(nameLines, x + 10, y);
+
+    setText(doc, orgStatusColor(node.status));
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.text(tag, PAGE_W - MARGIN, y, { align: 'right' });
+
+    y += need + 3;
+  }
+  return y + 6;
+}
+
 // ── Lists ─────────────────────────────────────────────────────
 const LIST_CAP = 10;
 function drawList(doc, ctx, title, subtitle, items, yStart) {
@@ -552,6 +628,7 @@ export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, 
   y = drawContext(doc, ctx, kpis, y);
   y = drawOverview(doc, ctx, analysis, y);
   y = drawStageBoard(doc, ctx, resolvedBoard, y);
+  y = drawOrgChart(doc, ctx, analysis.org_map, y);
   y = drawList(doc, ctx, 'Do This Next', 'The most useful next best actions', analysis.next_actions, y);
   y = drawList(doc, ctx, 'Maturity Gaps', 'What is missing to advance the operational stage', analysis.gaps, y);
   y = drawList(doc, ctx, 'Open Questions', 'What the evidence leaves unanswered', analysis.open_questions, y);

@@ -14,9 +14,13 @@
 //   • deterministic HEALTH SIGNALS for partner-analyzer-health.js
 //   • parser ANCHORS (valid ids/dates + source text for grounding)
 //
-// Privacy: contact rows are reduced to counts only (reusing the Event
-// Analyzer's tested aggregator). Password hashes, usernames, event passwords,
-// contact names/emails and API keys never enter any output of this module.
+// Privacy: EVENT contact rows (attendees) are reduced to counts only
+// (reusing the Event Analyzer's tested aggregator). Saved PARTNER contacts
+// (Partner_Contacts — the deliberately saved partner-side roster the Contact
+// Analyzer already exposes by name) are passed as contact_id + name + role
+// ONLY, for the likely org chart. Password hashes, usernames, event
+// passwords, contact emails/phones and API keys never enter any output of
+// this module.
 //
 // No DOM, no network — fully testable under Node.
 // ============================================================
@@ -170,6 +174,53 @@ export function selectEventDescriptionsForPartner(rows, eventIds) {
 export function selectEventContactsForPartner(rows, eventIds) {
   const ids = eventIds instanceof Set ? eventIds : new Set(eventIds || []);
   return (rows || []).filter(c => c && ids.has(String(c.event_id || '').trim()));
+}
+
+// ── Saved partner contacts (Partner_Contacts — the org-chart roster) ─
+// Unlike EVENT contacts (event attendees — reduced to counts only), the
+// Partner_Contacts sheet holds the partner-side people deliberately saved on
+// this partner's record; the Contact Analyzer already sends their name/role
+// to the model. The Partner Analyzer uses them as the roster for its likely
+// org chart — restricted to contact_id + name + role. Emails, phones,
+// evidence text and LeadCheck payloads NEVER leave this module.
+
+/** How many saved contacts the roster may carry into the prompt. */
+export const CONTACT_ROSTER_LIMIT = 60;
+
+/** Partner_Contacts rows for exactly this partner (strict partner_id). */
+export function selectPartnerContacts(rows, partnerId) {
+  const id = String(partnerId || '').trim();
+  if (!id) return [];
+  return (rows || []).filter(c => c
+    && String(c.partner_id || '').trim() === id
+    && String(c.contact_id || '').trim());
+}
+
+/**
+ * Build the privacy-safe org-chart roster from partner-scoped contact rows:
+ * `{ contact_id, name, role }` ONLY, named rows only (an org-chart node needs
+ * a person's name, and a nameless email-only row would leak the email as its
+ * label), A→Z, bounded with an explicit omitted count.
+ *
+ * @param {Array} contacts  selectPartnerContacts() rows.
+ * @param {number} [limit]  Override for CONTACT_ROSTER_LIMIT.
+ * @returns {{ total: number, included: Array<{contact_id,name,role}>, omittedCount: number }}
+ */
+export function buildPartnerContactRoster(contacts, limit = CONTACT_ROSTER_LIMIT) {
+  const named = (contacts || [])
+    .map(c => ({
+      contact_id: String(c && c.contact_id || '').trim(),
+      name: String(c && c.name || '').trim(),
+      role: String(c && c.role || '').trim(),
+    }))
+    .filter(c => c.contact_id && c.name)
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const cap = Math.max(0, limit);
+  return {
+    total: named.length,
+    included: named.slice(0, cap),
+    omittedCount: Math.max(0, named.length - cap),
+  };
 }
 
 // ── Partner selector population ─────────────────────────────────────
@@ -352,11 +403,12 @@ export function dedupeMeetingsAgainstTranscripts(meetings, transcripts) {
  * (partner_profile / opportunity / event / event_contacts / saved_event_playbook):
  * the claim survives validation only if the backing fact exists.
  */
-export function buildPartnerCriteriaFacts({ partner, kpis, contactsAgg, savedPlaybook } = {}) {
+export function buildPartnerCriteriaFacts({ partner, kpis, contactsAgg, savedPlaybook, contactRoster } = {}) {
   const p = partner || {};
   const k = kpis || {};
   const contacts = contactsAgg || { total: 0, meetingCount: 0 };
   const saved = savedPlaybook || { found: false, checked: {} };
+  const rosterCount = (contactRoster && contactRoster.included && contactRoster.included.length) || 0;
 
   const deterministic = {};
   const structuredSupport = {};
@@ -391,8 +443,10 @@ export function buildPartnerCriteriaFacts({ partner, kpis, contactsAgg, savedPla
     };
   }
 
-  // key_stakeholders_identified — meeting attendees or saved event contacts.
-  if ((contacts.total || 0) > 0 || (k.meetingCount || 0) > 0) {
+  // key_stakeholders_identified — meeting attendees, saved event contacts, or
+  // saved Partner_Contacts rows (the criterion's own label names "structured
+  // CRM records" as valid evidence; a saved roster is exactly that).
+  if ((contacts.total || 0) > 0 || (k.meetingCount || 0) > 0 || rosterCount > 0) {
     structuredSupport.key_stakeholders_identified = true;
   }
 
@@ -651,8 +705,12 @@ export function withCoverageFailures(coverage, failures) {
  *     narrative source (transcript, meeting_index, partner_document,
  *     opportunity_description, event_description).
  *   • textById / textByDate — the exact prose shown, for evidence grounding.
- *   • structuredIds — real opportunity_ids, event_ids and the partner_id, for
- *     validating a structured claim's source_id / related_entity_id.
+ *   • structuredIds — real opportunity_ids, event_ids, saved contact_ids and
+ *     the partner_id, for validating a structured claim's source_id /
+ *     related_entity_id.
+ *   • contactIds — the saved Partner_Contacts ids from the supplied roster;
+ *     the ONLY ids an org-chart node may carry (a fabricated contact_id is
+ *     stripped by the parser).
  *   • relatedById — narrative source id → the entity a link should open
  *     (an opportunity_id, an event_id, or the partner_id).
  *
@@ -660,7 +718,8 @@ export function withCoverageFailures(coverage, failures) {
  * it was shown.
  *
  * @param {object} evidence  Result of assemblePartnerEvidence().
- * @param {object} ids       { opportunityIds:Set, eventIds:Set, partnerId:string }
+ * @param {object} ids       { opportunityIds:Set, eventIds:Set, partnerId:string,
+ *                             contactIds:Set }  (contactIds = roster ids actually sent)
  */
 export function collectPartnerAnchors(evidence, ids = {}) {
   const ev = evidence || {};
@@ -693,7 +752,13 @@ export function collectPartnerAnchors(evidence, ids = {}) {
   (ids.eventIds instanceof Set ? ids.eventIds : new Set(ids.eventIds || [])).forEach(id => id && structuredIds.add(String(id)));
   if (partnerId) structuredIds.add(partnerId);
 
-  return { narrativeIds, narrativeDates, textById, textByDate, structuredIds, relatedById, partnerId };
+  // Saved contact ids are structured entities too (a "partner_contact" claim
+  // may cite one), and they gate which org-chart nodes may carry a contact_id.
+  const contactIds = new Set();
+  (ids.contactIds instanceof Set ? ids.contactIds : new Set(ids.contactIds || [])).forEach(id => id && contactIds.add(String(id)));
+  contactIds.forEach(id => structuredIds.add(id));
+
+  return { narrativeIds, narrativeDates, textById, textByDate, structuredIds, relatedById, partnerId, contactIds };
 }
 
 // ── Health signals (deterministic inputs for the health function) ───

@@ -1007,3 +1007,197 @@
   .event-grid { grid-template-columns: repeat(7, minmax(180px, 220px)); }
   .partner-kpi-strip { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ============================================================
+   Partner Analyzer — Likely Org Chart
+   ============================================================
+   The Partner analogue of the Contact brief's likely org map, rendered
+   org-chart style: a classic connector-line tree of node cards built from
+   nested <ul>s (buildPartnerOrgChart in admin-forecast.js). Statuses share
+   the Contact org-map palette — engaged (success) / introduced (primary) /
+   identified (muted) / missing (danger) — and nodes backed by a saved
+   Partner_Contacts row carry a "Saved" tag. Wide trees scroll horizontally
+   inside .partner-org__scroll instead of breaking the board layout. */
+.partner-org {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.partner-org__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  flex-wrap: wrap;
+}
+.partner-org__heading { display: flex; flex-direction: column; gap: 1px; }
+.partner-org__title {
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+.partner-org__sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.partner-org__legend { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.partner-org__legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 2px var(--space-3);
+  white-space: nowrap;
+}
+.partner-org__legend-chip--saved { color: var(--color-primary); border-color: var(--color-primary-lighter); }
+
+/* ── Connector-line tree ─────────────────────────────────────
+   Nested flex <ul>s; the lines are pseudo-elements on each branch:
+   every non-root branch reserves --org-drop of headroom, draws the
+   horizontal sibling rail with border-tops split at its center, and the
+   vertical drop with a center border. A parent's <ul> adds the stub that
+   descends from the parent card to the rail. */
+.partner-org { --org-drop: 22px; --org-line: var(--color-border); }
+.partner-org__scroll { overflow-x: auto; padding: var(--space-2) 0; }
+.partner-org__tree,
+.partner-org__children {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: max-content;
+}
+.partner-org__tree { margin: 0 auto; }
+.partner-org__children { position: relative; padding-top: var(--org-drop); }
+.partner-org__children::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: var(--org-drop);
+  border-left: 2px solid var(--org-line);
+}
+.partner-org__branch {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  padding: var(--org-drop) var(--space-2) 0;
+}
+.partner-org__branch::before,
+.partner-org__branch::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: var(--org-drop);
+  border-top: 2px solid var(--org-line);
+}
+.partner-org__branch::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid var(--org-line);
+}
+.partner-org__branch:only-child { padding-top: 0; }
+.partner-org__branch:only-child::before,
+.partner-org__branch:only-child::after { display: none; }
+.partner-org__branch:first-child::before,
+.partner-org__branch:last-child::after { border: 0 none; }
+.partner-org__branch:last-child::before {
+  border-right: 2px solid var(--org-line);
+  border-radius: 0 var(--radius-sm) 0 0;
+}
+.partner-org__branch:first-child::after { border-radius: var(--radius-sm) 0 0 0; }
+/* Roots stand on their own — no connectors above the top row. */
+.partner-org__tree > .partner-org__branch { padding-top: 0; }
+.partner-org__tree > .partner-org__branch::before,
+.partner-org__tree > .partner-org__branch::after { display: none; }
+
+/* ── Node cards ──────────────────────────────────────────────── */
+.partner-org__node {
+  min-width: 148px;
+  max-width: 216px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.partner-org__node--engaged { border-top-color: var(--color-success); }
+.partner-org__node--introduced { border-top-color: var(--color-primary-light); }
+.partner-org__node--identified { border-top-color: var(--color-text-muted); }
+.partner-org__node--missing {
+  border: 1px dashed var(--color-danger);
+  border-top: 3px solid var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 4%, var(--color-surface));
+}
+.partner-org__node-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+.partner-org__node-title {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+.partner-org__node-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: 2px; }
+.partner-org__dot { width: 9px; height: 9px; border-radius: var(--radius-full); flex: none; }
+.partner-org__dot--engaged { background: var(--color-success); }
+.partner-org__dot--introduced { background: var(--color-primary-light); }
+.partner-org__dot--identified { background: var(--color-text-muted); }
+.partner-org__dot--missing { background: var(--color-danger); }
+.partner-org__status {
+  font-size: 10px;
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.partner-org__status--engaged { color: var(--color-success); }
+.partner-org__status--introduced { color: var(--color-primary); }
+.partner-org__status--identified { color: var(--color-text-muted); }
+.partner-org__status--missing { color: var(--color-danger); }
+.partner-org__saved {
+  font-size: 10px;
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary-lighter);
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+}
+
+@media (max-width: 640px) {
+  .partner-org { padding: var(--space-3) var(--space-4); }
+  .partner-org__node { min-width: 132px; max-width: 180px; }
+}

@@ -140,17 +140,59 @@ pipeline, revenue, event count or opportunity count.
    ids; contacts are aggregated to **counts only** (no names/emails/PII).
 9. **Event_Playbook** (optional) — reuses the tested loader; only rows for the
    partner's strictly‑assigned events; labelled `saved_event_playbook`.
+10. **Partner_Contacts** — `partner_id`; the deliberately saved partner‑side
+    roster, reduced to **`contact_id` + name + role only** (emails, phones,
+    evidence text and LeadCheck payloads never leave the evidence module).
+    Feeds the **likely org chart** (below) and, as a structured source
+    (`partner_contact`), may back `key_stakeholders_identified` — whose own
+    label already names "structured CRM records" as valid evidence.
 
 ### Privacy & size control
 
-- Never sent: password hashes, auth fields, event passwords, contact
-  names/emails, API keys, or any other partner's data.
+- Never sent: password hashes, auth fields, event passwords, EVENT‑contact
+  names/emails, saved‑contact emails/phones, API keys, or any other partner's
+  data. (Saved **Partner_Contacts** names/roles are sent deliberately — the
+  same fields the Contact Analyzer already exposes by name — because the org
+  chart needs them; the roster is bounded and A→Z.)
 - Bounded evidence assembly (`assemblePartnerEvidence`): newest‑first selection,
   explicit per‑source and overall caps, mid‑source truncation is **labelled**
   `[truncated]`, and a **coverage object** reports sources found / included /
   omitted / read‑failures. The UI shows a non‑fatal coverage banner when
   material evidence was omitted or could not be loaded. Deterministic aggregates
   always cover the complete history.
+
+---
+
+## Likely Org Chart (inferred — parallels the Contact brief's org map)
+
+Selecting a partner now also yields a **likely org chart** of the partner
+organization, rendered org‑chart style (a connector‑line tree of node cards)
+on the board and in the PDF — the Partner‑mode analogue of the Contact
+Analyzer's "Likely Organizational Map".
+
+- **Where the people come from:** the saved **Partner_Contacts** roster
+  (names + roles only) plus partner‑side people explicitly **named in the
+  supplied evidence**. The prompt forbids inventing named people; unnamed
+  *role* placeholders (e.g. "CTO (not yet identified)") are allowed for
+  structural gaps.
+- **Node shape:** `{ name, status, depth, contact_id }` in a flat top‑down
+  list. `depth` 0 is the most senior known person; statuses share the Contact
+  Analyzer's canonical set — `engaged` · `introduced` · `identified` ·
+  `missing` (same colors on both boards).
+- **Validation (structural, like the Contact brief):** statuses are
+  canonicalized, depth is clamped (0–6), the list is bounded (30 nodes), and
+  — the partner‑specific guarantee — a node's `contact_id` survives **only**
+  when it names a roster row that was actually sent (`anchors.contactIds`),
+  so a fabricated contact_id can never masquerade as a saved CRM record.
+  Valid ones render a "Saved" tag.
+- **Rendering:** `buildOrgChartTree()` (in `partner-analyzer-schema.js`)
+  nests the flat list — normalizing skipped depths — and is shared by the
+  view and the PDF, so the two trees can never disagree;
+  `derivePartnerOrgStats()` powers the legend counts.
+- **It never affects scoring.** The org chart is interpretive output; stage
+  statuses, the operational/furthest stages and completion % are still
+  recomputed exclusively from the validated criteria. An empty roster plus
+  evidence naming no one yields `org_map: []` and an explanatory empty state.
 
 ---
 
@@ -182,15 +224,15 @@ anti‑hallucination Golden Rule:
 | --- | --- |
 | `js/utils/partner-analyzer-stages.js` | Framework definitions + board derivation |
 | `js/utils/partner-analyzer-health.js` | Deterministic relationship health |
-| `js/utils/partner-analyzer-evidence.js` | Strict scoping, KPIs, criteria facts, bounded evidence, coverage, anchors, health signals |
-| `js/utils/partner-analyzer-schema.js` | Strict parser / validator |
+| `js/utils/partner-analyzer-evidence.js` | Strict scoping, KPIs, criteria facts, bounded evidence, coverage, anchors, health signals, saved-contact roster |
+| `js/utils/partner-analyzer-schema.js` | Strict parser / validator + org-chart validation & tree/stat derivations |
 | `js/utils/partner-analyzer-prompts.js` | Prompt builder |
 | `js/utils/partner-analyzer-client.js` | Anthropic client + orchestration (`preparePartnerAnalysis`, `requestPartnerAnalysisJson`) |
 | `js/utils/partner-analyzer-pdf-builder.js` | Recast‑branded PDF (`Partner_Analysis_{slug}_{YYYY-MM-DD}.pdf`) |
 | `js/utils/analyzer-job-key.js` | `{ entityType, entityId, runId }` background‑job key |
 | `js/views/admin-forecast.js` | Analyzer view — adds Partner mode (isolated state/job) |
 
-Tests: `tests/partner-analyzer-{stages,health,evidence,schema,prompts,integration,pdf-builder}.test.mjs`.
+Tests: `tests/partner-analyzer-{stages,health,evidence,schema,prompts,integration,pdf-builder,org-chart}.test.mjs`.
 Run with `npm test`.
 
 ### Background‑job & mode isolation

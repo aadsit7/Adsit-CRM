@@ -34,6 +34,14 @@ import {
   getPartnerStageById,
   stageStatusFromCriteria,
 } from './partner-analyzer-stages.js';
+// The org-chart node statuses are SHARED with the Contact Analyzer's likely
+// org map (a leaf module — no import cycle), so both analyzers speak one
+// canonical engagement vocabulary and the tested canonicalizer is reused.
+import { ORG_NODE_STATUSES, canonOrgStatus } from './contact-analyzer-schema.js';
+
+// Re-exported so the Partner view / PDF / tests never need to know where the
+// canonical org-status set lives.
+export { ORG_NODE_STATUSES, canonOrgStatus };
 
 export const PARTNER_ANALYZER_SCHEMA_EXAMPLE = `{
   "partner_id": "string — echo back the ID given",
@@ -52,8 +60,8 @@ export const PARTNER_ANALYZER_SCHEMA_EXAMPLE = `{
           "criterion_id": "string — must exactly match a criterion id from the definitions",
           "status": "met | partial | not_met | no_evidence",
           "evidence": "string — a short quote or close paraphrase from ONE supplied source. Empty string if no_evidence or a structured fact.",
-          "source_type": "partner_profile | transcript | meeting_index | partner_document | opportunity | opportunity_description | event | event_description | event_contacts | saved_event_playbook | none",
-          "source_id": "string — the id of the cited source (transcript_id / meeting_id / document_id / description_id / opportunity_id / event_id / partner_id). Empty string if none.",
+          "source_type": "partner_profile | transcript | meeting_index | partner_document | opportunity | opportunity_description | event | event_description | event_contacts | partner_contact | saved_event_playbook | none",
+          "source_id": "string — the id of the cited source (transcript_id / meeting_id / document_id / description_id / opportunity_id / event_id / contact_id / partner_id). Empty string if none.",
           "source_date": "string — the date of the cited source. Empty string if none.",
           "related_entity_id": "string — the opportunity_id or event_id a link should open, or the partner_id. Empty string if none."
         }
@@ -64,7 +72,10 @@ export const PARTNER_ANALYZER_SCHEMA_EXAMPLE = `{
   "gaps": ["string — maturity gaps blocking the current stage"],
   "open_questions": ["string — questions the evidence leaves unanswered"],
   "risks": ["string — relationship risks"],
-  "momentum": ["string — positive momentum"]
+  "momentum": ["string — positive momentum"],
+  "org_map": [
+    { "name": "string — 'Name — Title' for a person named in the roster or evidence, or 'Role (not yet identified)' for a structural gap", "status": "engaged | identified | introduced | missing", "depth": 0, "contact_id": "string — the saved contact_id when this node is a saved partner contact, else empty string" }
+  ]
 }`;
 
 const VALID_STAGE_STATUSES = new Set(['complete', 'in_progress', 'not_started']);
@@ -74,16 +85,18 @@ const VALID_CONFIDENCE = new Set(['high', 'medium', 'low']);
 export const VALID_SOURCE_TYPES = new Set([
   'partner_profile', 'transcript', 'meeting_index', 'partner_document',
   'opportunity', 'opportunity_description', 'event', 'event_description',
-  'event_contacts', 'saved_event_playbook', 'none',
+  'event_contacts', 'partner_contact', 'saved_event_playbook', 'none',
 ]);
 
 // Narrative sources are held to the grounding bar; structured sources need a
-// supplied deterministic/structured fact to stand.
+// supplied deterministic/structured fact to stand. `partner_contact` (a saved
+// Partner_Contacts row) is STRUCTURED: a claim resting on the saved roster
+// stands only when the roster was actually supplied and non-empty.
 const NARRATIVE_SOURCE_TYPES = new Set([
   'transcript', 'meeting_index', 'partner_document', 'opportunity_description', 'event_description',
 ]);
 const STRUCTURED_SOURCE_TYPES = new Set([
-  'partner_profile', 'opportunity', 'event', 'event_contacts', 'saved_event_playbook',
+  'partner_profile', 'opportunity', 'event', 'event_contacts', 'partner_contact', 'saved_event_playbook',
 ]);
 
 // Statuses that assert a criterion is (at least partly) satisfied and so must
@@ -152,6 +165,42 @@ function emptyCriterion(criterionId) {
   };
 }
 
+// ── Likely org chart (org_map) validation ───────────────────────────
+// The org chart is an INTERPRETIVE section (like the Contact Analyzer's
+// likely org map): its value is the reasoned inference, so prose is not
+// grounded word-for-word. What IS enforced is structure and identity:
+// canonical statuses, clamped depth, bounded size, and — the partner-specific
+// guarantee — a node's contact_id survives only when it names a REAL supplied
+// Partner_Contacts row, so a fabricated contact_id can never masquerade as a
+// saved CRM record. The org chart never influences criterion scoring.
+const MAX_ORG_NODES = 30;
+const MAX_ORG_NAME = 200;
+const MAX_ORG_DEPTH = 6;
+
+function validPartnerOrgMap(v, contactIds) {
+  if (!Array.isArray(v)) return [];
+  const ids = contactIds instanceof Set ? contactIds : new Set();
+  const out = [];
+  for (const row of v) {
+    if (!row || typeof row !== 'object') continue;
+    let name = cleanStr(row.name);
+    if (!name) continue;
+    if (name.length > MAX_ORG_NAME) name = `${name.slice(0, MAX_ORG_NAME).trimEnd()}…`;
+    let depth = Number.parseInt(row.depth, 10);
+    if (!Number.isFinite(depth) || depth < 0) depth = 0;
+    if (depth > MAX_ORG_DEPTH) depth = MAX_ORG_DEPTH;
+    const contactId = cleanStr(row.contact_id);
+    out.push({
+      name,
+      status: canonOrgStatus(row.status),
+      depth,
+      contact_id: ids.has(contactId) ? contactId : '',
+    });
+    if (out.length >= MAX_ORG_NODES) break;
+  }
+  return out;
+}
+
 // Normalize whatever anchor shape the caller passes into one object.
 function normalizeAnchors(options) {
   const a = options.anchors || options;
@@ -163,6 +212,8 @@ function normalizeAnchors(options) {
     structuredIds: toSet(a.structuredIds) || new Set(),
     relatedById: toMap(a.relatedById) || new Map(),
     partnerId: cleanStr(a.partnerId) || cleanStr(options.partnerId),
+    // Saved Partner_Contacts ids — the only ids an org-chart node may carry.
+    contactIds: toSet(a.contactIds) || new Set(),
   };
 }
 
@@ -297,6 +348,7 @@ export function parsePartnerAnalysisResponse(rawText, options = {}) {
     open_questions: cleanStrArray(parsed.open_questions),
     risks: cleanStrArray(parsed.risks),
     momentum: cleanStrArray(parsed.momentum),
+    org_map: validPartnerOrgMap(parsed.org_map, anchors.contactIds),
     completion: { met: metCount, total, pct: total > 0 ? Math.round((metCount / total) * 100) : 0 },
   };
 }
@@ -377,4 +429,55 @@ function resolveRelated(sourceId, relatedRaw, anchors) {
   if (relatedRaw && anchors.structuredIds && anchors.structuredIds.has(relatedRaw)) return relatedRaw;
   if (sourceId && anchors.structuredIds && anchors.structuredIds.has(sourceId)) return sourceId;
   return anchors.partnerId || '';
+}
+
+// ── Org-chart derivations (shared by the board render and the PDF) ──
+/**
+ * Nest the validated flat org_map (top-down, depth-annotated) into a tree of
+ * `{ node, children }` branches. The SAME pure function feeds the on-screen
+ * org chart and the PDF, so the two can never disagree about structure.
+ *
+ * Depth is normalized so a level can never be skipped: a node may sit at most
+ * one level below the node before it (a "depth 3" row arriving directly under
+ * a depth-0 row becomes its direct report), and its parent is the nearest
+ * preceding shallower node. Multiple depth-0 roots are allowed.
+ *
+ * @param {Array<{name, status, depth, contact_id}>} orgMap validated org_map
+ * @returns {Array<{ node: object, children: Array }>} the root branches
+ */
+export function buildOrgChartTree(orgMap) {
+  const roots = [];
+  const stack = []; // stack[d] = the most recent branch placed at depth d
+  for (const raw of orgMap || []) {
+    if (!raw || typeof raw !== 'object' || !String(raw.name || '').trim()) continue;
+    let wanted = Number.parseInt(raw.depth, 10);
+    if (!Number.isFinite(wanted) || wanted < 0) wanted = 0;
+    const depth = Math.min(wanted, stack.length);
+    const branch = { node: raw, children: [] };
+    if (depth === 0) roots.push(branch);
+    else stack[depth - 1].children.push(branch);
+    stack[depth] = branch;
+    stack.length = depth + 1;
+  }
+  return roots;
+}
+
+/**
+ * Coverage read-out for the org chart (headline + legend counts) — the
+ * partner-side analogue of deriveContactBriefBoard()'s org numbers.
+ *
+ * @param {Array} orgMap validated org_map
+ * @returns {{ total, engaged, introduced, identified, missing, saved }}
+ */
+export function derivePartnerOrgStats(orgMap) {
+  const list = Array.isArray(orgMap) ? orgMap : [];
+  const count = (s) => list.filter(n => n && n.status === s).length;
+  return {
+    total: list.length,
+    engaged: count('engaged'),
+    introduced: count('introduced'),
+    identified: count('identified'),
+    missing: count('missing'),
+    saved: list.filter(n => n && String(n.contact_id || '').trim()).length,
+  };
 }

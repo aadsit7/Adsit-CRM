@@ -57,6 +57,9 @@ import {
   resolveFurthestDemonstrated,
   PARTNER_STAGES,
 } from '../utils/partner-analyzer-stages.js';
+// The likely-org-chart derivations are shared with the partner PDF builder so
+// the on-screen tree and the exported tree can never disagree.
+import { buildOrgChartTree, derivePartnerOrgStats } from '../utils/partner-analyzer-schema.js';
 import { buildPartnerSelectorOptions } from '../utils/partner-analyzer-evidence.js';
 import { buildPartnerAnalysisPdf, partnerAnalysisFilename } from '../utils/partner-analyzer-pdf-builder.js';
 // ── Contact Analyzer (fourth entity mode: partner → contact → brief) ──
@@ -1721,6 +1724,7 @@ async function runPartnerAnalysis(explicitOption = null) {
       transcripts, meetings, documents,
       opportunities, opportunityDescriptions,
       events, eventDescriptions, eventContacts, savedPlaybookRows,
+      partnerContacts,
     ] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(soft('Transcripts could not be loaded, so conversation evidence may be incomplete.')),
       readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(soft('The meeting index could not be loaded, so indexed meetings may be incomplete.')),
@@ -1731,6 +1735,7 @@ async function runPartnerAnalysis(explicitOption = null) {
       readSheetAsObjects(CONFIG.SHEET_EVENT_DESCRIPTIONS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_EVENT_CONTACTS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_EVENT_PLAYBOOK).catch(() => []), // optional evidence source
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(soft('Saved partner contacts could not be loaded, so the org chart may be missing saved people.')),
     ]);
 
     if (!stillCurrent()) return;
@@ -1741,6 +1746,7 @@ async function runPartnerAnalysis(explicitOption = null) {
       transcripts, meetings, documents,
       opportunities, opportunityDescriptions,
       events, eventDescriptions, eventContacts,
+      partnerContacts,
       savedPlaybookRows, readFailures,
       signal: controller.signal,
     });
@@ -1784,6 +1790,8 @@ function renderPartnerBoard({ analysis, board, kpis, health, partner, coverage }
   frag.appendChild(el('div', { class: 'event-board__scroll' },
     buildPartnerGrid({ board, partner }),
   ));
+
+  frag.appendChild(buildPartnerOrgChart(analysis));
 
   frag.appendChild(buildPartnerLists(analysis));
 
@@ -2114,6 +2122,98 @@ function buildPartnerListCard(title, subtitle, items) {
   );
 }
 
+// ── Likely org chart ────────────────────────────────────────────────
+// The Partner analogue of the Contact brief's "Likely Organizational Map",
+// rendered org-chart style: the validated flat org_map is nested with
+// buildOrgChartTree() (the SAME pure helper the PDF uses) and drawn as a
+// connector-line tree of node cards. Nodes carrying a contact_id are saved
+// Partner_Contacts rows; everything else was inferred from the evidence. The
+// chart is presentational only — it never feeds criterion scoring.
+function buildPartnerOrgChart(analysis) {
+  const nodes = (analysis && analysis.org_map) || [];
+  const stats = derivePartnerOrgStats(nodes);
+
+  const head = el('div', { class: 'partner-org__head' },
+    el('div', { class: 'partner-org__heading' },
+      el('div', { class: 'partner-org__title' }, 'Likely Org Chart'),
+      el('div', { class: 'partner-org__sub' }, 'Inferred from saved contacts and CRM evidence — not an official org chart'),
+    ),
+    stats.total ? buildPartnerOrgLegend(stats) : null,
+  );
+
+  if (!stats.total) {
+    return el('section', { class: 'partner-org' }, head,
+      el('p', { class: 'forecast-list__empty' },
+        'No partner-side people surfaced from the evidence yet. Save contacts on the partner record '
+        + '(or capture notes and meetings that name people), then re-run the analysis.'),
+    );
+  }
+
+  const roots = buildOrgChartTree(nodes);
+  return el('section', { class: 'partner-org' }, head,
+    el('div', { class: 'partner-org__scroll' },
+      el('ul', { class: 'partner-org__tree', role: 'tree', 'aria-label': 'Likely partner org chart' },
+        ...roots.map(buildPartnerOrgBranch)),
+    ),
+  );
+}
+
+function buildPartnerOrgBranch(branch) {
+  const n = branch.node;
+  const [personName, personTitle] = splitOrgNodeName(n.name);
+  const card = el('div', { class: `partner-org__node partner-org__node--${n.status}` },
+    el('div', { class: 'partner-org__node-name' },
+      el('span', { class: `partner-org__dot partner-org__dot--${n.status}` }),
+      el('span', {}, personName),
+    ),
+    personTitle ? el('div', { class: 'partner-org__node-title' }, personTitle) : null,
+    el('div', { class: 'partner-org__node-meta' },
+      el('span', { class: `partner-org__status partner-org__status--${n.status}` }, orgNodeStatusLabel(n.status)),
+      n.contact_id ? el('span', { class: 'partner-org__saved', title: 'Saved partner contact' }, 'Saved') : null,
+    ),
+  );
+  const li = el('li', { class: 'partner-org__branch', role: 'treeitem' }, card);
+  if (branch.children.length) {
+    li.appendChild(el('ul', { class: 'partner-org__children', role: 'group' },
+      ...branch.children.map(buildPartnerOrgBranch)));
+  }
+  return li;
+}
+
+// "Jane Doe — VP Alliances" → box with a name line and a title line. Accepts
+// an em-dash or a spaced hyphen; a plain name stays a single line.
+function splitOrgNodeName(name) {
+  const s = String(name || '').trim();
+  for (const sep of [' — ', ' – ', ' - ']) {
+    const at = s.indexOf(sep);
+    if (at > 0) return [s.slice(0, at).trim(), s.slice(at + sep.length).trim()];
+  }
+  return [s, ''];
+}
+
+function orgNodeStatusLabel(status) {
+  switch (status) {
+    case 'engaged': return 'Engaged';
+    case 'introduced': return 'Introduced';
+    case 'missing': return 'Missing';
+    default: return 'Identified';
+  }
+}
+
+function buildPartnerOrgLegend(stats) {
+  const chip = (status, count) => (count ? el('span', { class: 'partner-org__legend-chip' },
+    el('span', { class: `partner-org__dot partner-org__dot--${status}` }),
+    `${count} ${orgNodeStatusLabel(status).toLowerCase()}`) : null);
+  return el('div', { class: 'partner-org__legend', role: 'note', 'aria-label': 'Org chart key' },
+    chip('engaged', stats.engaged),
+    chip('introduced', stats.introduced),
+    chip('identified', stats.identified),
+    chip('missing', stats.missing),
+    stats.saved ? el('span', { class: 'partner-org__legend-chip partner-org__legend-chip--saved' },
+      `${stats.saved} saved contact${stats.saved === 1 ? '' : 's'}`) : null,
+  );
+}
+
 function partnerStatusLabel(status) {
   switch (status) {
     case 'met': return 'Met';
@@ -2134,6 +2234,7 @@ function partnerSourceTypeLabel(sourceType) {
     case 'event': return 'Partner event';
     case 'event_description': return 'Event note';
     case 'event_contacts': return 'Event contacts';
+    case 'partner_contact': return 'Saved contact';
     case 'saved_event_playbook': return 'Saved event playbook';
     default: return 'Source';
   }
