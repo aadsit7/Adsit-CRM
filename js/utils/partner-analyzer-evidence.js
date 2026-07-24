@@ -711,6 +711,10 @@ export function withCoverageFailures(coverage, failures) {
  *   • contactIds — the saved Partner_Contacts ids from the supplied roster;
  *     the ONLY ids an org-chart node may carry (a fabricated contact_id is
  *     stripped by the parser).
+ *   • contactNamesById — contact_id → saved contact name for the roster rows
+ *     actually sent; lets the org-chart validator verify a named person
+ *     against the roster (and auto-link an unlinked exact match) without the
+ *     evidence module leaking anything beyond the already-sent names.
  *   • relatedById — narrative source id → the entity a link should open
  *     (an opportunity_id, an event_id, or the partner_id).
  *
@@ -719,7 +723,8 @@ export function withCoverageFailures(coverage, failures) {
  *
  * @param {object} evidence  Result of assemblePartnerEvidence().
  * @param {object} ids       { opportunityIds:Set, eventIds:Set, partnerId:string,
- *                             contactIds:Set }  (contactIds = roster ids actually sent)
+ *                             contactIds:Set, contacts:Array }
+ *                           (contactIds / contacts = roster rows actually sent)
  */
 export function collectPartnerAnchors(evidence, ids = {}) {
   const ev = evidence || {};
@@ -756,9 +761,21 @@ export function collectPartnerAnchors(evidence, ids = {}) {
   // may cite one), and they gate which org-chart nodes may carry a contact_id.
   const contactIds = new Set();
   (ids.contactIds instanceof Set ? ids.contactIds : new Set(ids.contactIds || [])).forEach(id => id && contactIds.add(String(id)));
+
+  // contact_id → name for the roster rows actually sent (names only — the
+  // same field already shown in the prompt; never emails/phones).
+  const contactNamesById = new Map();
+  (Array.isArray(ids.contacts) ? ids.contacts : []).forEach(c => {
+    const cid = String(c && c.contact_id || '').trim();
+    const nm = String(c && c.name || '').trim();
+    if (cid && nm) {
+      contactNamesById.set(cid, nm);
+      contactIds.add(cid);
+    }
+  });
   contactIds.forEach(id => structuredIds.add(id));
 
-  return { narrativeIds, narrativeDates, textById, textByDate, structuredIds, relatedById, partnerId, contactIds };
+  return { narrativeIds, narrativeDates, textById, textByDate, structuredIds, relatedById, partnerId, contactIds, contactNamesById };
 }
 
 // ── Health signals (deterministic inputs for the health function) ───

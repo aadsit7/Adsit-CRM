@@ -435,26 +435,60 @@ function flattenOrgTree(roots, depth = 0, out = []) {
 }
 
 const ORG_INDENT = 16;
-function drawOrgChart(doc, ctx, orgMap, yStart) {
+
+// The person's provenance tag — computed by the validator, mirrored here so
+// the PDF reader can tell fact from inference at a glance. A linked roster
+// person is already tagged SAVED; a gap is already tagged MISSING.
+function orgProvenanceTag(node) {
+  switch (node.person_source) {
+    case 'both': return 'CORROBORATED';
+    case 'evidence': return 'IN EVIDENCE';
+    case 'roster': return node.contact_id ? '' : 'ROSTER MATCH';
+    default: return '';
+  }
+}
+
+function drawOrgChart(doc, ctx, orgMap, yStart, orgMeta) {
   const rows = flattenOrgTree(buildOrgChartTree(orgMap));
-  if (!rows.length) return yStart;
+  const removed = Number(orgMeta && orgMeta.removed_unverified) || 0;
+  if (!rows.length && !removed) return yStart;
 
   let y = breakIfNeeded(doc, ctx, yStart, 56);
   y = drawHeading(doc, 'Likely Org Chart', y) + 14;
   setText(doc, MUTED_TEXT);
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(8);
-  doc.text('Inferred from saved contacts and CRM evidence — not an official org chart', MARGIN, y);
+  doc.text('Inferred from saved contacts and CRM evidence — not an official org chart. Each person and line carries its provenance.', MARGIN, y);
   y += 12;
+  if (removed > 0) {
+    // Truth over completeness — a removed fabrication is stated, not hidden.
+    setText(doc, MUTED_TEXT);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.text(`${removed} unverifiable name${removed === 1 ? ' was' : 's were'} removed — only people found in the saved contacts or this partner's evidence are shown.`, MARGIN, y);
+    y += 12;
+  }
 
   for (const node of rows) {
     const x = MARGIN + node.depth * ORG_INDENT;
+    const isGap = node.status === 'missing';
     const tagBits = [String(node.status || 'identified').toUpperCase()];
     if (node.contact_id) tagBits.push('SAVED');
+    const provTag = orgProvenanceTag(node);
+    if (provTag) tagBits.push(provTag);
+    // The connector line above this row is a claim — tag how it was earned.
+    // Gaps skip it: MISSING already marks the whole node as scaffold.
+    if (node.depth > 0 && !isGap && node.line_confidence) tagBits.push(`LINE ${String(node.line_confidence).toUpperCase()}`);
     const tag = tagBits.join(' · ');
+
+    const detailBits = [];
+    if (node.last_seen_date) detailBits.push(`last seen ${node.last_seen_date}`);
+    if (node.depth > 0 && node.line_basis) detailBits.push(`line: ${node.line_basis}`);
+    const detail = detailBits.join(' · ');
+
     const nameW = CONTENT_W - node.depth * ORG_INDENT - 10 - (tag.length * 4.6 + 12);
     const nameLines = wrap(doc, node.name, Math.max(nameW, 120));
-    const need = Math.max(12, nameLines.length * 11);
+    const need = Math.max(12, nameLines.length * 11) + (detail ? 10 : 0);
     y = breakIfNeeded(doc, ctx, y, need);
     if (isFull(doc, y, need)) break;
 
@@ -479,7 +513,16 @@ function drawOrgChart(doc, ctx, orgMap, yStart) {
     doc.setFontSize(7.5);
     doc.text(tag, PAGE_W - MARGIN, y, { align: 'right' });
 
-    y += need + 3;
+    let rowBottom = y + Math.max(12, nameLines.length * 11) - 12;
+    if (detail) {
+      setText(doc, MUTED_TEXT);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.5);
+      doc.text(wrap(doc, detail, Math.max(nameW, 120))[0], x + 10, rowBottom + 10);
+      rowBottom += 10;
+    }
+
+    y = rowBottom + 15;
   }
   return y + 6;
 }
@@ -635,7 +678,7 @@ export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, 
   y = drawList(doc, ctx, 'Positive Momentum', 'What is going well', analysis.momentum, y);
   // Mirrors the on-screen board: the org chart closes the document, below
   // the action/gap/risk lists.
-  y = drawOrgChart(doc, ctx, analysis.org_map, y);
+  y = drawOrgChart(doc, ctx, analysis.org_map, y, analysis.org_map_meta);
   drawCoverage(doc, ctx, coverageWarnings, y);
 
   drawFooters(doc, title, genDate);

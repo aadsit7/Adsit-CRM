@@ -7,6 +7,14 @@
 //   • prompt composition (roster block, org_map contract, empty-roster line),
 //   • strict parsing (status canonicalization, depth clamping, node cap,
 //     roster-anchored contact_id — fabricated ids are stripped),
+//   • TRUTH OVER COMPLETENESS enforcement: a named person the validator
+//     cannot find in the saved roster or the supplied evidence text is
+//     REMOVED (and the removal is counted in org_map_meta), person and
+//     reporting-line confidence are scored separately (the explicit →
+//     observed → inferred → scaffold ladder, with deterministic clamps),
+//     cross-source corroboration and last-seen dates are app-computed,
+//     duplicates collapse, exact roster names auto-link, and gap nodes stay
+//     visible as scaffold questions rather than answers,
 //   • the partner_contact structured source for key_stakeholders_identified,
 //   • scoring isolation (an org chart can never move a maturity criterion),
 //   • the shared tree/stat derivations the view and the PDF both use, and
@@ -108,6 +116,19 @@ test('prompt explains the org_map contract and the partner_contact source type',
   assert.ok(PARTNER_ANALYZER_SCHEMA_EXAMPLE.includes('partner_contact'), 'schema example allows the new source type');
 });
 
+test('prompt teaches the accuracy contract: truth over completeness and the line-confidence ladder', () => {
+  const prompt = promptWith(rosterFor());
+  assert.ok(/TRUTH OVER COMPLETENESS/.test(prompt), 'the governing rule is stated');
+  assert.ok(/PERSON AND THE REPORTING LINE ARE RATED SEPARATELY/i.test(prompt), 'person vs line split is explicit');
+  for (const rung of ['"explicit"', '"observed"', '"inferred"', '"scaffold"']) {
+    assert.ok(prompt.includes(rung), `ladder rung ${rung} defined`);
+  }
+  assert.ok(/removes any named node it cannot find/i.test(prompt), 'the model is warned that fabrications are removed');
+  assert.ok(/line_basis/.test(prompt), 'line_basis asked for');
+  assert.ok(PARTNER_ANALYZER_SCHEMA_EXAMPLE.includes('line_confidence'), 'schema example carries line_confidence');
+  assert.ok(PARTNER_ANALYZER_SCHEMA_EXAMPLE.includes('line_basis'), 'schema example carries line_basis');
+});
+
 test('an empty roster gets the explicit empty-state instruction instead of names', () => {
   const prompt = promptWith(buildPartnerContactRoster([]));
   assert.ok(/No saved partner contacts on file/i.test(prompt));
@@ -115,12 +136,26 @@ test('an empty roster gets the explicit empty-state instruction instead of names
 });
 
 // ── Strict parsing of org_map ────────────────────────────────────────
+// Roster-only anchors: two saved contacts, no narrative evidence supplied.
 const CONTACT_ANCHORS = {
   narrativeIds: new Set(), narrativeDates: new Set(),
   textById: new Map(), textByDate: new Map(),
   structuredIds: new Set(['p1', 'ct1', 'ct2']),
   relatedById: new Map(), partnerId: 'p1',
   contactIds: new Set(['ct1', 'ct2']),
+  contactNamesById: new Map([['ct1', 'Amir Khan'], ['ct2', 'Zoe Alvarez']]),
+};
+
+// Roster + narrative evidence: the SAME bounded texts the model was shown,
+// naming Zoe (a saved contact), Priya (not saved) and Böb (diacritics).
+const EVIDENCE_TEXT_MAY = 'Call with Zoe Alvarez and their CTO Priya Nair. Priya said the rollout team reports to her. Marketing lead Böb Ünger joined late.';
+const EVIDENCE_TEXT_JUNE = 'Follow-up with Priya Nair about the joint GTM plan.';
+const EVIDENCE_ANCHORS = {
+  ...CONTACT_ANCHORS,
+  narrativeIds: new Set(['t1', 't2']),
+  narrativeDates: new Set(['2026-05-12', '2026-06-02']),
+  textById: new Map([['t1', EVIDENCE_TEXT_MAY], ['t2', EVIDENCE_TEXT_JUNE]]),
+  textByDate: new Map([['2026-05-12', EVIDENCE_TEXT_MAY], ['2026-06-02', EVIDENCE_TEXT_JUNE]]),
 };
 
 function parseWithOrgMap(orgMap, { facts, anchors = CONTACT_ANCHORS, stages = [] } = {}) {
@@ -137,34 +172,144 @@ test('org_map nodes are structurally validated: status canon, depth clamp, name 
     { name: 'Zoe Alvarez — VP Alliances', status: 'actively working together', depth: 0, contact_id: 'ct2' },
     { name: 'Amir Khan — Solutions Architect', status: 'INTRODUCED', depth: '1', contact_id: 'ct1' },
     { name: 'CTO (not yet identified)', status: 'gap — absent', depth: 99 },
-    { name: 'Regional Lead', status: 'mystery-status', depth: -3 },
     { name: '   ', status: 'engaged', depth: 1 },          // nameless — dropped
     'not-an-object',                                        // dropped
   ]);
-  assert.equal(out.org_map.length, 4);
-  assert.deepEqual(out.org_map[0], { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' });
+  assert.equal(out.org_map.length, 3);
+  assert.deepEqual(out.org_map[0], {
+    name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2',
+    line_confidence: '', line_basis: '', person_source: 'roster', corroborated: false, last_seen_date: '',
+  });
   assert.equal(out.org_map[1].status, 'introduced');
   assert.equal(out.org_map[1].depth, 1);
+  assert.equal(out.org_map[1].line_confidence, 'inferred', 'an unstated line defaults to the honest middle rung');
   assert.equal(out.org_map[2].status, 'missing');
   assert.equal(out.org_map[2].depth, 6, 'depth clamps to 6');
-  assert.equal(out.org_map[3].status, 'identified', 'unknown statuses default to identified');
-  assert.equal(out.org_map[3].depth, 0, 'negative depth clamps to 0');
+  assert.equal(out.org_map[2].person_source, 'gap');
+  assert.equal(out.org_map[2].line_confidence, 'scaffold', 'a gap node is scaffold by definition');
 });
 
-test('a fabricated contact_id is stripped while a real roster id survives', () => {
+test('a fabricated contact_id is stripped, and an unverifiable name is removed outright', () => {
   const out = parseWithOrgMap([
     { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
     { name: 'Fake Person — CFO', status: 'identified', depth: 1, contact_id: 'ct999' },
   ]);
+  assert.equal(out.org_map.length, 1, 'a name found in neither the roster nor the evidence never renders');
   assert.equal(out.org_map[0].contact_id, 'ct2');
-  assert.equal(out.org_map[1].contact_id, '', 'an id not in the supplied roster can never masquerade as saved');
+  assert.equal(out.org_map_meta.removed_unverified, 1, 'the removal is surfaced, not silent');
+});
+
+test('a fabricated contact_id on an evidence-named person is stripped while the person survives', () => {
+  const out = parseWithOrgMap([
+    { name: 'Priya Nair — CTO', status: 'engaged', depth: 0, contact_id: 'ct999' },
+  ], { anchors: EVIDENCE_ANCHORS });
+  assert.equal(out.org_map.length, 1);
+  assert.equal(out.org_map[0].contact_id, '', 'an id not in the supplied roster can never masquerade as saved');
+  assert.equal(out.org_map[0].person_source, 'evidence');
 });
 
 test('org_map is bounded to 30 nodes and tolerates a missing/malformed section', () => {
-  const big = Array.from({ length: 40 }, (_, i) => ({ name: `Person ${i}`, status: 'identified', depth: 0 }));
+  // Declared gaps are legitimate nodes, so they exercise the cap without
+  // tripping the fabricated-name removal.
+  const big = Array.from({ length: 40 }, (_, i) => ({ name: `Role ${i} (not yet identified)`, status: 'missing', depth: 0 }));
   assert.equal(parseWithOrgMap(big).org_map.length, 30);
   assert.deepEqual(parseWithOrgMap(undefined).org_map, [], 'a response without org_map still parses (backward compatible)');
   assert.deepEqual(parseWithOrgMap('nope').org_map, []);
+  assert.deepEqual(parseWithOrgMap(undefined).org_map_meta, { removed_unverified: 0, deduped: 0, auto_linked: 0 });
+});
+
+// ── Truth over completeness: person verification + provenance ────────
+test('a person named only in the supplied evidence survives with app-computed provenance and freshness', () => {
+  const out = parseWithOrgMap([
+    { name: 'Priya Nair — CTO', status: 'engaged', depth: 0 },
+  ], { anchors: EVIDENCE_ANCHORS });
+  assert.equal(out.org_map.length, 1);
+  assert.equal(out.org_map[0].person_source, 'evidence');
+  assert.equal(out.org_map[0].corroborated, false);
+  assert.equal(out.org_map[0].last_seen_date, '2026-06-02', 'the NEWEST sighting dates the node');
+});
+
+test('a saved contact also named in the evidence is corroborated across source types', () => {
+  const out = parseWithOrgMap([
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
+  ], { anchors: EVIDENCE_ANCHORS });
+  assert.equal(out.org_map[0].person_source, 'both');
+  assert.equal(out.org_map[0].corroborated, true);
+  assert.equal(out.org_map[0].last_seen_date, '2026-05-12');
+  assert.equal(derivePartnerOrgStats(out.org_map).corroborated, 1);
+});
+
+test('name matching is diacritic- and word-order-insensitive but never invents a surname', () => {
+  const out = parseWithOrgMap([
+    { name: 'Bob Unger — Marketing Lead', status: 'introduced', depth: 0 },   // evidence spells him "Böb Ünger"
+    { name: 'Nair, Priya — CTO', status: 'identified', depth: 0 },            // reversed word order
+    { name: 'Priya Higgins — CTO', status: 'identified', depth: 0 },          // surname not in any source → removed
+  ], { anchors: EVIDENCE_ANCHORS });
+  assert.deepEqual(out.org_map.map(n => n.name), ['Bob Unger — Marketing Lead', 'Nair, Priya — CTO']);
+  assert.equal(out.org_map_meta.removed_unverified, 1);
+});
+
+test('an unlinked node whose name exactly matches exactly one saved contact is auto-linked', () => {
+  const out = parseWithOrgMap([
+    { name: 'Amir Khan — Solutions Architect', status: 'introduced', depth: 0 },
+  ]);
+  assert.equal(out.org_map[0].contact_id, 'ct1', 'the Saved tag now reflects the real CRM record');
+  assert.equal(out.org_map[0].person_source, 'roster');
+  assert.equal(out.org_map_meta.auto_linked, 1);
+});
+
+test('one person can never occupy two boxes — duplicate ids and names collapse', () => {
+  const out = parseWithOrgMap([
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
+    { name: 'Alvarez, Zoe', status: 'identified', depth: 1 },   // same person, reversed
+    { name: 'Amir Khan — Solutions Architect', status: 'introduced', depth: 1, contact_id: 'ct1' },
+    { name: 'Amir Khan', status: 'identified', depth: 1, contact_id: 'ct1' },  // duplicate id
+  ]);
+  assert.deepEqual(out.org_map.map(n => n.contact_id), ['ct2', 'ct1']);
+  assert.equal(out.org_map_meta.deduped, 2);
+});
+
+// ── Person vs reporting line — scored separately ─────────────────────
+test('a roster-only person can never carry an evidence-grade reporting line', () => {
+  const out = parseWithOrgMap([
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
+    { name: 'Amir Khan — Solutions Architect', status: 'introduced', depth: 1, contact_id: 'ct1', line_confidence: 'explicit', line_basis: 'reports to Zoe' },
+  ]);
+  const amir = out.org_map[1];
+  assert.equal(amir.line_confidence, 'inferred', 'the saved roster stores no reporting info — explicit/observed clamp to inferred');
+  assert.equal(amir.line_basis, 'reports to Zoe', 'the basis stays visible so the reader can judge it');
+});
+
+test('an evidence-named person may keep an explicit line, and the rung canonicalizes', () => {
+  const out = parseWithOrgMap([
+    { name: 'Priya Nair — CTO', status: 'engaged', depth: 0, line_confidence: 'explicit', line_basis: 'is the CTO' },
+    { name: 'Bob Unger — Marketing Lead', status: 'introduced', depth: 1, line_confidence: 'stated directly in the call', line_basis: 'Priya said the rollout team reports to her — 2026-05-12' },
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 1, contact_id: 'ct2', line_confidence: 'typical channel pattern' },
+  ], { anchors: EVIDENCE_ANCHORS });
+  assert.equal(out.org_map[0].line_confidence, '', 'a depth-0 root has no reporting line to rate');
+  assert.equal(out.org_map[0].line_basis, '', 'and no basis either');
+  assert.equal(out.org_map[1].line_confidence, 'explicit', 'free-text rungs canonicalize');
+  assert.equal(out.org_map[2].line_confidence, 'scaffold', 'an analogous-structure claim stays visibly scaffold');
+});
+
+// ── Gaps are data (never guessed answers) ────────────────────────────
+test('a "(not yet identified)" name is a gap regardless of the claimed status', () => {
+  const out = parseWithOrgMap([
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
+    { name: 'CRO (not yet identified)', status: 'engaged', depth: 1, line_confidence: 'explicit' },
+  ]);
+  const gap = out.org_map[1];
+  assert.equal(gap.status, 'missing', 'an unnamed role slot can never claim engagement');
+  assert.equal(gap.person_source, 'gap');
+  assert.equal(gap.line_confidence, 'scaffold', 'a gap’s line is shape only, whatever the model claimed');
+});
+
+test('a saved CRM record beats a "missing" claim — the primary source wins', () => {
+  const out = parseWithOrgMap([
+    { name: 'Amir Khan — Solutions Architect', status: 'missing', depth: 0, contact_id: 'ct1' },
+  ]);
+  assert.equal(out.org_map[0].status, 'identified', 'a person with a saved contact row is not an unfilled gap');
+  assert.equal(out.org_map[0].person_source, 'roster');
 });
 
 test('the org chart never moves a maturity criterion or the completion %', () => {
@@ -237,16 +382,16 @@ test('a first row deeper than 0 still roots the tree instead of being lost', () 
   assert.equal(tree[0].node.name, 'Only Person');
 });
 
-test('derivePartnerOrgStats counts statuses and saved contacts', () => {
+test('derivePartnerOrgStats counts statuses, saved contacts and corroborated people', () => {
   const stats = derivePartnerOrgStats([
-    { name: 'A', status: 'engaged', depth: 0, contact_id: 'ct1' },
+    { name: 'A', status: 'engaged', depth: 0, contact_id: 'ct1', person_source: 'both', corroborated: true },
     { name: 'B', status: 'engaged', depth: 1, contact_id: '' },
     { name: 'C', status: 'introduced', depth: 1, contact_id: 'ct2' },
     { name: 'D', status: 'identified', depth: 1, contact_id: '' },
     { name: 'E', status: 'missing', depth: 1, contact_id: '' },
   ]);
-  assert.deepEqual(stats, { total: 5, engaged: 2, introduced: 1, identified: 1, missing: 1, saved: 2 });
-  assert.deepEqual(derivePartnerOrgStats([]), { total: 0, engaged: 0, introduced: 0, identified: 0, missing: 0, saved: 0 });
+  assert.deepEqual(stats, { total: 5, engaged: 2, introduced: 1, identified: 1, missing: 1, saved: 2, corroborated: 1 });
+  assert.deepEqual(derivePartnerOrgStats([]), { total: 0, engaged: 0, introduced: 0, identified: 0, missing: 0, saved: 0, corroborated: 0 });
 });
 
 // ── preparePartnerAnalysis wiring (pure) ─────────────────────────────
@@ -272,6 +417,16 @@ test('preparePartnerAnalysis scopes the roster, anchors its ids, and flags stake
   assert.ok(prep.scoped.partnerContacts.every(c => c.partner_id === 'p1'));
 });
 
+test('anchors carry the roster names (names only) so the validator can verify/auto-link people', () => {
+  const prep = preparePartnerAnalysis(prepArgs());
+  assert.equal(prep.anchors.contactNamesById.get('ct1'), 'Amir Khan');
+  assert.equal(prep.anchors.contactNamesById.get('ct2'), 'Zoe Alvarez');
+  assert.ok(!prep.anchors.contactNamesById.has('ct9'), 'another partner’s contact never enters the anchors');
+  for (const name of prep.anchors.contactNamesById.values()) {
+    assert.ok(!String(name).includes('@'), 'names only — never an email');
+  }
+});
+
 test('without Partner_Contacts rows nothing changes: empty roster, no stakeholder support from it', () => {
   const prep = preparePartnerAnalysis(prepArgs({ partnerContacts: [] }));
   assert.equal(prep.contactRoster.total, 0);
@@ -285,23 +440,28 @@ function stubModel(obj) { globalThis.fetch = async () => ({ ok: true, json: asyn
 function restoreFetch() { globalThis.fetch = REAL_FETCH; }
 function setApiKey() { globalThis.localStorage.setItem('pp_runtime_config', JSON.stringify({ ANTHROPIC_API_KEY: 'test-key' })); }
 
-test('requestPartnerAnalysisJson returns a validated org chart (fabricated contact_id stripped)', async () => {
+test('requestPartnerAnalysisJson returns a validated org chart (fabrications stripped end-to-end)', async () => {
   setApiKey();
   stubModel({
     partner_id: 'p1', partner_name: 'Nerdio', confidence: 'low', summary: 'Early.',
     stages: [], next_actions: [], gaps: [], open_questions: [], risks: [], momentum: [],
     org_map: [
       { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
-      { name: 'Amir Khan — Solutions Architect', status: 'introduced', depth: 1, contact_id: 'ct1' },
+      { name: 'Amir Khan — Solutions Architect', status: 'introduced', depth: 1, contact_id: 'ct1', line_confidence: 'explicit', line_basis: 'reports to Zoe' },
       { name: 'CTO (not yet identified)', status: 'missing', depth: 1, contact_id: 'ct_fake' },
+      { name: 'Taylor Made — CRO', status: 'identified', depth: 1 },  // invented — in no roster row and no evidence
     ],
   });
   try {
     const { analysis } = await requestPartnerAnalysisJson(prepArgs());
-    assert.equal(analysis.org_map.length, 3);
+    assert.equal(analysis.org_map.length, 3, 'the invented person is removed end-to-end');
     assert.equal(analysis.org_map[0].contact_id, 'ct2');
     assert.equal(analysis.org_map[1].contact_id, 'ct1');
+    assert.equal(analysis.org_map[1].line_confidence, 'inferred',
+      'no evidence was supplied, so a roster-only "explicit" line clamps end-to-end');
     assert.equal(analysis.org_map[2].contact_id, '', 'fabricated id stripped end-to-end');
+    assert.equal(analysis.org_map[2].line_confidence, 'scaffold');
+    assert.equal(analysis.org_map_meta.removed_unverified, 1, 'the removal is reported to the UI');
     const stats = derivePartnerOrgStats(analysis.org_map);
     assert.deepEqual({ saved: stats.saved, missing: stats.missing }, { saved: 2, missing: 1 });
   } finally {
@@ -345,6 +505,22 @@ test('the partner PDF renders the org chart section with statuses and the SAVED 
   assert.ok(texts.some(t => t.includes('Zoe Alvarez — VP Alliances')));
   assert.ok(texts.some(t => t === 'ENGAGED · SAVED'), 'saved node tag drawn');
   assert.ok(texts.some(t => t === 'MISSING'), 'missing node tag drawn');
+});
+
+test('the PDF carries per-node provenance: corroboration, evidence sightings and line rungs', async () => {
+  const calls = installJsPdfShim();
+  const analysis = parseWithOrgMap([
+    { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
+    { name: 'Bob Unger — Marketing Lead', status: 'introduced', depth: 1, line_confidence: 'observed', line_basis: 'cc’d for sign-off' },
+    { name: 'Invented Person — COO', status: 'identified', depth: 1 },
+  ], { anchors: EVIDENCE_ANCHORS });
+  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {}, health: { status: 'watch', label: 'Watch' } });
+  const texts = textStrings(calls);
+  assert.ok(texts.some(t => t === 'ENGAGED · SAVED · CORROBORATED'), 'roster+evidence person tagged corroborated');
+  assert.ok(texts.some(t => t === 'INTRODUCED · IN EVIDENCE · LINE OBSERVED'), 'evidence person carries its line rung');
+  assert.ok(texts.some(t => /last seen 2026-05-12/.test(t)), 'freshness drawn');
+  assert.ok(texts.some(t => /1 unverifiable name was removed/.test(t)), 'the removal is stated in the PDF too');
+  assert.ok(!texts.some(t => t.includes('Invented Person')), 'the invented person never reaches the PDF');
 });
 
 test('a PDF for an analysis without an org chart simply omits the section', async () => {
