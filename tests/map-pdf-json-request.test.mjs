@@ -82,7 +82,7 @@ test('builds correct request — headers, model, max_tokens, no Skills betas', a
     'request must not include Skills or code_execution betas');
 
   const body = JSON.parse(captured.opts.body);
-  assert.equal(body.model, 'claude-opus-4-7');
+  assert.equal(body.model, 'claude-opus-4-8');
   assert.ok(typeof body.max_tokens === 'number' && body.max_tokens >= 2048);
   assert.ok(!body.tools, 'no tools in the new flow');
   assert.ok(!body.container, 'no container in the new flow');

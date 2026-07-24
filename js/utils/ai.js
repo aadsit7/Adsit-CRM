@@ -889,7 +889,7 @@ function classifyQueryComplexity(userMessage) {
 }
 
 // Per-tier API parameters. SIMPLE omits thinking entirely for minimum TTFT
-// and uses effort:low so Opus 4.7 produces a terse, direct reply.
+// and uses effort:low so Opus 4.8 produces a terse, direct reply.
 // MEDIUM uses adaptive thinking at low effort — enough for synthesis without
 // the multi-second pause of high-effort reasoning. COMPLEX is unchanged.
 const TIER_CONFIG = {
@@ -961,13 +961,13 @@ function buildRequestBody(messages, sheetData, userMessage, systemPrompt, { stre
 
   // output_config: thinking tiers include both thinking + effort; simple tier
   // uses effort alone (no thinking) to keep replies brief and direct.
-  // temperature is not a valid parameter on claude-opus-4-7.
+  // temperature is not a valid parameter on claude-opus-4-8.
   const outputConfig = tierCfg.thinking
     ? { thinking: tierCfg.thinking, output_config: tierCfg.effort }
     : { output_config: tierCfg.effort };
 
   return {
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-4-8',
     max_tokens: tierCfg.max_tokens,
     ...outputConfig,
     system,
@@ -1211,7 +1211,7 @@ export async function callKimiStream(messages, sheetData, userMessage, signal, s
 // and uploads it to Google Drive via the existing Apps Script endpoint.
 // No Skills API, no Files API, no code_execution — this path is
 // CORS-friendly and works from a static host.
-const MAP_JSON_MODEL = 'claude-opus-4-7';
+const MAP_JSON_MODEL = 'claude-opus-4-8';
 const MAP_JSON_TIMEOUT_MS = 120_000;
 const MAP_JSON_MAX_TOKENS = 4096;
 
@@ -1944,7 +1944,7 @@ export const __mapJsonInternals = {
 // either "meeting_recap" or "opportunity_note" and reformats it into
 // a consistent structure while preserving 100% of the original content.
 
-const STANDARDIZE_MODEL = 'claude-opus-4-7';
+const STANDARDIZE_MODEL = 'claude-opus-4-8';
 const STANDARDIZE_MAX_TOKENS = 16000; // high enough for any realistic CRM description
 const STANDARDIZE_TIMEOUT_MS = 300_000; // 5 min — streaming keeps connection alive for long inputs
 

@@ -33,7 +33,7 @@ import {
 import { buildContactBriefPrompt, buildPartnerContextBlock } from './contact-analyzer-prompts.js';
 import { parseContactBriefResponse } from './contact-analyzer-schema.js';
 
-const CONTACT_MODEL = 'claude-opus-4-7';
+const CONTACT_MODEL = 'claude-opus-4-8';
 const CONTACT_MAX_TOKENS = 16000;
 const CONTACT_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
 const CONTACT_MAX_ROUNDS = 6;               // pause_turn continuations

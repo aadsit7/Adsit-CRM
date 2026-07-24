@@ -24,7 +24,7 @@ import {
   buildEventFacts,
 } from './event-analyzer-evidence.js';
 
-const EVENT_MODEL = 'claude-opus-4-7';
+const EVENT_MODEL = 'claude-opus-4-8';
 const EVENT_MAX_TOKENS = 16000;
 const EVENT_TIMEOUT_MS = 120_000;
 

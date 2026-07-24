@@ -146,7 +146,7 @@ test('requestMapPdfJsonFromMultiple uses the same model + headers as the voice f
   assert.ok(captured);
   assert.ok(captured.url.endsWith('/v1/messages'));
   const body = JSON.parse(captured.opts.body);
-  assert.equal(body.model, 'claude-opus-4-7');
+  assert.equal(body.model, 'claude-opus-4-8');
   assert.equal(body.messages.length, 1);
   assert.match(body.messages[0].content, /DATE: 2026-04-15/);
   assert.match(body.messages[0].content, /DATE: 2026-03-01/);

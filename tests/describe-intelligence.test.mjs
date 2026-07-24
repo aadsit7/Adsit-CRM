@@ -104,7 +104,7 @@ test('standardizeDescription() builds correct request — headers, model, no Ski
     'request must not include Skills or code_execution betas');
 
   const body = JSON.parse(captured.opts.body);
-  assert.equal(body.model, 'claude-opus-4-7');
+  assert.equal(body.model, 'claude-opus-4-8');
   assert.ok(typeof body.max_tokens === 'number' && body.max_tokens >= 2048);
   assert.ok(!body.tools, 'no tools');
   assert.equal(body.messages.length, 1);
