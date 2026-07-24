@@ -1049,6 +1049,13 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+.partner-org__tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+}
 .partner-org__legend { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .partner-org__legend-chip {
   display: inline-flex;
@@ -1064,27 +1071,35 @@
 }
 .partner-org__legend-chip--saved { color: var(--color-primary); border-color: var(--color-primary-lighter); }
 
-/* ── Connector-line tree ─────────────────────────────────────
-   Nested flex <ul>s; the lines are pseudo-elements on each branch:
-   every non-root branch reserves --org-drop of headroom, draws the
-   horizontal sibling rail with border-tops split at its center, and the
-   vertical drop with a center border. A parent's <ul> adds the stub that
-   descends from the parent card to the rail. */
-.partner-org { --org-drop: 22px; --org-line: var(--color-border); }
-.partner-org__scroll { overflow-x: auto; padding: var(--space-2) 0; }
+/* ── Connector-line tree (hybrid row / hanging layout) ───────
+   Nested flex <ul>s. A sibling set of up to ORG_ROW_MAX (see
+   admin-forecast.js) renders side-by-side under the classic horizontal
+   rail; a bigger set gets `--hang` and stacks vertically with a spine +
+   elbow connectors — the convention org-chart tools use for large teams,
+   so a real roster grows down the page instead of sideways.
+
+   ROW connectors are pseudo-elements on each branch: every non-root
+   branch reserves --org-drop of headroom, draws the sibling rail with
+   border-tops split at its center, and the vertical drop with a center
+   border; the parent's <ul> adds the stub that descends from the parent
+   card to the rail. All rail rules are scoped to
+   `:not(.partner-org__children--hang)` so they can never bleed into a
+   hanging list. */
+.partner-org { --org-drop: 22px; --org-line: var(--color-border); --org-elbow-y: 26px; }
+.partner-org__scroll { overflow: auto; padding: var(--space-2) 0; max-height: 560px; }
 .partner-org__tree,
 .partner-org__children {
   display: flex;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-start;
   list-style: none;
   margin: 0;
   padding: 0;
   min-width: max-content;
 }
-.partner-org__tree { margin: 0 auto; }
-.partner-org__children { position: relative; padding-top: var(--org-drop); }
-.partner-org__children::before {
+.partner-org__children:not(.partner-org__children--hang) { justify-content: center; }
+.partner-org__children:not(.partner-org__children--hang) { position: relative; padding-top: var(--org-drop); }
+.partner-org__children:not(.partner-org__children--hang)::before {
   content: '';
   position: absolute;
   top: 0;
@@ -1101,8 +1116,8 @@
   position: relative;
   padding: var(--org-drop) var(--space-2) 0;
 }
-.partner-org__branch::before,
-.partner-org__branch::after {
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch::before,
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch::after {
   content: '';
   position: absolute;
   top: 0;
@@ -1111,25 +1126,110 @@
   height: var(--org-drop);
   border-top: 2px solid var(--org-line);
 }
-.partner-org__branch::after {
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch::after {
   right: auto;
   left: 50%;
   border-left: 2px solid var(--org-line);
 }
-.partner-org__branch:only-child { padding-top: 0; }
-.partner-org__branch:only-child::before,
-.partner-org__branch:only-child::after { display: none; }
-.partner-org__branch:first-child::before,
-.partner-org__branch:last-child::after { border: 0 none; }
-.partner-org__branch:last-child::before {
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:only-child { padding-top: 0; }
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:only-child::before,
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:only-child::after { display: none; }
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:first-child::before,
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:last-child::after { border: 0 none; }
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:last-child::before {
   border-right: 2px solid var(--org-line);
   border-radius: 0 var(--radius-sm) 0 0;
 }
-.partner-org__branch:first-child::after { border-radius: var(--radius-sm) 0 0 0; }
+.partner-org__children:not(.partner-org__children--hang) > .partner-org__branch:first-child::after { border-radius: var(--radius-sm) 0 0 0; }
 /* Roots stand on their own — no connectors above the top row. */
 .partner-org__tree > .partner-org__branch { padding-top: 0; }
 .partner-org__tree > .partner-org__branch::before,
 .partner-org__tree > .partner-org__branch::after { display: none; }
+/* Many roots (a flat map) stack vertically like a directory. */
+.partner-org__tree--hang {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* HANGING lists: children stack under the parent, attached to a spine
+   dropping from the parent card's left side; each row draws its own
+   rounded elbow into the card. Handles any card height because the elbow
+   is anchored a fixed --org-elbow-y below the row's top. */
+.partner-org__children--hang {
+  flex-direction: column;
+  align-items: flex-start;
+  margin-left: 17px;
+  min-width: 0;
+}
+.partner-org__children--hang > .partner-org__branch,
+.partner-org__branch--hang {
+  align-items: flex-start;
+  padding: 10px 0 0 22px;
+}
+.partner-org__children--hang > .partner-org__branch::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 16px;
+  height: var(--org-elbow-y);
+  border-left: 2px solid var(--org-line);
+  border-bottom: 2px solid var(--org-line);
+  border-bottom-left-radius: var(--radius-sm);
+}
+.partner-org__children--hang > .partner-org__branch::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-left: 2px solid var(--org-line);
+}
+.partner-org__children--hang > .partner-org__branch:last-child::after { display: none; }
+/* A manager whose team hangs left-aligns with the list, so the spine
+   visibly drops from under their card rather than floating beside it. */
+.partner-org__branch--hangparent { align-items: flex-start; }
+/* Hanging ROOTS are their own trees — indent and elbows don't apply. */
+.partner-org__tree--hang > .partner-org__branch { padding: 0; }
+
+/* ── Full-screen overlay ─────────────────────────────────────
+   The same tree (buildPartnerOrgTreeEl) in a viewport-filling dialog:
+   sticky toolbar with the legend + Close, and a canvas that scrolls on
+   both axes. Closes on Escape and on in-app navigation. */
+.partner-org-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--color-bg, var(--color-surface));
+  display: flex;
+  flex-direction: column;
+}
+.partner-org-overlay__bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+  flex: none;
+}
+.partner-org-overlay__tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+}
+.partner-org-overlay__canvas {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: var(--space-5);
+  background: var(--color-surface);
+}
 
 /* ── Node cards ──────────────────────────────────────────────── */
 .partner-org__node {

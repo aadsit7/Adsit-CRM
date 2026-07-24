@@ -628,12 +628,14 @@ export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, 
   y = drawContext(doc, ctx, kpis, y);
   y = drawOverview(doc, ctx, analysis, y);
   y = drawStageBoard(doc, ctx, resolvedBoard, y);
-  y = drawOrgChart(doc, ctx, analysis.org_map, y);
   y = drawList(doc, ctx, 'Do This Next', 'The most useful next best actions', analysis.next_actions, y);
   y = drawList(doc, ctx, 'Maturity Gaps', 'What is missing to advance the operational stage', analysis.gaps, y);
   y = drawList(doc, ctx, 'Open Questions', 'What the evidence leaves unanswered', analysis.open_questions, y);
   y = drawList(doc, ctx, 'Relationship Risks', 'Risks to the relationship', analysis.risks, y);
   y = drawList(doc, ctx, 'Positive Momentum', 'What is going well', analysis.momentum, y);
+  // Mirrors the on-screen board: the org chart closes the document, below
+  // the action/gap/risk lists.
+  y = drawOrgChart(doc, ctx, analysis.org_map, y);
   drawCoverage(doc, ctx, coverageWarnings, y);
 
   drawFooters(doc, title, genDate);
