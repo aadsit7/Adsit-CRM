@@ -30,6 +30,11 @@ import {
 } from '../utils/partner-contacts.js';
 import { requestPartnerContactsExtraction } from '../utils/partner-contacts-client.js';
 import {
+  withoutAnalyzerExports,
+  indexContactAnalyzerPdfs,
+  findContactAnalyzerPdf,
+} from '../utils/analyzer-export-files.js';
+import {
   LEADCHECK_FRESH_DAYS,
   NO_DIRECT_REPORTS_NOTE,
   checklistItemLabel,
@@ -64,12 +69,20 @@ export async function render(container, params) {
     // Partner_Contacts may not exist yet in older spreadsheets (it is created
     // on first scan / via Setup → Initialize Sheet), so its read — like the
     // optional Meeting_Index — must never take down the whole page.
-    const [partners, opportunities, events, transcripts, contactRows] = await Promise.all([
+    // The document store is read here too, so the Contacts table can link each
+    // contact to their Analyzer brief. It is ONE cached Sheets read covering
+    // every contact on the page — the alternative, an Apps Script listFiles per
+    // contact, would be dozens of round-trips for one column. It runs in
+    // parallel with the reads the page already needs, so it costs no extra
+    // wall-clock, and a failure (or a spreadsheet with no such tab yet) just
+    // means no links, never a broken page.
+    const [partners, opportunities, events, transcripts, contactRows, documentRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_PARTNERS),
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
       readSheetAsObjects(CONFIG.SHEET_EVENTS),
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS),
       readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS).catch(() => []),
     ]);
 
     const partner = partners.find(p => p.partner_id === partnerId);
@@ -112,7 +125,12 @@ export async function render(container, params) {
         .finally(() => { contactBackfillPromise = null; });
     }
 
-    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts);
+    // contact_id → their newest Analyzer brief (or nothing). Keyed on the raw
+    // file-store key, so only a file actually filed against that contact can
+    // ever surface on their row.
+    const contactPdfIndex = indexContactAnalyzerPdfs(documentRows);
+
+    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading data'),
@@ -126,7 +144,7 @@ function reRender(partnerId) {
   render(viewContainer, { id: partnerId });
 }
 
-function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = []) {
+function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = [], contactPdfIndex = null) {
   const tierClass = tierSlug(partner.tier);
   const pipelineValue = opportunities.filter(o => o.status !== 'Won').reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
   const wonDeals = opportunities.filter(o => o.status === 'Won');
@@ -252,7 +270,7 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
 
     // Section 3: Contacts — extracted from this partner's description notes
     // and attachments, shown as a branded table matrix on click.
-    buildPartnerContactsSection(partner, partnerContacts),
+    buildPartnerContactsSection(partner, partnerContacts, contactPdfIndex),
 
     // Section 4: Call Transcripts
     el('div', { class: 'partner-detail-page__section' },
@@ -408,7 +426,51 @@ function contactCell(value, { muted = 'partner-contacts__muted' } = {}) {
   return v ? v : el('span', { class: muted }, '—');
 }
 
-function buildContactsTable(partner, contacts) {
+function pdfLinkIconSvg() {
+  return '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
+    + '<path d="M4 1.5h5L13 5.5V14a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 4 14V1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '<path d="M9 1.5V5.5H13" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '</svg>';
+}
+
+/**
+ * The Analyzer PDF cell: a link to this contact's Account Intelligence Brief
+ * when the Analyzer has produced one, and an honest dash when it hasn't.
+ *
+ * The brief is found by contact_id, the same key the Analyzer files it under
+ * and the same key the contact's Documents panel lists it by — so what shows
+ * here is exactly what is attached to the record, never an inference from a
+ * name. A brief whose Drive link never resolved is shown as present but
+ * unlinked rather than silently hidden: the file exists, and saying "—" would
+ * be a lie the user could disprove by opening the contact.
+ */
+function contactAnalyzerPdfCell(contact, contactPdfIndex) {
+  const pdf = findContactAnalyzerPdf(contactPdfIndex, contact && contact.contact_id);
+  if (!pdf) return el('span', { class: 'partner-contacts__muted' }, '—');
+
+  const dated = pdf.brief_date ? (formatDate(pdf.brief_date) || pdf.brief_date) : '';
+  const label = dated ? `Brief · ${dated}` : 'Brief';
+
+  if (!pdf.drive_url) {
+    return el('span', {
+      class: 'partner-contacts__muted',
+      title: `${pdf.file_name} is attached to this contact, but its Drive link did not resolve. Open the contact to reach it.`,
+    }, `${label} (no link)`);
+  }
+
+  return el('a', {
+    class: 'partner-contacts__pdf-link',
+    href: pdf.drive_url,
+    target: '_blank',
+    rel: 'noopener',
+    title: pdf.file_name,
+  },
+    el('span', { class: 'partner-contacts__pdf-icon', html: pdfLinkIconSvg() }),
+    label,
+  );
+}
+
+function buildContactsTable(partner, contacts, contactPdfIndex) {
   return el('div', { class: 'events-page__table-wrapper partner-contacts__table-wrapper' },
     el('table', { class: 'events-page__table events-page__table--compact partner-contacts__table' },
       el('thead', {},
@@ -417,7 +479,12 @@ function buildContactsTable(partner, contacts) {
           el('th', {}, 'Role'),
           el('th', {}, 'Company'),
           el('th', {}, 'Email'),
-          el('th', {}, 'Phone'),
+          // Replaces the Phone column: a phone number is one more thing to
+          // read past on a roster, while "has this person been analyzed, and
+          // where is that brief?" is the question this table gets opened for.
+          // Phone is still captured, stored and edited on the contact itself —
+          // it just no longer costs a column here.
+          el('th', {}, 'Analyzer PDF'),
           el('th', {}, 'Sources'),
           el('th', {}, 'Actions'),
         )
@@ -436,7 +503,7 @@ function buildContactsTable(partner, contacts) {
           el('td', {}, c.email
             ? el('a', { class: 'partner-contacts__email-link', href: `mailto:${c.email}` }, c.email)
             : el('span', { class: 'partner-contacts__muted' }, '—')),
-          el('td', {}, contactCell(c.phone)),
+          el('td', {}, contactAnalyzerPdfCell(c, contactPdfIndex)),
           el('td', {}, contactSourceChips(c)),
           el('td', { class: 'events-page__td--actions' },
             el('div', { class: 'partner-contacts__actions' },
@@ -457,7 +524,7 @@ function buildContactsTable(partner, contacts) {
   );
 }
 
-function buildPartnerContactsSection(partner, contacts) {
+function buildPartnerContactsSection(partner, contacts, contactPdfIndex) {
   const isOpen = !collapsedContactSections.has(partner.partner_id);
 
   const chevron = el('span', {
@@ -469,7 +536,7 @@ function buildPartnerContactsSection(partner, contacts) {
     class: `partner-contacts__body${isOpen ? '' : ' partner-contacts__body--collapsed'}`,
   },
     contacts.length > 0
-      ? buildContactsTable(partner, contacts)
+      ? buildContactsTable(partner, contacts, contactPdfIndex)
       : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
           el('div', { class: 'empty-state__title' }, 'No contacts yet'),
           el('div', { class: 'empty-state__description' },
@@ -762,7 +829,16 @@ async function handleScanContacts(partner, btn) {
     } catch (err) {
       warnings.push(`Could not list attachments: ${err.message}`);
     }
-    const pendingFiles = files.filter(f => String(f.analyzed || '').toUpperCase() !== 'TRUE');
+    // The Analyzer files its own "Create PDF" exports onto this partner, so
+    // they appear in this listing. They must never be scanned for contacts:
+    // a Partner Analysis PDF contains Randy's LIKELY org chart — people and
+    // titles the model inferred — and the attendee pipeline would read those
+    // back as if the file were a real attendee list, promoting inferences
+    // into verified Partner_Contacts rows. Everything in this table has to be
+    // traceable to a genuine source, so the Analyzer's own output is excluded
+    // before anything else looks at the files.
+    const pendingFiles = withoutAnalyzerExports(files)
+      .filter(f => String(f.analyzed || '').toUpperCase() !== 'TRUE');
     for (let i = 0; i < pendingFiles.length; i++) {
       const file = pendingFiles[i];
       setLabel(`Attachment ${i + 1}/${pendingFiles.length}…`);
@@ -1940,3 +2016,11 @@ function escapeHtml(str) {
 }
 
 export function cleanup() {}
+
+// Test hook — the Contacts table's column contract and its Analyzer-PDF cell,
+// exposed so both can be asserted without a browser. Same pattern as
+// __inlineRowActionsInternals in admin-opportunities.js. Not used at runtime.
+export const __partnerContactsTableInternals = {
+  contactAnalyzerPdfCell,
+  buildContactsTable,
+};

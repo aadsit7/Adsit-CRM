@@ -682,7 +682,7 @@ html {
    ============================================
    The Contacts table on the partner-detail page is the panel a user opens
    most on their phone, and the generic table→card treatment (section 9)
-   broke on it: the 7-column rows (Name, Role, Company, Email, Phone,
+   broke on it: the 7-column rows (Name, Role, Company, Email, Analyzer PDF,
    Sources, Actions) carry long values (roles, company names, emails) and a
    three-button, no-wrap Actions row. Those forced each card wider than the
    viewport, so values were sliced off the right edge and the Actions row

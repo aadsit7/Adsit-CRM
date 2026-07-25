@@ -139,3 +139,73 @@ test('updatePillStage ignores settled pills', () => {
   updatePillStage(pill, 'shouldNotAppear');
   assert.equal(pill.stageEl.textContent, 'Done');
 });
+
+// ── Hard timeout is per-caller ───────────────────────────────
+// The 4-minute default is sized for the MAP PDF flow. Work that legitimately
+// runs longer (an Analyzer run reading attachments, or the Contacts brief's
+// multi-round web research) must be able to say so: once the pill times out it
+// is SETTLED, which turns every later progress update and the final "ready"
+// into a no-op — so the wrong budget makes a healthy run report failure and
+// then never report success.
+test('createPill accepts a per-caller hard timeout', async () => {
+  const pill = createPill('Long job…', { hardTimeoutMs: 60 });
+  // Past the custom budget, well short of the 4-minute default.
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal(pill.settled, true, 'the custom budget should have fired');
+  assert.match(pill.stageEl.textContent, /^Timed out after \d+ minute/);
+  destroyPill(pill);
+});
+
+test('a generous budget leaves a long-running pill alive and updatable', async () => {
+  const pill = createPill('Researching…', { hardTimeoutMs: 20 * 60_000 });
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal(pill.settled, false, 'must not self-fail inside its budget');
+  updatePillStage(pill, 'Round 2');
+  assert.equal(pill.stageEl.textContent, 'Round 2');
+  markPillSuccess(pill, 'Brief ready');
+  assert.equal(pill.stageEl.textContent, 'Brief ready', 'success must still land');
+  destroyPill(pill);
+});
+
+test('an absent / invalid hardTimeoutMs falls back to the default', async () => {
+  for (const options of [{}, { hardTimeoutMs: 0 }, { hardTimeoutMs: -1 }, { hardTimeoutMs: 'soon' }]) {
+    const pill = createPill('Working…', options);
+    await new Promise(r => setTimeout(r, 1100));
+    assert.equal(pill.settled, false, `${JSON.stringify(options)} should use the 4-minute default`);
+    destroyPill(pill);
+  }
+});
+
+// ── The live region is the stage text, not the whole pill ────
+// role=status on the pill made the ticking clock re-announce label + stage +
+// elapsed once per second for the entire run.
+test('the pill announces only its stage, and hides the ticking clock from AT', () => {
+  const pill = createPill('Reading the notes…', { label: 'Acme' });
+  assert.match(pill.el.innerHTML, /__stage" role="status" aria-live="polite"/);
+  assert.match(pill.el.innerHTML, /__elapsed" aria-hidden="true"/);
+  destroyPill(pill);
+});
+
+// ── A pill can always be dismissed ───────────────────────────
+// With a caller-supplied budget the wait before a stuck pill self-settles can
+// be long, so there has to be a way out that doesn't require starting another
+// run of the same kind.
+test('clicking a pill destroys it', () => {
+  const clicks = [];
+  const realCreate = globalThis.document.createElement;
+  globalThis.document.createElement = () => {
+    const e = realCreate();
+    e.style = {};
+    e.addEventListener = (ev, fn) => { if (ev === 'click') clicks.push(fn); };
+    return e;
+  };
+  try {
+    const pill = createPill('Working…');
+    assert.equal(clicks.length, 1, 'a click handler should be wired');
+    clicks[0]();
+    assert.equal(pill.settled, true, 'dismiss should settle the pill');
+    assert.equal(pill.tickHandle, null, 'dismiss should clear the ticker');
+  } finally {
+    globalThis.document.createElement = realCreate;
+  }
+});

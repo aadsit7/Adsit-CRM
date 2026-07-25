@@ -10,11 +10,20 @@
 // `Opportunity_Documents` sheet) keys every attachment by a single id string
 // and never inspects its prefix — so opportunities (`opp_*`), events
 // (`evt_*`), partners (`p_*`) and contacts (`pct_*`) all attach through the
-// exact same call, and a file keyed on one id can never cross-list under a
-// different record. This is the same wire contract the Documents panel and
+// exact same call. This is the same wire contract the Documents panel and
 // the MAP PDF flows already use (`action:'uploadFile'`, `opportunityId` =
 // entity key, `customerName` = Drive folder name); no backend change is
 // required to support a fourth entity type.
+//
+// SEPARATION DEPENDS ON THE IDS, NOT ON THIS CODE. Because the store keys on
+// one untyped string (and `doListFiles` compares it with a loose `==`), two
+// records of DIFFERENT types that share an id value share a document list.
+// Every id this app generates carries a type prefix, so anything created here
+// is safe — but legacy rows seeded before that convention (partners and events
+// numbered 1, 2, 3 …) do collide with each other, and a file attached to
+// partner "6" will also list under event "6". Give those rows prefixed ids to
+// separate them; re-keying on upload here would instead orphan every
+// attachment already filed under the bare id.
 //
 // Reuses existing primitives only:
 //   • blobToBase64()   — FileReader (js/utils/map-pdf-builder.js)
