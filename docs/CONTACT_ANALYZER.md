@@ -28,7 +28,9 @@ matches the reference layout.
 > `contact_id`) and downloads a local copy — the same auto-attach every Analyzer
 > mode now performs. Contacts gained a Drive-backed **Documents** panel (on the
 > Edit Contact modal) for exactly this, matching the capability opportunities,
-> events and partners already had. See
+> events and partners already had. The brief is also linked from the partner
+> page's **Contacts** table, in its **Analyzer PDF** column — so the roster
+> shows at a glance who has been briefed and when. See
 > [ANALYZER_PDF_AUTOATTACH.md](ANALYZER_PDF_AUTOATTACH.md).
 
 ---

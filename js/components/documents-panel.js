@@ -10,8 +10,11 @@
 // the JSON field `opportunityId`. We retain that field name in the
 // outgoing payload for backwards compatibility (the script doesn't
 // inspect prefixes — it just uses the value as a folder/key string).
-// Event IDs (`evt_*`) and opportunity IDs (`opp_*`) use distinct
-// prefixes, so files cannot cross-list between the two views.
+// Because the key is one untyped string, records of different types can
+// only stay separate if their ids differ: the app's generated ids all carry
+// a type prefix (`opp_` / `evt_` / `p_` / `pct_`) and cannot collide, but
+// legacy bare-integer partner/event ids do. See the note in
+// js/utils/analyzer-pdf-attach.js.
 // ============================================
 
 import { el } from '../utils/dom.js';

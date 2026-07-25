@@ -7662,6 +7662,30 @@
   text-decoration: underline;
 }
 
+/* Analyzer PDF link (replaces the old Phone column). Same brand blue as the
+   email link so the two clickable columns read as one family; the glyph makes
+   "there is a document here" scannable down the column without reading. */
+.partner-contacts__pdf-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #2F6BFF;
+  text-decoration: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.partner-contacts__pdf-link:hover {
+  text-decoration: underline;
+}
+
+.partner-contacts__pdf-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  /* Inherits the link colour — same treatment as the Documents panel's file
+     glyph, so nothing new enters the palette. */
+}
+
 .partner-contacts__muted {
   color: #B0B0BC;
   font-weight: 500;

@@ -10,6 +10,10 @@
 //     options.label               — opportunity name shown above the stage line
 //     options.global              — use the body-fixed global stack (default)
 //     options.scopeContainer      — legacy: anchor inside a specific element
+//     options.hardTimeoutMs       — how long before the pill declares the work
+//                                   timed out (default HARD_TIMEOUT_MS, 4 min).
+//                                   Callers whose work legitimately runs longer
+//                                   pass a bigger budget — see the note there.
 //   updatePillStage(pill, text)   — swap the stage text
 //   markPillSuccess(pill, text)   — green tick, hold 3s, fade out
 //   markPillFailure(pill, text)   — amber warning, hold 5s, fade out
@@ -21,6 +25,18 @@
 
 const WARN_THRESHOLD_MS = 150_000;  // 2:30 — switch to amber "taking longer…"
 const HARD_TIMEOUT_MS   = 240_000;  // 4:00 — hard fail state
+
+// The hard timeout is a LAST RESORT for work that owns no cancellation of its
+// own — it settles the pill so a wedged job can't spin forever. It is not a
+// measurement of the work: once it fires, the pill is settled, which makes
+// every later updatePillStage / markPillSuccess a no-op. A caller whose work
+// routinely runs longer than the default must pass its own budget, or the
+// user is told the run failed while it is still going — and then gets no
+// success signal at all when it finishes.
+function resolveHardTimeout(options) {
+  const ms = Number(options && options.hardTimeoutMs);
+  return Number.isFinite(ms) && ms > 0 ? ms : HARD_TIMEOUT_MS;
+}
 
 // Every pill is a background thing Randy is doing (analyzing, scanning,
 // building a PDF), so each one wears Randy's face as its persistent identity
@@ -110,8 +126,12 @@ export function createPill(initialStage = 'Starting…', options = {}) {
   const el = document.createElement('div');
   el.className = 'randy-map-pill randy-map-pill--active';
   el.id = id;
-  el.setAttribute('role', 'status');
-  el.setAttribute('aria-live', 'polite');
+  // The live region is the STAGE TEXT alone (set in the template below), not
+  // the whole pill. With role=status on the pill, the elapsed clock ticking
+  // every second re-announced the entire pill — label, stage and time — once
+  // per second for the whole run, which on a several-minute analysis buries a
+  // screen-reader user. Announcing only the stage means they hear each real
+  // step ("Reading documents… 2 of 5", "Analysis ready") exactly once.
 
   const labelHtml = options.label
     ? `<span class="randy-map-pill__label">${escapeHtml(options.label)}</span>`
@@ -129,12 +149,13 @@ export function createPill(initialStage = 'Starting…', options = {}) {
   // When a label is present, it sits on a line of its own (flex full-width)
   // above the spinner row. flex-wrap: wrap on the pill handles the break.
   el.innerHTML = `
-    ${labelHtml}${avatarHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed">0:00</span>
+    ${labelHtml}${avatarHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage" role="status" aria-live="polite">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed" aria-hidden="true">0:00</span>
   `.trim();
 
   // Newest pill on top (so older ones settle below if the user kicks
   // off two generations). Gap comes from CSS.
   host.insertBefore(el, host.firstChild);
+
 
   const startedAt = Date.now();
   const pill = {
@@ -148,12 +169,26 @@ export function createPill(initialStage = 'Starting…', options = {}) {
     settled: false,
   };
 
+  // Click to dismiss. The pill has no other exit if its work never settles —
+  // and with a caller-supplied budget that wait can be long — so a stuck pill
+  // would otherwise follow the user around every page until a new run of the
+  // same kind replaced it. Dismissing removes only the indicator; the job is
+  // owned by its caller and keeps running.
+  if (typeof el.addEventListener === 'function') {
+    el.style.cursor = 'pointer';
+    el.setAttribute('title', 'Dismiss');
+    el.addEventListener('click', () => destroyPill(pill));
+  }
+
+  const hardTimeoutMs = resolveHardTimeout(options);
+
   pill.tickHandle = setInterval(() => {
     if (pill.settled) return;
     const ms = Date.now() - startedAt;
     if (pill.elapsedEl) pill.elapsedEl.textContent = formatElapsed(ms);
-    if (ms >= HARD_TIMEOUT_MS) {
-      markPillFailure(pill, 'Timed out after 4 minutes');
+    if (ms >= hardTimeoutMs) {
+      const mins = Math.max(1, Math.round(hardTimeoutMs / 60_000));
+      markPillFailure(pill, `Timed out after ${mins} minute${mins === 1 ? '' : 's'}`);
       return;
     }
     if (ms >= WARN_THRESHOLD_MS && !el.classList.contains('randy-map-pill--warn')) {

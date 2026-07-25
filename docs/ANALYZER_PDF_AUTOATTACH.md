@@ -36,10 +36,20 @@ because there is no `contact_id` to key on yet.
 The Apps Script file store (the `Opportunity_Documents` sheet) keys every
 attachment by **one id string and never inspects its prefix**
 (`doUploadFile` / `doListFiles` / `doDeleteFile` in `apps-script/Code.gs`). So
-all four entity types attach and list through the **exact same call**, and the
-distinct id prefixes (`opp_` / `evt_` / `p_` / `pct_`) guarantee a file keyed on
-one record can never cross-list under another — even though every entity shares
-the single backing sheet. **Adding contacts required no Apps Script change.**
+all four entity types attach and list through the **exact same call**, even
+though every entity shares the single backing sheet. **Adding contacts required
+no Apps Script change.**
+
+> ⚠️ **Separation comes from the ids, not from the code.** The store keys on one
+> untyped string and `doListFiles` matches it with a loose `==`, so two records
+> of different types that share an id value share a document list. Every id this
+> app generates carries a type prefix (`opp_` / `evt_` / `p_` / `pct_`), so
+> anything created in-app is safe. **Legacy rows seeded before that convention
+> are not**: in the live sheet, partners are numbered `1`–`9` and events `1`–`8`,
+> so a Partner Analysis PDF filed against partner `6` also lists under event `6`.
+> Contacts are unaffected (all `pct_*`). The fix is at the data level — give
+> those legacy rows prefixed ids — because re-keying on upload would orphan
+> every attachment already filed under the bare id.
 
 ## The flow
 
@@ -50,8 +60,11 @@ the single backing sheet. **Adding contacts required no Apps Script change.**
   build{Forecast,EventAnalysis,PartnerAnalysis,ContactBrief}Pdf(...)  → Blob
         │
         ▼
+  downloadBlob(blob, filename)               ← FIRST, never waits on Drive
+        │
+        ▼
   autoAttachAnalyzerPdf({ entityId, contextName, filename, blob, recordNoun })
-        │   (admin-forecast.js — best-effort wrapper)
+        │   (admin-forecast.js — best-effort wrapper, 120s bound)
         ▼
   attachAnalyzerPdf(...)                     ← js/utils/analyzer-pdf-attach.js
     blobToBase64()                           ← FileReader (map-pdf-builder.js)
@@ -62,14 +75,17 @@ the single backing sheet. **Adding contacts required no Apps Script change.**
     resolveDriveUrl(response)                ← shared resolver (file-api.js)
         │
         ▼
-  downloadBlob(blob, filename)   +   truthful toast
+  truthful toast
 ```
 
 ### Best-effort contract (the download never breaks)
 
-`autoAttachAnalyzerPdf()` **never throws**. If Drive is unreachable it returns a
-status the caller folds into the toast, and the local download still happens —
-so "Create PDF" always produces a file. The toast tells the truth:
+`autoAttachAnalyzerPdf()` **never throws**, and — since the ordering fix — the
+download genuinely never waits on it: every handler calls `downloadBlob()`
+*before* awaiting the upload, so a slow or wedged Apps Script can no longer hold
+the local file hostage. The upload is additionally bounded at
+`ANALYZER_ATTACH_TIMEOUT_MS` (120s) so the button always reaches a verdict. The
+toast tells the truth:
 
 - attached + downloaded → *"PDF attached to the {record} and downloaded"*
 - attach failed → *"PDF downloaded, but couldn't attach it to the {record}. Try again."*
@@ -77,17 +93,64 @@ so "Create PDF" always produces a file. The toast tells the truth:
 A well-formed run always has an id; the missing-id branch is a defensive guard,
 never a silent false "attached".
 
+### Naming: the CRM row wins
+
+The Drive folder (`contextName`) and the filename both come from the **CRM
+record**, falling back to the model's echo only if the row has no name. The
+model can rephrase a customer or partner name, and using its version would file
+the export into a folder that matches no other document for that record. The
+PDF's printed header keeps its own fallback chain, so nothing about the
+document's appearance changed.
+
+### An export is never evidence
+
+Because these PDFs land in the same file store as real uploads, everything that
+reads attachments **as evidence** must skip them —
+`isAnalyzerExportPdf()` / `withoutAnalyzerExports()` in
+`js/utils/analyzer-export-files.js` are the single definition of "a file the
+Analyzer wrote". Two consumers apply it:
+
+| Consumer | Why it matters |
+| --- | --- |
+| `runForecast()` (Opportunity Analyzer) | An unfiltered export is OCR'd into a fresh, today-dated note and then scored on the next run under the prompt's "most recent note wins" rule — the Analyzer grading its own homework, compounding an early misread instead of correcting it. |
+| `handleScanContacts()` (partner contact scan) | A Partner Analysis PDF contains the **likely** org chart. The attendee pipeline would read those inferred people back as if the file were a real attendee list, promoting guesses into verified `Partner_Contacts` rows. |
+
+Places that merely **list** files — the Documents panels on the opportunity,
+event, partner and contact records — are deliberately unfiltered: seeing the
+brief filed there is the whole point of the feature.
+
 ## Modules
 
 | Module | Responsibility |
 | --- | --- |
 | `js/utils/analyzer-pdf-attach.js` | `attachAnalyzerPdf()` — entity-agnostic upload + `ANALYZER_ENTITY_KEYS` mapping |
+| `js/utils/analyzer-export-files.js` | What the Analyzer's own filenames look like: `isAnalyzerExportPdf()` / `withoutAnalyzerExports()` (evidence hygiene) and `indexContactAnalyzerPdfs()` / `findContactAnalyzerPdf()` (the contact-brief link) |
 | `js/utils/file-api.js` | `fileApiRequest()` + the shared `resolveDriveUrl()` (promoted here as the canonical home) |
 | `js/views/admin-forecast.js` | `autoAttachAnalyzerPdf()` best-effort wrapper + truthful toast, wired into all 4 "Create PDF" handlers |
-| `js/views/admin-partner-detail.js` | Documents panel on the Edit Contact modal (contact file capability) |
+| `js/views/admin-partner-detail.js` | Documents panel on the Edit Contact modal (contact file capability) + the Contacts table's **Analyzer PDF** column |
 | `js/components/documents-panel.js` | The reused, entity-agnostic Documents panel (unchanged) |
 
-Tests: `tests/analyzer-pdf-attach.test.mjs` — input validation, the exact
-upload wire shape, the entity-agnostic contract across `opp_/evt_/p_/pct_`
-ids, Drive-URL resolution (and a graceful no-URL response), folder fallback,
-and the documented entity → id-field mapping. Run with `npm test`.
+## Finding a contact's brief from a list
+
+The partner Contacts table links every contact to their brief (see
+[PARTNER_CONTACTS.md](PARTNER_CONTACTS.md)). It resolves those links from **one
+cached read** of the `Opportunity_Documents` sheet
+(`CONFIG.SHEET_OPPORTUNITY_DOCUMENTS`) rather than an Apps Script `listFiles`
+per contact — the sheet lives in the same spreadsheet the portal already reads,
+so a 40-contact roster costs one request instead of forty. The lookup key is the
+contact's `contact_id`: exactly the key the attach wrote and the Documents panel
+lists by, so a link can never be an inference from a name.
+
+Tests:
+
+- `tests/analyzer-pdf-attach.test.mjs` — input validation, the exact upload wire
+  shape, the entity-agnostic contract across `opp_/evt_/p_/pct_` ids, Drive-URL
+  resolution (and a graceful no-URL response), folder fallback, and the
+  documented entity → id-field mapping.
+- `tests/analyzer-export-files.test.mjs` — the filename matchers pinned against
+  all four builders, that a user's own upload is never mistaken for an export,
+  and the contact-brief index (entity keying, newest-wins, no cross-entity leak).
+- `tests/partner-contacts-analyzer-pdf-column.test.mjs` — the Contacts table's
+  column contract and the link/dash/unlinked states of the cell.
+
+Run with `npm test`.

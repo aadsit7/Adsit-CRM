@@ -10,6 +10,7 @@ import {
   derivePartnerHealth,
   healthLabel,
   containsRiskLanguage,
+  RISK_LANGUAGE,
   RELATIONSHIP_HEALTH,
   HEALTH_HEALTHY_MAX_DAYS,
   HEALTH_WATCH_MAX_DAYS,
@@ -187,4 +188,95 @@ test('containsRiskLanguage flags disengagement / cancellation / blocked', () => 
   assert.ok(!containsRiskLanguage('Great meeting, everyone is aligned and excited'));
   assert.ok(!containsRiskLanguage(''));
   assert.ok(!containsRiskLanguage(null));
+});
+
+// Relationship health is one of the few numbers on the partner board the model
+// never gets to invent, so a false positive here is a deterministic lie about
+// the relationship. A substring test made every mention of "install" contain
+// "stall" — fatal in a CRM whose partners deploy software for a living.
+test('containsRiskLanguage does not fire on words that merely CONTAIN a risk term', () => {
+  assert.ok(!containsRiskLanguage('Installed the agent on 400 endpoints'), '"install" is not "stall"');
+  assert.ok(!containsRiskLanguage('Installation completed on schedule'));
+  assert.ok(!containsRiskLanguage('Their install base is growing'));
+  assert.ok(!containsRiskLanguage('We are re-installing the console'));
+  assert.ok(!containsRiskLanguage('Uncancelled the renewal'));
+});
+
+test('containsRiskLanguage still fires on the real word', () => {
+  assert.ok(containsRiskLanguage('The rollout has stalled'));
+  assert.ok(containsRiskLanguage('Deal stalls whenever procurement gets involved'));
+  assert.ok(containsRiskLanguage('There are blockers on the integration'), 'plural still counts');
+  assert.ok(containsRiskLanguage('Cancellation of the joint webinar'));
+  assert.ok(containsRiskLanguage('At risk of losing the renewal'));
+  assert.ok(containsRiskLanguage('Project paused until Q3'));
+});
+
+// Word boundaries must not cost the inflected forms a substring test caught.
+// Losing these would flip a genuinely at-risk partner to Healthy — the same
+// deterministic lie as a false positive, pointing the other way.
+test('containsRiskLanguage catches regular inflections of a risk term', () => {
+  assert.ok(containsRiskLanguage('The project is stalling'));
+  assert.ok(containsRiskLanguage('They are canceling the contract'));
+  assert.ok(containsRiskLanguage('They are cancelling the contract'), 'British spelling');
+  assert.ok(containsRiskLanguage('unresponsiveness from the team'));
+  assert.ok(containsRiskLanguage('They are churning through the deployment'));
+});
+
+test('every RISK_LANGUAGE term still matches its own sentence', () => {
+  for (const term of RISK_LANGUAGE) {
+    assert.ok(containsRiskLanguage(`QBR note: the account has ${term} this quarter.`),
+      `"${term}" no longer matches — the boundary/suffix rules dropped a listed term`);
+  }
+});
+
+// "No <describing word> blockers" is how reps actually write a clean status.
+// An allowlist of adjectives would never keep up, so the gap is open and only
+// the not-really-negating continuations are excluded.
+test('containsRiskLanguage ignores a negated risk term, however it is qualified', () => {
+  for (const s of [
+    'No blockers reported this week',
+    'No open blockers.',
+    'No remaining blockers.',
+    'No technical blockers.',
+    'No immediate blockers.',
+    'No critical blockers.',
+    'No procurement blockers',
+    'No major blockers',
+    'No longer blocked — legal signed off',
+    'There are no longer any blockers.',
+    'not currently blocked',
+    'Zero blockers',
+    'Zero open blockers.',
+    'Without any blockers we ship Friday',
+  ]) {
+    assert.ok(!containsRiskLanguage(s), `should read as negated: ${s}`);
+  }
+  // …but a negation elsewhere in the sentence must not launder a real risk.
+  assert.ok(containsRiskLanguage('No update yet, and the project is blocked'));
+});
+
+// The negator has to be adjacent (or separated only by a degree word). A
+// negator that merely appears two words earlier is usually negating something
+// else entirely, and suppressing on it hides real risk.
+// A negator that is not negating the TERM must not suppress it. These are the
+// constructions the gap blocklist exists for.
+test('containsRiskLanguage does not treat a non-negating negator as negation', () => {
+  assert.ok(containsRiskLanguage('The project has not only stalled but reversed.'));
+  assert.ok(containsRiskLanguage('They have not yet cancelled, but they will.'));
+  assert.ok(containsRiskLanguage('Without warning cancelled the contract.'));
+  assert.ok(containsRiskLanguage('No progress this month, the deal is stalled'));
+});
+
+test('containsRiskLanguage stays fast on a very long note', () => {
+  // Negated hits used to re-scan the whole prefix, making this quadratic.
+  const long = 'the partner installed and reinstalled with no blockers everywhere. '.repeat(3000);
+  const started = Date.now();
+  assert.equal(containsRiskLanguage(long), false);
+  assert.ok(Date.now() - started < 1000, 'scanning a 200KB note must not block the main thread');
+});
+
+test('containsRiskLanguage reads a whole note, not just its opening', () => {
+  const note = 'Kicked off the pilot. Installed on three sites. '
+    + 'Procurement has stalled the order form.';
+  assert.ok(containsRiskLanguage(note));
 });

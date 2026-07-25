@@ -59,6 +59,10 @@ export const RISK_LANGUAGE = [
   'churn', 'churning', 'churned',
   'cancel', 'cancelled', 'canceled', 'cancellation',
   'terminate', 'terminated', 'termination',
+  // British doubled-l spelling: the suffix group below derives "canceling"
+  // from "cancel" but cannot derive "cancelling", so it is listed outright —
+  // the same reason "cancelled" and "canceled" both already appear.
+  'cancelling',
   'blocked', 'blocker', 'stalled', 'stall',
   'at risk', 'walk away', 'walked away', 'pulling out', 'pull out',
   'no longer interested', 'not interested', 'lost interest',
@@ -67,17 +71,86 @@ export const RISK_LANGUAGE = [
   'ending the relationship', 'end the partnership', 'winding down',
 ];
 
+// Words that negate the risk term immediately following them. "No blockers"
+// and "no longer blocked" are the OPPOSITE of a relationship at risk, and in
+// this CRM they are common phrasings, so a hit right after one of these is
+// discarded rather than counted.
+//
+// Up to two describing words may sit between the negator and the term — "no
+// open blockers", "no longer any blockers", "not currently blocked" are all
+// still negations, and an allowlist of adjectives would never keep up with how
+// people actually write.
+//
+// What DOES have to be excluded is the small set of continuations that show
+// the negator is not negating the term at all: "has not ONLY stalled", "not
+// YET cancelled", "without WARNING cancelled". Those read as risk and must
+// survive, so they are blocked from the gap rather than the gap being closed.
+const NEGATOR_ALTERNATIVES = "no|not|zero|without|never|aren't any|isn't any";
+const NEGATOR_GAP_BLOCKLIST = 'only|yet|just|merely|simply|solely|warning|sooner';
+// `\s{1,4}` rather than `\s+`: a term separated from a negator by a long run
+// of whitespace is not being negated by it, and bounding the run is what makes
+// the lookback window below provably sufficient.
+const RISK_NEGATOR_RE = new RegExp(
+  `\\b(?:${NEGATOR_ALTERNATIVES})\\s{1,4}(?:(?!(?:${NEGATOR_GAP_BLOCKLIST})\\b)\\w+\\s{1,4}){0,2}$`,
+);
+
+// How far back to look for a negator. The pattern is `$`-anchored and bounded
+// — a negator (≤10 chars) plus at most two gap words and their bounded
+// whitespace — so this window covers every string it can match, while keeping
+// the scan linear in the note's length instead of quadratic in
+// (length × negated hits).
+const NEGATOR_LOOKBACK = 120;
+
+// Word-boundary matcher for one risk term, tolerating the regular English
+// inflections. Boundaries are what keep "install" from reading as "stall" — a
+// plain substring test flagged an IT partner as At Risk for the word
+// "installed". The suffix group is what keeps the boundaries from throwing out
+// the inflected forms the substring test legitimately caught ("stalling",
+// "canceling", "unresponsiveness"): a leading boundary is still required, so
+// "installing" cannot match "stall" either way.
+function riskTermRegex(term) {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}(?:s|es|ed|ing|ness)?\\b`, 'g');
+}
+
+// Built once — this runs over every recent note of every partner analyzed.
+const RISK_TERM_REGEXES = RISK_LANGUAGE.filter(Boolean).map(riskTermRegex);
+
 /**
- * Does `text` contain explicit relationship-risk language? Case-insensitive
- * substring match against RISK_LANGUAGE. Pure — the caller decides whether the
- * source is recent enough to matter.
+ * Does `text` contain explicit relationship-risk language?
+ *
+ * Case-insensitive, WORD-BOUNDED match against RISK_LANGUAGE (regular
+ * inflections tolerated), ignoring any hit that is directly negated
+ * ("no blockers"). Pure — the caller decides whether the source is recent
+ * enough to matter.
+ *
+ * Word boundaries are not a nicety here: relationship health is one of the few
+ * numbers on the partner board the model never gets to invent, so a false
+ * positive is a deterministic lie. A plain substring test made every mention of
+ * "install", "installed" or "installation" contain "stall".
+ *
+ * Note this is a vocabulary match, not comprehension: a term listed in
+ * RISK_LANGUAGE still fires in an innocent context that happens to use the word
+ * (e.g. "reviewed the cancellation policy"), because "cancellation" is a listed
+ * term. Boundaries fixed the substring collisions, not that.
+ *
  * @param {string} text
  * @returns {boolean}
  */
 export function containsRiskLanguage(text) {
   const s = String(text || '').toLowerCase();
   if (!s) return false;
-  return RISK_LANGUAGE.some(term => term && s.includes(term));
+  for (const re of RISK_TERM_REGEXES) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const before = s.slice(Math.max(0, m.index - NEGATOR_LOOKBACK), m.index);
+      if (!RISK_NEGATOR_RE.test(before)) return true;
+      // Zero-length matches are impossible here (every term is non-empty),
+      // so exec always advances.
+    }
+  }
+  return false;
 }
 
 // ── Date helpers ────────────────────────────────────────────────────

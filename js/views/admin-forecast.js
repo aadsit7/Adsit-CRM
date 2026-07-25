@@ -12,7 +12,7 @@
 // the timeline-PDF flow; the source-note link reuses openOppDetailsModal.
 // ============================================================
 
-import { readSheetAsObjects, appendRow, addDemoRow, isConfigured } from '../sheets.js';
+import { readSheetAsObjects, appendRow, addDemoRow, isConfigured, invalidateSheetCache } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, $, uuid } from '../utils/dom.js';
 import { formatDate, todayISO, nowISO } from '../utils/date.js';
@@ -70,6 +70,8 @@ import { deriveContactBriefBoard } from '../utils/contact-analyzer-schema.js';
 import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-analyzer-pdf-builder.js';
 // ── Auto-attach: file every "Create PDF" export onto its CRM record ───
 import { attachAnalyzerPdf } from '../utils/analyzer-pdf-attach.js';
+// …and keep those exports out of the evidence base they were derived from.
+import { withoutAnalyzerExports } from '../utils/analyzer-export-files.js';
 
 // ── Module state ─────────────────────────────────────────────────────
 // This state deliberately OUTLIVES the view. The analysis runs as a
@@ -96,6 +98,17 @@ let activeJob = null;
 let mode = 'opportunity'; // 'opportunity' | 'event' | 'partner' | 'contact'
 const MODES = ['opportunity', 'event', 'partner', 'contact'];
 let modeSlotEl = null;    // the container the active mode panel renders into
+
+// How long an Analyzer run may take before its progress pill gives up on it.
+// The pill's own 4-minute default is sized for the MAP PDF flow; an Analyzer
+// run reads every unread attachment first (a server-side OCR each) and the
+// Contacts brief runs multi-round live web research, so four minutes is
+// routinely too short. Once the pill times out it is SETTLED — every later
+// progress update and the final "Analysis ready" become no-ops — so the old
+// default meant a long-but-healthy run showed a failure and then never
+// reported its success. Each run owns an AbortController and always settles
+// its own pill, so this budget only ever catches a genuinely wedged job.
+const ANALYZER_PILL_TIMEOUT_MS = 20 * 60_000;
 
 // ── Event Analyzer state (parallel to the opportunity state above) ────
 let allEvents = [];
@@ -226,9 +239,17 @@ function notifyIfAway(job) {
 }
 // On (re)mount, show whatever the background job is currently doing and pin
 // the dropdown to its deal.
+//
+// The pin only applies when the user has not chosen something newer. Both the
+// job and `selectedOppId` outlive the view, so an unconditional pin silently
+// undid a pick made after the run started: choose deal B while A is analyzing,
+// switch tabs, come back — and the dropdown says A again. The cached board
+// still repaints either way; it carries its own captured opp (buildBoardActions
+// and the coverage banner's re-run both close over it), so the board and its
+// export stay pinned to A no matter what the dropdown shows.
 function restoreActiveJob() {
   if (!activeJob) return;
-  if (activeJob.oppId) {
+  if (activeJob.oppId && !selectedOppId) {
     selectedOppId = activeJob.oppId;
     const select = $('.forecast .forecast__select');
     if (select) select.value = activeJob.oppId;
@@ -309,7 +330,17 @@ export function cleanup() {
 // physically cannot render at the same time — switching modes can never
 // show the other entity's analysis.
 function buildView() {
-  modeSlotEl = el('div', { class: 'analyzer-mode-slot' });
+  modeSlotEl = el('div', {
+    class: 'analyzer-mode-slot',
+    // The slot IS the tab panel the mode bar controls. Naming it lets a
+    // screen reader announce "Opportunity tab panel" instead of leaving the
+    // tablist pointing at nothing. No tabindex: every panel starts with a
+    // focusable control (its selector), so the panel itself must not add a
+    // second, empty tab stop.
+    id: MODE_PANEL_ID,
+    role: 'tabpanel',
+    'aria-labelledby': modeTabId(mode),
+  });
   fillModeSlot();
   return el('div', { class: 'forecast' },
     buildModeBar(),
@@ -317,19 +348,57 @@ function buildView() {
   );
 }
 
+const MODE_PANEL_ID = 'analyzer-mode-panel';
+const MODE_LABELS = { opportunity: 'Opportunity', event: 'Event', partner: 'Partner', contact: 'Contacts' };
+function modeTabId(key) { return `analyzer-mode-tab-${key}`; }
+
+// The mode bar is a real ARIA tablist, so it owes the keyboard the real tab
+// pattern: ONE tab stop for the whole group (roving tabindex), then ←/→ to
+// move between modes and Home/End to jump to the ends. Before this it declared
+// role="tablist" while behaving as four separate buttons — a keyboard user had
+// to tab through every mode to reach the board, and the announced roles
+// promised navigation that did not exist.
 function buildModeBar() {
-  const labels = { opportunity: 'Opportunity', event: 'Event', partner: 'Partner', contact: 'Contacts' };
   const mk = (key) => el('button', {
     type: 'button',
+    id: modeTabId(key),
     class: `analyzer-modebar__tab ${mode === key ? 'analyzer-modebar__tab--active' : ''}`,
     role: 'tab',
     'aria-selected': mode === key ? 'true' : 'false',
+    'aria-controls': MODE_PANEL_ID,
+    tabindex: mode === key ? '0' : '-1',
     dataset: { mode: key },
     onClick: () => switchMode(key),
-  }, labels[key]);
-  return el('div', { class: 'analyzer-modebar', role: 'tablist', 'aria-label': 'Analyzer mode' },
+  }, MODE_LABELS[key]);
+
+  const bar = el('div', { class: 'analyzer-modebar', role: 'tablist', 'aria-label': 'Analyzer mode' },
     ...MODES.map(mk),
   );
+
+  bar.addEventListener('keydown', (e) => {
+    // Modified arrows belong to the browser — Alt/Cmd+← is Back. Claiming them
+    // would silently swallow the user's navigation.
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    let next = '';
+    if (delta) {
+      const i = MODES.indexOf(mode);
+      next = MODES[(i + delta + MODES.length) % MODES.length];
+    } else if (e.key === 'Home') {
+      next = MODES[0];
+    } else if (e.key === 'End') {
+      next = MODES[MODES.length - 1];
+    }
+    if (!next) return;
+    e.preventDefault();
+    switchMode(next);
+    // Follow-focus selection: the newly selected tab takes the focus, which is
+    // what makes ←/→ feel like one control rather than four.
+    const btn = document.getElementById(modeTabId(next));
+    if (btn) btn.focus();
+  });
+
+  return bar;
 }
 
 // Repaint the mode slot with the active mode's panel. Does NOT restore the
@@ -360,7 +429,10 @@ function switchMode(next) {
     const isActive = t.dataset.mode === mode;
     t.classList.toggle('analyzer-modebar__tab--active', isActive);
     t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    // Roving tabindex: only the selected tab is in the tab order.
+    t.setAttribute('tabindex', isActive ? '0' : '-1');
   });
+  if (modeSlotEl) modeSlotEl.setAttribute('aria-labelledby', modeTabId(mode));
   fillModeSlot();
   restoreForMode();
 }
@@ -485,7 +557,7 @@ async function runForecast(explicitOpp = null) {
   abortInflight();
   const controller = new AbortController();
   const label = opp.customer_name || opp.deal_name || 'Analyzer';
-  const pill = createPill('Reading the notes…', { label });
+  const pill = createPill('Reading the notes…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
   const job = { oppId: opp.opportunity_id, label, status: 'running', controller, pill, result: null, error: null };
   activeJob = job;
 
@@ -494,10 +566,23 @@ async function runForecast(explicitOpp = null) {
 
   try {
     // Load evidence base + document list in parallel.
-    const [descAll, documents] = await Promise.all([
+    //
+    // The Analyzer's own "Create PDF" exports are filed onto this same
+    // opportunity, so they come back in this listing. They are stripped here,
+    // at the single point of entry, because a board Randy wrote is DERIVED
+    // from the deal — never independent evidence about it. Left in, each
+    // export would be OCR'd into a fresh, today-dated note and then scored on
+    // the next run under the prompt's "the more recent note wins" rule, so the
+    // Analyzer would grade its own homework and compound an early misread
+    // instead of correcting it. Filtering here (rather than inside
+    // collectUnreadDocuments) also keeps the export out of the model's weak
+    // document context AND out of the coverage banner — an export is not a
+    // document that "could not be read", it is one that must not be.
+    const [descAll, allDocuments] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_OPP_DESCRIPTIONS),
       listEntityDocuments(opp.opportunity_id).catch(() => []),
     ]);
+    const documents = withoutAnalyzerExports(allDocuments);
     const descriptions = descAll
       .filter(d => d.opportunity_id === opp.opportunity_id)
       .sort(byDescriptionDateAsc);
@@ -586,6 +671,10 @@ function renderForecastBoard({ forecast, board, opp, descriptions, documents }) 
 
   frag.appendChild(buildSummary({ forecast, board, opp, positionState }));
 
+  // Status key — the same one the Event and Partner boards carry, so the
+  // criterion labels are never the only explanation of a coloured glyph.
+  frag.appendChild(buildEventLegend({ manual: false }));
+
   // The stage grid lives in a horizontal scroller so the chevrons keep
   // their width and the board scrolls on narrow screens.
   frag.appendChild(el('div', { class: 'forecast-board__scroll' },
@@ -626,10 +715,20 @@ async function handleCreatePdf({ forecast, board, opp, positionState, btn }) {
     // stage, the PDF's "current position" follows the override.
     const overrideStageId = positionState ? positionState.overrideStageId : '';
     const blob = await buildForecastPdf({ forecast, board, opp, overrideStageId });
-    const contextName = forecast.customer_name || opp?.customer_name || opp?.deal_name || 'Opportunity';
+    // The CRM row names the Drive folder and the file, not the model's echo of
+    // it: `forecast.customer_name` comes back from the LLM and can differ from
+    // the deal on file (a rephrasing, a parent-company name), which would file
+    // this export under a folder that matches no other document for the deal.
+    // The PDF's own header keeps its own fallback chain, so the printed title
+    // is unchanged — this only fixes where the file lands and what it's called.
+    const contextName = opp?.customer_name || opp?.deal_name || forecast.customer_name || 'Opportunity';
     const filename = forecastFilename(contextName);
-    // File the export onto the opportunity (keyed on opportunity_id), then
-    // download a local copy regardless of whether the attach succeeded.
+    // Download FIRST, then file the copy onto the opportunity. The local file
+    // is what the user clicked for and it is already built — making it wait on
+    // a Drive round-trip means a slow or wedged Apps Script holds the download
+    // hostage. Attaching second honors the documented "the download never
+    // breaks" contract literally.
+    const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
       entityId: opp?.opportunity_id,
       contextName,
@@ -637,8 +736,7 @@ async function handleCreatePdf({ forecast, board, opp, positionState, btn }) {
       blob,
       recordNoun: 'opportunity',
     });
-    downloadBlob(blob, filename);
-    analyzerExportToast(status);
+    analyzerExportToast(status, downloaded);
   } catch (err) {
     console.error('[Forecast] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -649,26 +747,45 @@ async function handleCreatePdf({ forecast, board, opp, positionState, btn }) {
 }
 
 // Trigger a browser download for a Blob without leaking the object URL.
+// Returns whether the download was actually started: it runs BEFORE the
+// upload in every handler, so a throw here would otherwise skip the attach
+// entirely and report "could not create the PDF" for a PDF that was built.
+// The caller folds the result into its toast so the wording stays true.
 function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = el('a', { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke on the next tick — Safari needs the URL to survive the click.
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: filename });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke on the next tick — Safari needs the URL to survive the click.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch (err) {
+    console.error('[Analyzer] local download failed', err);
+    return false;
+  }
 }
 
 // ── Auto-attach a "Create PDF" export onto its CRM record ────────────
 // Every Analyzer board / brief the user exports is filed straight onto the
 // record it describes — the opportunity, event, partner, or contact — via the
 // shared Drive-backed file store, keyed by that record's id so it lists under
-// exactly the right entity (and never cross-lists with another).
+// exactly that record. (Records whose ids carry the app's type prefixes can
+// never cross-list; legacy bare-integer partner/event ids can — see the note
+// in js/utils/analyzer-pdf-attach.js.)
 //
-// Best-effort by contract: the upload NEVER blocks the local download. It
+// Best-effort by contract: the upload NEVER blocks the local download — every
+// caller downloads the blob BEFORE awaiting this — and it never throws. It
 // returns a status the caller folds into its toast, so "Create PDF" always
 // produces a file even when Drive is unreachable, and the toast tells the
 // truth about whether the attach landed. `recordNoun` names the record type.
+
+// How long to wait on the Drive upload before calling it failed. Generous
+// enough for a large board over a slow connection, bounded so a wedged Apps
+// Script can't leave "Building PDF…" spinning forever with no verdict.
+const ANALYZER_ATTACH_TIMEOUT_MS = 120_000;
+
 async function autoAttachAnalyzerPdf({ entityId, contextName, filename, blob, recordNoun }) {
   const id = String(entityId == null ? '' : entityId).trim();
   if (!id) {
@@ -677,25 +794,93 @@ async function autoAttachAnalyzerPdf({ entityId, contextName, filename, blob, re
     return { attached: false, reason: 'no-id', recordNoun };
   }
   try {
-    const { driveUrl } = await attachAnalyzerPdf({ entityId: id, contextName, filename, blob });
+    const { driveUrl } = await attachAnalyzerPdf({
+      entityId: id, contextName, filename, blob,
+      signal: attachTimeoutSignal(),
+    });
+    // The upload went through the Apps Script, not through sheets.js, so
+    // nothing invalidated the cached copy of the file-store sheet. Drop it, or
+    // a reader inside the 30s TTL — the partner page's Contacts column looking
+    // for exactly this brief — reports "no brief" for one that now exists.
+    invalidateSheetCache(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS);
     return { attached: true, driveUrl, recordNoun };
   } catch (err) {
     console.error(`[Analyzer] auto-attach to ${recordNoun} failed`, err);
+    // A timeout is NOT a known failure. The Apps Script creates the Drive file
+    // and writes its row before it replies, so an aborted upload has very
+    // likely landed — reporting "couldn't attach" would invite a re-click and
+    // a duplicate. Say what is actually known, and still drop the cached
+    // file-store copy so the record's own list shows the truth.
+    if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+      invalidateSheetCache(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS);
+      return { attached: false, reason: 'timeout', recordNoun };
+    }
     return { attached: false, reason: 'error', recordNoun };
   }
 }
 
+// AbortSignal.timeout isn't available in every browser the portal supports, so
+// fall back to a plain controller. Returns undefined when neither exists —
+// attachAnalyzerPdf then behaves exactly as it did before, untimed.
+function attachTimeoutSignal() {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ANALYZER_ATTACH_TIMEOUT_MS);
+    }
+    if (typeof AbortController === 'function') {
+      const c = new AbortController();
+      setTimeout(() => { try { c.abort(); } catch { /* ignore */ } }, ANALYZER_ATTACH_TIMEOUT_MS);
+      return c.signal;
+    }
+  } catch { /* ignore — an untimed upload is still correct, just unbounded */ }
+  return undefined;
+}
+
 // Compose the export toast so it always states whether the PDF was filed onto
-// the record, downloaded, or both — never a false "attached".
-function analyzerExportToast(status) {
+// the record, downloaded, or both — never a false "attached", and never a
+// claimed download that the browser refused.
+function analyzerExportToast(status, downloaded = true) {
   const noun = status.recordNoun || 'record';
   if (status.attached) {
-    showToast(`PDF attached to the ${noun} and downloaded`, 'success');
+    showToast(
+      downloaded
+        ? `PDF attached to the ${noun} and downloaded`
+        : `PDF attached to the ${noun}, but the local download didn't start. Open it from the ${noun}.`,
+      downloaded ? 'success' : 'error',
+    );
+  } else if (!downloaded) {
+    showToast('Could not download or attach the PDF. Try again.', 'error');
   } else if (status.reason === 'no-id') {
     showToast('PDF downloaded', 'success');
+  } else if (status.reason === 'timeout') {
+    showToast(
+      `PDF downloaded. The upload is taking a while — check the ${noun}'s Documents before creating it again.`,
+      'error',
+    );
   } else {
     showToast(`PDF downloaded, but couldn't attach it to the ${noun}. Try again.`, 'error');
   }
+}
+
+// Every board's eyebrow names its subject. A board outlives the view and the
+// selector above it can move on to something else, so "Current position" with
+// no subject leaves a rep reading Acme's board under a dropdown showing Globex
+// with nothing on screen to tell them apart. The exported PDFs have always
+// carried the name in their header; this puts the same anchor on screen.
+function boardEyebrow(label, subject) {
+  const s = String(subject || '').trim();
+  return s ? `${label} · ${s}` : label;
+}
+
+// The disclosure caret on an evidence row. Evidence panels are collapsed by
+// default (the row builders set `detail.hidden = true`), so without a visible
+// affordance the quote, its source and the link to the source note are simply
+// undiscoverable — the row looks like a static label. Rotated by the
+// `--open` class the toggle already sets, matching the chevron on the partner
+// page's collapsible sections.
+function disclosureCaret() {
+  return el('span', { class: 'evidence-caret', 'aria-hidden': 'true',
+    html: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' });
 }
 
 function pdfIcon() {
@@ -767,7 +952,8 @@ function buildSummary({ forecast, board, opp, positionState }) {
   paint();
 
   const children = [
-    el('div', { class: 'forecast-summary__eyebrow' }, 'Current position'),
+    el('div', { class: 'forecast-summary__eyebrow' },
+      boardEyebrow('Current position', opp?.customer_name || opp?.deal_name || forecast.customer_name)),
     head,
     picker,
     notes,
@@ -880,7 +1066,17 @@ function buildCriterionItem({ criterion, opp, descriptions }) {
     disabled: !hasDetail,
   },
     el('span', { class: `forecast-criterion__icon forecast-criterion__icon--${criterion.status}`, html: statusIcon(criterion.status) }),
-    el('span', { class: 'forecast-criterion__label' }, criterion.label),
+    // Status in words, not colour alone. The Event and Partner boards already
+    // label every row; this board conveyed met / partial / not met purely
+    // through a green, amber or red glyph, which is unreadable to anyone with
+    // a colour-vision deficiency and ambiguous to everyone else at a glance.
+    // Reuses the sibling boards' status classes so all three read identically.
+    el('span', { class: 'forecast-criterion__text' },
+      el('span', { class: 'forecast-criterion__label' }, criterion.label),
+      el('span', { class: `event-activity__status event-activity__status--${criterion.status}` },
+        partnerStatusLabel(criterion.status)),
+    ),
+    hasDetail ? disclosureCaret() : null,
   );
 
   const item = el('li', { class: `forecast-criterion forecast-criterion--${criterion.status}` }, head);
@@ -1004,10 +1200,19 @@ function buildCoverageBanner(documents, opp) {
   const n = unread.length;
   const btn = el('button', { class: 'btn btn--secondary btn--sm forecast-coverage__btn' }, 'Retry & re-run');
 
+  // Name them. "1 document could not be read" tells a rep something is missing
+  // but not whether it was the signed MSA or a stray screenshot — and that is
+  // the difference between re-running and moving on.
+  const names = unread.map(d => String(d.file_name || d.name || '').trim()).filter(Boolean);
+  const shown = names.slice(0, 3).join(', ');
+  const detail = shown
+    ? ` (${shown}${names.length > 3 ? `, +${names.length - 3} more` : ''})`
+    : '';
+
   const banner = el('div', { class: 'forecast-coverage' },
     el('span', { class: 'forecast-coverage__icon', html: warnIcon() }),
     el('span', { class: 'forecast-coverage__text' },
-      `${n} ${n === 1 ? 'document' : 'documents'} could not be read, so ${n === 1 ? 'it was' : 'they were'} left out of this analysis. The board reflects the deal’s notes and every document Randy could read.`),
+      `${n} ${n === 1 ? 'document' : 'documents'} could not be read${detail}, so ${n === 1 ? 'it was' : 'they were'} left out of this analysis. The board reflects the deal’s notes and every document Randy could read.`),
     btn,
   );
 
@@ -1183,7 +1388,9 @@ function notifyEventIfAway(job) {
 }
 function restoreEventJob() {
   if (!eventJob) return;
-  if (eventJob.eventId) {
+  // Only pin the selector when the user hasn't picked something newer —
+  // see the note on restoreActiveJob.
+  if (eventJob.eventId && !selectedEventId) {
     selectedEventId = eventJob.eventId;
     const select = $('.forecast .event-analyzer__select');
     if (select) select.value = eventJob.eventId;
@@ -1224,7 +1431,7 @@ async function runEventAnalysis(explicitEvent = null) {
   abortEventInflight();
   const controller = new AbortController();
   const label = event.title || 'Event';
-  const pill = createPill('Reading the event notes…', { label });
+  const pill = createPill('Reading the event notes…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
   const job = { eventId: event.event_id, label, status: 'running', controller, pill, result: null, error: null };
   eventJob = job;
 
@@ -1325,8 +1532,10 @@ async function handleCreateEventPdf({ analysis, board, event, timing, coverageWa
       coverageWarnings,
     });
     const contextName = event?.title || analysis.event_title || 'Event';
-    const filename = eventAnalysisFilename(analysis.event_title || event?.title || 'Event');
-    // File the export onto the event (keyed on event_id), then download.
+    const filename = eventAnalysisFilename(event?.title || analysis.event_title || 'Event');
+    // Download first, then file the copy onto the event (keyed on event_id) —
+    // the local download must never wait on the Drive round-trip.
+    const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
       entityId: event?.event_id,
       contextName,
@@ -1334,8 +1543,7 @@ async function handleCreateEventPdf({ analysis, board, event, timing, coverageWa
       blob,
       recordNoun: 'event',
     });
-    downloadBlob(blob, filename);
-    analyzerExportToast(status);
+    analyzerExportToast(status, downloaded);
   } catch (err) {
     console.error('[Event Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -1384,7 +1592,8 @@ function buildEventSummary({ analysis, board, event, timing }) {
   );
 
   const children = [
-    el('div', { class: 'event-summary__eyebrow' }, 'Lifecycle position'),
+    el('div', { class: 'event-summary__eyebrow' },
+      boardEyebrow('Lifecycle position', event?.title || analysis.event_title)),
     chips,
     facts,
   ];
@@ -1405,7 +1614,10 @@ function summaryFact(label, value) {
 }
 
 // A status legend so completion is never conveyed by colour alone.
-function buildEventLegend() {
+// The shared status key. `manual` adds the "Saved playbook" entry, which only
+// the Event board can produce — the Opportunity board passes false so its key
+// never advertises a marker its rows cannot show.
+function buildEventLegend({ manual = true } = {}) {
   const item = (status, label) => el('span', { class: 'event-legend__item' },
     el('span', { class: `event-activity__icon event-activity__icon--${status}`, html: statusIcon(status) }),
     el('span', {}, label),
@@ -1415,10 +1627,12 @@ function buildEventLegend() {
     item('partial', 'Partial'),
     item('not_met', 'Not met'),
     item('no_evidence', 'No evidence'),
-    el('span', { class: 'event-legend__item' },
-      el('span', { class: 'event-legend__manual-dot' }, '✓'),
-      el('span', {}, 'Saved playbook (manual)'),
-    ),
+    manual
+      ? el('span', { class: 'event-legend__item' },
+          el('span', { class: 'event-legend__manual-dot' }, '✓'),
+          el('span', {}, 'Saved playbook (manual)'),
+        )
+      : null,
   );
 }
 
@@ -1464,6 +1678,7 @@ function buildEventActivityItem({ activity, event, descriptions }) {
       el('span', { class: 'event-owner' }, ownerLabel(activity.owner)),
       el('span', { class: `event-activity__status event-activity__status--${activity.status}` }, eventStatusLabel(activity.status)),
       activity.manual ? el('span', { class: 'event-activity__manual' }, 'Saved playbook') : null,
+      hasDetail ? disclosureCaret() : null,
     ),
   );
 
@@ -1677,7 +1892,9 @@ function notifyPartnerIfAway(job) {
 }
 function restorePartnerJob() {
   if (!partnerJob) return;
-  if (partnerJob.key && partnerJob.key.entityId) {
+  // Only pin the selector when the user hasn't picked something newer —
+  // see the note on restoreActiveJob.
+  if (partnerJob.key && partnerJob.key.entityId && !selectedPartnerId) {
     selectedPartnerId = partnerJob.key.entityId;
     const select = $('.forecast .partner-analyzer__select');
     if (select) select.value = partnerJob.key.entityId;
@@ -1702,7 +1919,7 @@ async function runPartnerAnalysis(explicitOption = null) {
   const runId = uuid('run');
   const key = makeJobKey('partner', partner.partner_id, runId);
   const label = partner.display_name || 'Partner';
-  const pill = createPill('Reading partner evidence…', { label });
+  const pill = createPill('Reading partner evidence…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
   const job = { key, label, status: 'running', controller, pill, result: null, error: null };
   partnerJob = job;
 
@@ -1729,9 +1946,14 @@ async function runPartnerAnalysis(explicitOption = null) {
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(soft('Transcripts could not be loaded, so conversation evidence may be incomplete.')),
       readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(soft('The meeting index could not be loaded, so indexed meetings may be incomplete.')),
       readSheetAsObjects(CONFIG.SHEET_PARTNER_DOCUMENTS).catch(soft('Partner documents could not be loaded, so document evidence may be incomplete.')),
-      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES).catch(() => []),
-      readSheetAsObjects(CONFIG.SHEET_OPP_DESCRIPTIONS).catch(() => []),
-      readSheetAsObjects(CONFIG.SHEET_EVENTS).catch(() => []),
+      // These two feed the DETERMINISTIC KPI strip — pipeline value, deal
+      // counts, joint events. A silent failure there is the worst kind: the
+      // board renders a confident "$0 / 0 deals", and that PDF gets filed onto
+      // the partner as if it were the truth. Route them through soft() so the
+      // board says what it could not see.
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES).catch(soft('Opportunities could not be loaded, so pipeline value and deal counts on this board are incomplete.')),
+      readSheetAsObjects(CONFIG.SHEET_OPP_DESCRIPTIONS).catch(soft('Opportunity notes could not be loaded, so deal evidence may be incomplete.')),
+      readSheetAsObjects(CONFIG.SHEET_EVENTS).catch(soft('Events could not be loaded, so joint-activity counts on this board are incomplete.')),
       readSheetAsObjects(CONFIG.SHEET_EVENT_DESCRIPTIONS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_EVENT_CONTACTS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_EVENT_PLAYBOOK).catch(() => []), // optional evidence source
@@ -1783,7 +2005,7 @@ function renderPartnerBoard({ analysis, board, kpis, health, partner, coverage }
   const banner = buildPartnerCoverage(coverage);
   if (banner) frag.appendChild(banner);
 
-  frag.appendChild(buildPartnerSummary({ analysis, board, kpis, health }));
+  frag.appendChild(buildPartnerSummary({ analysis, board, kpis, health, partner }));
   frag.appendChild(buildPartnerKpiStrip(kpis));
   frag.appendChild(buildPartnerLegend());
 
@@ -1822,8 +2044,10 @@ async function handleCreatePartnerPdf({ analysis, board, kpis, health, partner, 
       coverageWarnings: (coverage && coverage.warnings) || [],
     });
     const contextName = partner?.display_name || analysis.partner_name || 'Partner';
-    const filename = partnerAnalysisFilename(analysis.partner_name || partner?.display_name || 'Partner');
-    // File the export onto the partner (keyed on partner_id), then download.
+    const filename = partnerAnalysisFilename(partner?.display_name || analysis.partner_name || 'Partner');
+    // Download first, then file the copy onto the partner (keyed on
+    // partner_id) — the local download must never wait on the Drive round-trip.
+    const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
       entityId: partner?.partner_id,
       contextName,
@@ -1831,8 +2055,7 @@ async function handleCreatePartnerPdf({ analysis, board, kpis, health, partner, 
       blob,
       recordNoun: 'partner',
     });
-    downloadBlob(blob, filename);
-    analyzerExportToast(status);
+    analyzerExportToast(status, downloaded);
   } catch (err) {
     console.error('[Partner Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -1858,7 +2081,7 @@ function buildPartnerCoverage(coverage) {
 // completion %, confidence, the CRM tier + status (as CONTEXT), partner type +
 // region, last meaningful activity, and relationship health (separate from
 // maturity). A note surfaces a tier-vs-evidence discrepancy when present.
-function buildPartnerSummary({ analysis, board, kpis, health }) {
+function buildPartnerSummary({ analysis, board, kpis, health, partner }) {
   const confidence = String(analysis.confidence || 'low');
   const pos = resolvePartnerPosition(board);
   const furthest = resolveFurthestDemonstrated(board);
@@ -1885,7 +2108,8 @@ function buildPartnerSummary({ analysis, board, kpis, health }) {
   );
 
   const children = [
-    el('div', { class: 'event-summary__eyebrow' }, 'Operational maturity'),
+    el('div', { class: 'event-summary__eyebrow' },
+      boardEyebrow('Operational maturity', partner?.display_name || analysis.partner_name)),
     chips,
     facts,
   ];
@@ -2017,6 +2241,7 @@ function buildPartnerCriterionItem({ criterion, partner }) {
     el('span', { class: 'event-activity__label' }, criterion.label),
     el('span', { class: 'event-activity__meta' },
       el('span', { class: `event-activity__status event-activity__status--${criterion.status}` }, partnerStatusLabel(criterion.status)),
+      hasDetail ? disclosureCaret() : null,
     ),
   );
 
@@ -2585,15 +2810,18 @@ function notifyContactIfAway(job) {
 }
 function restoreContactJob() {
   if (!contactJob) return;
-  if (contactJob.partnerId) {
+  // Only pin the two selectors when the user hasn't picked someone newer —
+  // see the note on restoreActiveJob. Both are pinned together or not at all,
+  // so the pair can never end up describing two different partners.
+  if (contactJob.partnerId && !selectedContactPartnerId && !selectedContactId) {
     selectedContactPartnerId = contactJob.partnerId;
     const psel = $('.forecast .contact-analyzer__partner-select');
     if (psel) psel.value = contactJob.partnerId;
-  }
-  if (contactJob.key && contactJob.key.entityId) {
-    selectedContactId = contactJob.key.entityId;
-    const csel = $('.forecast .contact-analyzer__contact-select');
-    if (csel) { csel.replaceChildren(...contactSelectOptions(selectedContactPartnerId)); csel.value = contactJob.key.entityId; }
+    if (contactJob.key && contactJob.key.entityId) {
+      selectedContactId = contactJob.key.entityId;
+      const csel = $('.forecast .contact-analyzer__contact-select');
+      if (csel) { csel.replaceChildren(...contactSelectOptions(selectedContactPartnerId)); csel.value = contactJob.key.entityId; }
+    }
   }
   setContactAnalyzeDisabled(contactJob.status === 'running');
   if (contactJob.status === 'running') paintContactRunning();
@@ -2617,7 +2845,7 @@ async function runContactAnalysis(explicit = null) {
   const runId = uuid('run');
   const key = makeJobKey('contact', contactId, runId);
   const label = contact.name || 'Contact';
-  const pill = createPill('Researching the contact…', { label });
+  const pill = createPill('Researching the contact…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
   const job = { key, partnerId, label, status: 'running', controller, pill, result: null, error: null };
   contactJob = job;
 
@@ -2696,7 +2924,7 @@ function renderContactBrief({ brief, board, contact }) {
   // rest of the brief then lays out as a dense two-column masonry of cards
   // instead of a tall stack of full-width panels, so the whole brief fits the
   // screen the way the other three boards do.
-  frag.appendChild(buildBriefSummaryStrip(brief, board));
+  frag.appendChild(buildBriefSummaryStrip(brief, board, contact));
 
   const grid = el('div', { class: 'contact-brief__grid' });
   const add = (node) => { if (node) grid.appendChild(node); };
@@ -2736,9 +2964,15 @@ async function handleCreateContactPdf({ brief, contact, btn }) {
     // (the contact's own name) so manual uploads and this auto-attach land
     // together under one folder.
     const contextName = contact?.name || contact?.partner_name || 'Contact';
-    const filename = contactBriefFilename(brief.contact?.name || contact?.name || 'Contact');
-    // File the brief onto the contact record (keyed on contact_id — the same
-    // capability opportunities/events/partners already have), then download.
+    // The CRM contact's own name drives the filename, not the model's echo of
+    // it: the partner Contacts table finds this brief by contact_id but shows
+    // the file name, and `Account_Brief_{name}_{date}.pdf` is what a user
+    // recognizes in Drive. The brief's printed header is unaffected.
+    const filename = contactBriefFilename(contact?.name || brief.contact?.name || 'Contact');
+    // Download first, then file the brief onto the contact record (keyed on
+    // contact_id — the same capability opportunities/events/partners have).
+    // The local download must never wait on the Drive round-trip.
+    const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
       entityId: contact?.contact_id,
       contextName,
@@ -2746,8 +2980,7 @@ async function handleCreateContactPdf({ brief, contact, btn }) {
       blob,
       recordNoun: 'contact',
     });
-    downloadBlob(blob, filename);
-    analyzerExportToast(status);
+    analyzerExportToast(status, downloaded);
   } catch (err) {
     console.error('[Contact Analyzer] PDF export failed', err);
     showToast(err.message || 'Could not create the PDF', 'error');
@@ -2791,7 +3024,7 @@ function briefCallout(kind, title, text) {
 // account-maturity / coverage note as the muted summary line. Reuses the
 // shared .event-summary chrome and summaryFact() so it is visually identical
 // to the other boards' headers.
-function buildBriefSummaryStrip(brief, board) {
+function buildBriefSummaryStrip(brief, board, contact) {
   const es = brief.executive_summary || {};
   const cov = es.coverage_status || {};
   const covLevel = cov.level || 'yellow';
@@ -2820,7 +3053,11 @@ function buildBriefSummaryStrip(brief, board) {
   );
 
   const children = [
-    el('div', { class: 'event-summary__eyebrow' }, 'Account intelligence brief'),
+    // The eyebrow carries the CRM contact — the chip below carries the
+    // model's own contact line, so a mismatch between the two is visible
+    // rather than silently authoritative.
+    el('div', { class: 'event-summary__eyebrow' },
+      boardEyebrow('Account intelligence brief', contact?.name)),
     chips,
     icp,
     facts,

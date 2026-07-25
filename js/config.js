@@ -99,6 +99,13 @@ export const CONFIG = {
   SHEET_AI_CONVERSATIONS: 'AI_Conversations',
   SHEET_PARTNER_DOCUMENTS: 'Partner_Documents',
   SHEET_CUSTOM_PROMPTS: 'Custom_Prompts',
+  // The Drive-backed file store the Apps Script writes on every uploadFile —
+  // one row per attachment, keyed by entity id in its `opportunity_id` column
+  // (the backend never inspects the prefix, so opportunity / event / partner /
+  // contact attachments all live here). Named so read-only consumers can pull
+  // the whole store in ONE cached Sheets read instead of an Apps Script
+  // round-trip per record. Writes still go through the Apps Script.
+  SHEET_OPPORTUNITY_DOCUMENTS: 'Opportunity_Documents',
 
   // Support & Resources iframe URL
   SUPPORT_URL: 'https://partnerprogram.github.io/Application-Workspace/',

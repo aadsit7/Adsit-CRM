@@ -387,6 +387,14 @@
 .forecast-criterion__icon--partial { color: var(--color-warning); }
 .forecast-criterion__icon--not_met { color: var(--color-danger); }
 .forecast-criterion__icon--no_evidence { color: var(--color-text-muted); }
+/* Label over status, so a long criterion wraps in a narrow stage column
+   instead of squeezing the status off the row. */
+.forecast-criterion__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .forecast-criterion__label {
   font-size: var(--text-xs);
   line-height: 1.35;
@@ -394,7 +402,37 @@
 }
 .forecast-criterion--no_evidence .forecast-criterion__label { color: var(--color-text-muted); }
 
+/* ── Evidence disclosure caret ─────────────────────────────── */
+/* Marks a row as expandable. Shared by all three boards' evidence rows —
+   without it a collapsed row is indistinguishable from a static label and the
+   evidence behind a score is undiscoverable. Rotates on the `--open` class the
+   row's toggle already sets. */
+.evidence-caret {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: var(--space-1);
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+.forecast-criterion--open .evidence-caret,
+.event-activity--open .evidence-caret {
+  transform: rotate(180deg);
+  color: var(--color-primary);
+}
+.forecast-criterion__head:hover .evidence-caret,
+.event-activity__head:hover .evidence-caret { color: var(--color-primary); }
+
 /* ── Evidence detail ──────────────────────────────────────── */
+/* Collapsed by default: the criterion/activity rows build their evidence
+   panel with `detail.hidden = true` and toggle it from the disclosure
+   button. An author `display` declaration outranks the UA's
+   `[hidden] { display: none }` no matter the specificity, so the flex rule
+   below would keep every panel permanently open (and make `aria-expanded`
+   lie) without this companion rule. Same trap already handled for
+   .forecast-summary__picker above. Keep the two rules together. */
+.forecast-evidence[hidden] { display: none; }
 .forecast-evidence {
   padding: 0 var(--space-2) var(--space-3) calc(var(--space-2) + 26px);
   display: flex;
@@ -851,6 +889,11 @@
 }
 
 /* ── Evidence detail ──────────────────────────────────────── */
+/* Collapsed by default — see the note on .forecast-evidence[hidden].
+   This panel is shared by the Event AND Partner boards, so without the
+   companion rule every activity and every partner criterion renders
+   permanently expanded. */
+.event-evidence[hidden] { display: none; }
 .event-evidence {
   padding: 0 var(--space-2) var(--space-3) calc(var(--space-2) + 26px);
   display: flex;
