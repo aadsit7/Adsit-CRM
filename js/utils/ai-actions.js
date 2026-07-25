@@ -4,7 +4,7 @@
 // Used by both the AI Assistant chat view and the Randy voice assistant
 
 import { loadSheetData, invalidateSheetCache } from './ai.js';
-import { appendRow, updateRow, deleteRow } from '../sheets.js';
+import { appendRow, updateRow, deleteRowById, keyFieldFor } from '../sheets.js';
 
 // ── Sheet Headers (for write operations) ───────────────────────────
 export const SHEET_HEADERS = {
@@ -97,7 +97,13 @@ export async function executeAction(action) {
     if (!action.row_match || Object.keys(action.row_match).length === 0) throw new Error('No row_match specified');
     const row = findMatchingRow(rows, action.row_match);
     if (!row) throw new Error('No matching row found');
-    await deleteRow(action.sheet, row._rowIndex);
+    // row_match may name any columns, so the matched row is identified here by
+    // its own key before deleting — `rows` comes from a cache that a concurrent
+    // write can age out from under us, and a stale index deletes a bystander.
+    const keyField = keyFieldFor(action.sheet);
+    const keyValue = keyField ? row[keyField] : null;
+    if (!keyValue) throw new Error(`Cannot safely delete from ${action.sheet}: the matched row has no identifier.`);
+    await deleteRowById(action.sheet, keyField, keyValue);
   }
 
   invalidateSheetCache();

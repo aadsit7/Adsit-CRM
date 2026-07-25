@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO, parseDate, isDateInRange } from '../utils/date.js';
@@ -1085,24 +1085,27 @@ export async function openEventModal(event, container, onSaved) {
         }
       }
 
-      // Persist description changes to SHEET_EVENT_DESCRIPTIONS.
-      // Process deletes before inserts so row indices stay valid when
-      // deleting the highest-index rows first.
-      const toDelete = workingDescriptions
-        .filter(d => d._deleted && d.description_id && d._rowIndex)
-        .sort((a, b) => b._rowIndex - a._rowIndex);
+      // Persist description changes to SHEET_EVENT_DESCRIPTIONS. Each delete
+      // re-resolves its row by description_id, so the order no longer matters —
+      // this used to delete highest-index-first to keep the remaining indices
+      // valid, which only held while nothing else was writing to the sheet.
+      //
+      // missingOk because this modal stays open on failure: if a later step
+      // throws, the user hits Save again and these deletes re-run. Without it
+      // the second attempt fails on the row the first attempt already removed,
+      // and the modal can never be saved.
+      const toDelete = workingDescriptions.filter(d => d._deleted && d.description_id);
       for (const d of toDelete) {
-        if (isConfigured()) {
-          await deleteRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, d._rowIndex);
-        } else {
-          deleteDemoRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, d._rowIndex);
-        }
+        await deleteRowById(CONFIG.SHEET_EVENT_DESCRIPTIONS, 'description_id', d.description_id, { missingOk: true });
       }
 
       // Skip updates that would blank out an existing row.
       const toUpdate = workingDescriptions.filter(d =>
         !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
       );
+      // FIXME(Phase 3): still addressed by `_rowIndex`, captured when the modal
+      // opened and invalidated by the delete loop above — see the same note in
+      // admin-opportunities.js. updateRowById is the fix.
       for (const d of toUpdate) {
         const values = [
           d.description_id, eventId, data.title,
@@ -1369,11 +1372,7 @@ async function handleDelete(event) {
   if (!confirmed) return;
 
   try {
-    if (isConfigured()) {
-      await deleteRow(CONFIG.SHEET_EVENTS, event._rowIndex);
-    } else {
-      deleteDemoRow(CONFIG.SHEET_EVENTS, event._rowIndex);
-    }
+    await deleteRowById(CONFIG.SHEET_EVENTS, 'event_id', event.event_id);
     showToast('Event deleted', 'success');
     reRender();
   } catch (err) {

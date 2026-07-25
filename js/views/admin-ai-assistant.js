@@ -11,7 +11,7 @@ import { parseActions, executeAction } from '../utils/ai-actions.js';
 import { activateVoiceMode, isVoiceModeActive, stopEverything as stopVoice } from '../components/voice-widget.js';
 import { attachSpeakerButton, autoSpeak, stopTTS, createSettingsButton, isTTSEnabled, extractVoiceText, extractVoiceTextFromString, isAutoSpeakEnabled, speak, cleanTextForSpeech } from '../components/tts.js';
 import { getCurrentUser } from '../auth.js';
-import { appendRow, updateRow, deleteRow, readSheetAsObjects } from '../sheets.js';
+import { appendRow, updateRow, deleteRowById, readSheetAsObjects } from '../sheets.js';
 import { showToast } from '../components/toast.js';
 
 // ── State ──────────────────────────────────────────────────────────
@@ -226,9 +226,15 @@ async function saveConversation(isNew) {
   }
 }
 
-async function deleteConversation(convId, rowIndex) {
+async function deleteConversation(convId) {
   try {
-    await deleteRow(CONFIG.SHEET_AI_CONVERSATIONS, rowIndex);
+    // missingOk: a conversation can be listed without ever having reached the
+    // sheet. saveConversation falls back to an unsaved stub when the re-read
+    // does not find what it just appended (`saved || {...}`), which is exactly
+    // what happens with no spreadsheet configured — Custom_Prompts and
+    // AI_Conversations are not in the demo store. Dismissing that card must
+    // still work; refusing would leave it on screen with no way to remove it.
+    await deleteRowById(CONFIG.SHEET_AI_CONVERSATIONS, 'conversation_id', convId, { missingOk: true });
     conversations = conversations.filter(c => c.conversation_id !== convId);
     if (currentConversationId === convId) startNewChat();
     renderHistoryList();
@@ -307,7 +313,7 @@ function renderHistoryList(filter = '') {
     });
     card.querySelector('.ai-history-card__delete').addEventListener('click', (e) => {
       e.stopPropagation();
-      deleteConversation(conv.conversation_id, conv._rowIndex);
+      deleteConversation(conv.conversation_id);
     });
     list.appendChild(card);
   });
