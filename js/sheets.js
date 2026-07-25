@@ -376,6 +376,49 @@ export async function updateRow(sheetName, rowIndex, values) {
 }
 
 /**
+ * Write specific cells, leaving every other cell in their rows untouched.
+ *
+ * `updateRow` rewrites a whole row with USER_ENTERED, which re-interprets what
+ * it writes — a date-shaped string becomes a date, a leading `=` becomes a
+ * formula. For a surgical correction to one column that is both more damage
+ * than needed and a way to silently reformat neighbouring data, so this writes
+ * only the named cells, as RAW, in a single batch: either every cell lands or
+ * none does, so a repair can't finish half-applied.
+ *
+ * @param {string} sheetName Tab the cells live in (all updates must share it).
+ * @param {Array<{a1:string, value:*}>} cells e.g. [{ a1: 'B57', value: 'p_4' }]
+ * @returns {Promise<Object>} the API response, or {} when nothing was passed.
+ */
+export async function updateCells(sheetName, cells) {
+  const list = (cells || []).filter(c => c && c.a1);
+  if (!list.length) return {};
+
+  if (!isConfigured()) {
+    // Demo mode has no cell-level store; callers use this for repairs to real
+    // spreadsheet data, which demo data never has.
+    return {};
+  }
+
+  const base = getBaseUrl();
+  const authParam = getAuthParam();
+  const url = `${base}/values:batchUpdate${authParam ? '?' + authParam : ''}`;
+
+  const res = await writeWithAuthRetry((token) => fetch(url, {
+    method: 'POST',
+    headers: writeHeaders(token),
+    body: JSON.stringify({
+      valueInputOption: 'RAW',
+      data: list.map(c => ({ range: `${sheetName}!${c.a1}`, values: [[c.value]] })),
+    }),
+  }));
+
+  if (!res.ok) await throwWriteError(res, `Failed to update cells in ${sheetName}`);
+
+  invalidateSheetCache(sheetName);
+  return res.json();
+}
+
+/**
  * Delete a row by index.
  * Requires knowing the numeric sheet ID (gid).
  */

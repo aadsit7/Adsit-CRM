@@ -10,11 +10,12 @@
 // the JSON field `opportunityId`. We retain that field name in the
 // outgoing payload for backwards compatibility (the script doesn't
 // inspect prefixes — it just uses the value as a folder/key string).
-// Because the key is one untyped string, records of different types can
-// only stay separate if their ids differ: the app's generated ids all carry
-// a type prefix (`opp_` / `evt_` / `p_` / `pct_`) and cannot collide, but
-// legacy bare-integer partner/event ids do. See the note in
-// js/utils/analyzer-pdf-attach.js.
+// Because the key is one untyped string, records of different types stay
+// separate only if their ids differ. The app's generated ids all carry a
+// type prefix (`opp_` / `evt_` / `p_` / `pct_`); legacy partner and event
+// ids are bare integers and overlap, so those callers pass a key built by
+// `fileStoreKey()` (js/utils/file-store-keys.js) rather than the raw id.
+// This panel uses whatever `entityId` it is handed.
 // ============================================
 
 import { el } from '../utils/dom.js';
@@ -23,6 +24,7 @@ import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
+import { legacyRowBelongsTo } from '../utils/file-store-keys.js';
 
 const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.csv', '.pptx', '.png', '.jpg', '.jpeg'];
 
@@ -31,10 +33,29 @@ const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xls
  * Optional AbortSignal lets non-interactive callers (the partner contact
  * scan) bound the call instead of hanging on a wedged connection.
  */
-export async function listEntityDocuments(entityId, { signal } = {}) {
+export async function listEntityDocuments(entityId, { signal, legacy } = {}) {
   if (!entityId) return [];
   const data = await fileApiRequest({ action: 'listFiles', opportunityId: entityId }, { signal });
-  return Array.isArray(data.files) ? data.files : [];
+  const files = Array.isArray(data.files) ? data.files : [];
+  if (!legacy || !legacy.key || legacy.key === entityId) return files;
+
+  // Bridge for a record whose id predates type prefixes: its existing rows are
+  // still filed under the bare id until the one-time Setup repair moves them.
+  // Those rows are exactly the bucket another record may share, so they are
+  // filtered by folder name (legacyRowBelongsTo) rather than trusted — handing
+  // them over wholesale would BE the cross-listing bug. A failure here is
+  // non-fatal: the qualified list is still returned.
+  try {
+    const legacyData = await fileApiRequest({ action: 'listFiles', opportunityId: legacy.key }, { signal });
+    const seen = new Set(files.map(f => f && f.doc_id).filter(Boolean));
+    for (const row of (Array.isArray(legacyData.files) ? legacyData.files : [])) {
+      if (!row || (row.doc_id && seen.has(row.doc_id))) continue;
+      if (legacyRowBelongsTo(row, legacy.contextName)) files.push(row);
+    }
+  } catch (err) {
+    console.warn('[Documents] legacy attachment lookup failed', err?.message);
+  }
+  return files;
 }
 
 /**
@@ -82,6 +103,10 @@ function fileIconSvg() {
  * @param {boolean} [opts.loading] - When true, show a loading indicator
  *   inside the list area instead of the empty state. Cleared automatically
  *   on the first refresh() / addFile() call.
+ * @param {{key:string, contextName:string}} [opts.legacy] - For a record whose
+ *   id predates type prefixes: the bare key its existing attachments are still
+ *   filed under, plus the record's own name so those rows can be told apart
+ *   from another record sharing that key. Uploads always use `entityId`.
  * @returns {{ panel: HTMLElement, addFile: Function, refresh: Function, entityId: string|null }}
  */
 export function buildDocumentsPanel({
@@ -91,6 +116,7 @@ export function buildDocumentsPanel({
   onAnalyze,
   savePrompt,
   loading = false,
+  legacy,
 }) {
   const files = [...(initialFiles || [])];
   const list = el('div', { class: 'documents-list' });
@@ -352,7 +378,7 @@ export function buildDocumentsPanel({
       return;
     }
     try {
-      const fresh = await listEntityDocuments(entityId);
+      const fresh = await listEntityDocuments(entityId, { legacy });
       files.splice(0, files.length, ...fresh);
     } catch (err) {
       console.warn('documents panel refresh failed', err);
