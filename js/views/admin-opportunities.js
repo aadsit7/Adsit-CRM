@@ -90,15 +90,7 @@ export async function render(container) {
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
-    const [opportunities, partners, events] = await Promise.all([
-      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
-      readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-      readSheetAsObjects(CONFIG.SHEET_EVENTS),
-    ]);
-    allBasePartners = filterPartners(partners);
-    allBaseOpps = filterOpportunities(opportunities);
-    cachedPartners = allBasePartners;
-    cachedEvents = events;
+    await loadOpportunityData();
     renderWithTypeFilter(container);
 
     // Register global shortcut handler for Alt+O (new opportunity)
@@ -117,6 +109,21 @@ export async function render(container) {
       el('div', { class: 'empty-state__description' }, err.message)
     ));
   }
+}
+
+// Pull the sheets this view renders from into module state. Split out of
+// render() so a re-render after a mutation can refresh them too — see
+// reRender().
+async function loadOpportunityData() {
+  const [opportunities, partners, events] = await Promise.all([
+    readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+    readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+    readSheetAsObjects(CONFIG.SHEET_EVENTS),
+  ]);
+  allBasePartners = filterPartners(partners);
+  allBaseOpps = filterOpportunities(opportunities);
+  cachedPartners = allBasePartners;
+  cachedEvents = events;
 }
 
 function renderWithTypeFilter(container) {
@@ -140,9 +147,19 @@ function renderWithTypeFilter(container) {
   renderView(container, cachedOpps, filterBar);
 }
 
+// Re-render AFTER re-reading the sheet — see the note on admin-partners.js's
+// reRender. Redrawing the module-level `allBaseOpps` without refetching left
+// every deal below a deleted one carrying a `_rowIndex` one too high for the
+// rest of the session, so the next kanban drop, inline field edit or modal save
+// wrote a full 13-column row over an unrelated opportunity — annihilating it
+// and leaving two rows sharing one opportunity_id.
 function reRender() {
   const viewContainer = document.getElementById('view-container');
-  renderWithTypeFilter(viewContainer);
+  return loadOpportunityData()
+    .then(() => renderWithTypeFilter(viewContainer))
+    .catch((err) => {
+      showToast(err.message || 'Saved, but the list could not be refreshed. Reload the page.', 'error');
+    });
 }
 
 function getPartnerName(partnerId) {
@@ -780,7 +797,11 @@ async function saveOppRow(opp) {
     opp.description || '',
     opp.created_at || nowISO(),
     nowISO(),
-    '',
+    // `notes` — the stringified JSON array Randy appends to (see ai.js). This
+    // slot was hardcoded '', so every inline field edit wiped the deal's entire
+    // note history even when it wrote to the right row. Carry the value through
+    // like every other column this function does not edit.
+    opp.notes || '',
     opp.lead_source || 'salesperson',
   ];
   opp.updated_at = values[10];
@@ -2171,7 +2192,9 @@ export async function openOppModal(opp, container, onSaved) {
           opportunityId, data.partner_id, data.deal_name, data.customer_name,
           data.deal_value, data.status || 'Registered', data.stage,
           data.expected_close, latestDescText, createdAt, nowISO(),
-          '', leadSource,
+          // `notes` — carried through, not blanked. This form does not edit it,
+          // and hardcoding '' here destroyed Randy's note history on every save.
+          opp.notes || '', leadSource,
         ];
 
         if (isConfigured()) {

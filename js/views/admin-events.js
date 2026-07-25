@@ -74,14 +74,7 @@ export async function render(container, params) {
   if (params && params.playbook === '1') openPlaybookPanel();
 
   try {
-    const [events, partners, opportunities] = await Promise.all([
-      readSheetAsObjects(CONFIG.SHEET_EVENTS),
-      readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
-    ]);
-    allBasePartners = filterPartners(partners);
-    allBaseEvents = filterEvents(events);
-    allBaseOpps = opportunities || [];
+    await loadEventData();
     renderWithTypeFilter(container);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
@@ -89,6 +82,20 @@ export async function render(container, params) {
       el('div', { class: 'empty-state__description' }, err.message)
     ));
   }
+}
+
+// Pull the sheets this view renders from into module state. Split out of
+// render() so a re-render after a mutation can refresh them too — see
+// reRender().
+async function loadEventData() {
+  const [events, partners, opportunities] = await Promise.all([
+    readSheetAsObjects(CONFIG.SHEET_EVENTS),
+    readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+    readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+  ]);
+  allBasePartners = filterPartners(partners);
+  allBaseEvents = filterEvents(events);
+  allBaseOpps = opportunities || [];
 }
 
 function renderWithTypeFilter(container) {
@@ -113,9 +120,19 @@ function renderWithTypeFilter(container) {
   renderView(container, cachedEvents, cachedOpps, filterBar);
 }
 
+// Re-render AFTER re-reading the sheet — see the note on admin-partners.js's
+// reRender. Redrawing the module-level `allBaseEvents` without refetching left
+// every event below a deleted one carrying a `_rowIndex` one too high for the
+// rest of the session, so the next kanban drop or modal save wrote a full row
+// over an unrelated event. It also meant a deleted event stayed on screen and a
+// drag never visibly settled into its new column.
 function reRender() {
   const viewContainer = document.getElementById('view-container');
-  renderWithTypeFilter(viewContainer);
+  return loadEventData()
+    .then(() => renderWithTypeFilter(viewContainer))
+    .catch((err) => {
+      showToast(err.message || 'Saved, but the list could not be refreshed. Reload the page.', 'error');
+    });
 }
 
 function getPartnerName(partnerId) {
