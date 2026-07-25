@@ -40,16 +40,16 @@ all four entity types attach and list through the **exact same call**, even
 though every entity shares the single backing sheet. **Adding contacts required
 no Apps Script change.**
 
-> ⚠️ **Separation comes from the ids, not from the code.** The store keys on one
-> untyped string and `doListFiles` matches it with a loose `==`, so two records
-> of different types that share an id value share a document list. Every id this
-> app generates carries a type prefix (`opp_` / `evt_` / `p_` / `pct_`), so
-> anything created in-app is safe. **Legacy rows seeded before that convention
-> are not**: in the live sheet, partners are numbered `1`–`9` and events `1`–`8`,
-> so a Partner Analysis PDF filed against partner `6` also lists under event `6`.
-> Contacts are unaffected (all `pct_*`). The fix is at the data level — give
-> those legacy rows prefixed ids — because re-keying on upload would orphan
-> every attachment already filed under the bare id.
+> **Separation is enforced by `fileStoreKey()`.** The store keys on one untyped
+> string and `doListFiles` matches it with a loose `==`, so two records of
+> different types that share an id value would share a document list. Ids this
+> app generates carry a type prefix (`opp_` / `evt_` / `p_` / `pct_`) and cannot
+> collide, but rows seeded before that convention can: partners numbered `1`–`9`
+> and events `1`–`8` overlap. Partner and event attachments are therefore keyed
+> through `fileStoreKey()`
+> ([FILE_STORE_KEYS.md](FILE_STORE_KEYS.md)), which qualifies a bare id and
+> leaves a prefixed one untouched. Attachments filed before that are moved
+> across by the one-time **Setup → Attachment Keys** repair.
 
 ## The flow
 

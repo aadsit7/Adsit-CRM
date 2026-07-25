@@ -72,6 +72,9 @@ import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-ana
 import { attachAnalyzerPdf } from '../utils/analyzer-pdf-attach.js';
 // …and keep those exports out of the evidence base they were derived from.
 import { withoutAnalyzerExports } from '../utils/analyzer-export-files.js';
+// Partners and events share one untyped file-store namespace; this qualifies
+// the key so their attachments can never land in the same bucket.
+import { fileStoreKey } from '../utils/file-store-keys.js';
 
 // ── Module state ─────────────────────────────────────────────────────
 // This state deliberately OUTLIVES the view. The analysis runs as a
@@ -1537,7 +1540,9 @@ async function handleCreateEventPdf({ analysis, board, event, timing, coverageWa
     // the local download must never wait on the Drive round-trip.
     const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
-      entityId: event?.event_id,
+      // Type-qualified so this export cannot land in the bucket a legacy
+      // partner with the same numeric id is using (js/utils/file-store-keys.js).
+      entityId: fileStoreKey('event', event?.event_id),
       contextName,
       filename,
       blob,
@@ -2049,7 +2054,9 @@ async function handleCreatePartnerPdf({ analysis, board, kpis, health, partner, 
     // partner_id) — the local download must never wait on the Drive round-trip.
     const downloaded = downloadBlob(blob, filename);
     const status = await autoAttachAnalyzerPdf({
-      entityId: partner?.partner_id,
+      // Type-qualified so this export cannot land in the bucket a legacy event
+      // with the same numeric id is using (js/utils/file-store-keys.js).
+      entityId: fileStoreKey('partner', partner?.partner_id),
       contextName,
       filename,
       blob,

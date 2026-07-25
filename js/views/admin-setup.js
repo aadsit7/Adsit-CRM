@@ -3,12 +3,18 @@
 // ============================================
 
 import { CONFIG, getRuntimeConfig, setRuntimeConfig } from '../config.js';
-import { isConfigured, testConnection, initializeSheet, seedSheetData, syncHeaders, loadCustomPrompts, saveCustomPrompt, deleteCustomPrompt, saveReorderedPrompts } from '../sheets.js';
+import { isConfigured, testConnection, initializeSheet, seedSheetData, syncHeaders, loadCustomPrompts, saveCustomPrompt, deleteCustomPrompt, saveReorderedPrompts, readSheetAsObjects, readSheet, updateCells } from '../sheets.js';
 import { el, mount } from '../utils/dom.js';
 import { setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { syncAiKeyFromBackend } from '../utils/file-api.js';
 import { AI_PROVIDERS, normalizeProvider, providerLabel } from '../utils/ai-providers.js';
+import {
+  planDocumentKeyMigration,
+  resolveDocumentKeyWrites,
+  documentKeyColumnLetter,
+  describeDocumentKeyPlan,
+} from '../utils/file-store-keys.js';
 
 export const title = 'Setup';
 
@@ -63,6 +69,17 @@ export async function render(container) {
   const initBtn = el('button', { class: 'btn btn--success', onClick: handleInit }, 'Initialize Sheet');
   const syncBtn = el('button', { class: 'btn btn--secondary', onClick: handleSync }, 'Sync Headers');
   const seedBtn = el('button', { class: 'btn btn--secondary', onClick: handleSeed }, 'Seed Demo Data');
+
+  // --- Attachment keys (legacy id repair) ---
+  const docKeyReport = el('div', { class: 'form-hint', style: { marginTop: 'var(--space-3)' } },
+    'Click Check Attachments to see whether any need moving.');
+  const docKeyCheckBtn = el('button', { class: 'btn btn--secondary', onClick: handleDocKeyCheck }, 'Check Attachments');
+  const docKeyApplyBtn = el('button', {
+    class: 'btn btn--success', onClick: handleDocKeyApply, disabled: true,
+  }, 'Move Attachments');
+  // The plan the report is currently describing. Apply refuses to run on
+  // anything the admin has not seen.
+  let docKeyPlan = null;
 
   const content = el('div', { class: 'setup-page' },
     // Header section
@@ -134,6 +151,25 @@ export async function render(container) {
       el('div', { class: 'form-hint', style: { marginTop: 'var(--space-3)' } },
         'Initialize creates the 3 tabs with headers. Seed populates them with sample data. You must be logged in with Google SSO for these to work.'
       )
+    ),
+
+    // Attachment keys — one-time repair for records created before ids
+    // carried a type prefix. See js/utils/file-store-keys.js.
+    el('div', { class: 'setup-card' },
+      el('h3', { class: 'setup-card__title' }, 'Attachment Keys'),
+      el('p', { class: 'setup-card__description' },
+        'Every attachment is filed under one record id. Partners and events created before ids '
+        + 'carried a type prefix are numbered from 1, so partner 4 and event 4 were filing into '
+        + 'the same bucket and each could see the other’s documents. This moves those '
+        + 'attachments onto the record they actually belong to.'
+      ),
+      el('p', { class: 'setup-card__description', style: { marginTop: '6px' } },
+        'Check first — nothing is written until you press Move. Only the id cell changes; file '
+        + 'names, links and dates are untouched, and Drive itself is not modified. Safe to run '
+        + 'again: a second run finds nothing to do.'
+      ),
+      el('div', { class: 'setup-actions' }, docKeyCheckBtn, docKeyApplyBtn),
+      docKeyReport,
     ),
 
     // AI Assistant Presets
@@ -299,6 +335,108 @@ export async function render(container) {
     } finally {
       syncBtn.disabled = false;
       syncBtn.textContent = 'Sync Headers';
+    }
+  }
+
+  // ── Attachment keys ────────────────────────────────────────────────
+  // Read the sheet and everything needed to decide who each attachment belongs
+  // to. Shared by the check and by the re-verification the apply does.
+  async function readDocKeyInputs() {
+    const [documentRows, partners, events, opportunities, contacts] = await Promise.all([
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS, { forceRefresh: true }),
+      readSheetAsObjects(CONFIG.SHEET_PARTNERS, { forceRefresh: true }),
+      readSheetAsObjects(CONFIG.SHEET_EVENTS, { forceRefresh: true }),
+      // Read only so an id one of these claims makes a row ambiguous rather
+      // than being assumed to be a partner's.
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES).catch(() => []),
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(() => []),
+    ]);
+    return { documentRows, partners, events, opportunities, contacts };
+  }
+
+  // Read-only: builds the plan and shows exactly which rows would move.
+  async function handleDocKeyCheck() {
+    docKeyCheckBtn.disabled = true;
+    docKeyCheckBtn.textContent = 'Checking...';
+    docKeyApplyBtn.disabled = true;
+    docKeyPlan = null;
+    try {
+      const inputs = await readDocKeyInputs();
+      docKeyPlan = planDocumentKeyMigration(inputs);
+      renderDocKeyPlan(docKeyPlan);
+      docKeyApplyBtn.disabled = docKeyPlan.changes.length === 0;
+    } catch (err) {
+      docKeyPlan = null;
+      docKeyReport.replaceChildren(el('span', {}, `Could not read the attachment list: ${err.message}`));
+    } finally {
+      docKeyCheckBtn.disabled = false;
+      docKeyCheckBtn.textContent = 'Check Attachments';
+    }
+  }
+
+  function renderDocKeyPlan(plan, stale = []) {
+    const lines = [el('div', { style: { fontWeight: '600' } }, describeDocumentKeyPlan(plan))];
+
+    for (const c of plan.changes) {
+      lines.push(el('div', { style: { marginTop: '4px' } },
+        `• ${c.fileName || '(unnamed file)'} → ${c.entityType} “${c.entityLabel}” (${c.from} → ${c.to})`));
+    }
+    // Anything the plan refuses to guess at is listed just as loudly, because
+    // it is the part that still needs a human.
+    for (const a of plan.ambiguous) {
+      lines.push(el('div', { style: { marginTop: '4px', fontWeight: '600' } },
+        `• LEFT ALONE — ${a.fileName || '(unnamed file)'} (id ${a.key}, folder “${a.folder}”): ${a.reason}`));
+    }
+    for (const s of stale) {
+      lines.push(el('div', { style: { marginTop: '4px', fontWeight: '600' } },
+        `• NOT WRITTEN — ${s.fileName || '(unnamed file)'}: ${s.reason}`));
+    }
+    docKeyReport.replaceChildren(...lines);
+  }
+
+  async function handleDocKeyApply() {
+    if (!docKeyPlan || !docKeyPlan.changes.length) return;
+
+    docKeyApplyBtn.disabled = true;
+    docKeyApplyBtn.textContent = 'Moving...';
+    try {
+      // Re-read and re-verify before writing a single cell. Removing an
+      // attachment deletes its ROW, shifting everything below it up — so the
+      // row numbers behind the preview are only trustworthy against the sheet
+      // as it is at this instant. Each change is located by its doc_id and
+      // written only if that row still holds the key the plan expected.
+      const inputs = await readDocKeyInputs();
+      const fresh = planDocumentKeyMigration(inputs);
+      const headerRow = (await readSheet(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS))[0] || [];
+      const { updates, stale } = resolveDocumentKeyWrites(
+        fresh, inputs.documentRows, documentKeyColumnLetter(headerRow),
+      );
+
+      if (stale.length || !updates.length) {
+        // Something moved (or the sheet's layout is not what we expect).
+        // Write nothing — a partial or misaimed write is far worse than
+        // asking for another click.
+        docKeyPlan = fresh;
+        renderDocKeyPlan(fresh, stale);
+        showToast('The attachment list changed — nothing was written. Review and run Check again.', 'error');
+        docKeyApplyBtn.disabled = fresh.changes.length === 0;
+        return;
+      }
+
+      await updateCells(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS, updates);
+      showToast(
+        `Moved ${updates.length} attachment${updates.length === 1 ? '' : 's'} onto the right record`,
+        'success',
+      );
+      // Re-check from the sheet rather than trusting the write: the report now
+      // reflects what is actually stored, and a clean second read is the proof
+      // the repair landed.
+      await handleDocKeyCheck();
+    } catch (err) {
+      showToast(err.message || 'Could not move the attachments', 'error');
+      docKeyApplyBtn.disabled = false;
+    } finally {
+      docKeyApplyBtn.textContent = 'Move Attachments';
     }
   }
 

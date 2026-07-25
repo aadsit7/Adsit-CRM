@@ -34,6 +34,7 @@ import {
   indexContactAnalyzerPdfs,
   findContactAnalyzerPdf,
 } from '../utils/analyzer-export-files.js';
+import { fileStoreKey, legacyFileStoreKey } from '../utils/file-store-keys.js';
 import {
   LEADCHECK_FRESH_DAYS,
   NO_DIRECT_REPORTS_NOTE,
@@ -306,7 +307,18 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
  */
 function buildPartnerDocumentsSection(partner) {
   const docsHandle = buildDocumentsPanel({
-    entityId: partner.partner_id,
+    // Type-qualified: partners and events share one untyped file-store
+    // namespace, and legacy rows of both are numbered from 1 (see
+    // js/utils/file-store-keys.js). A partner id the app generated is already
+    // prefixed and keys exactly as before.
+    entityId: fileStoreKey('partner', partner.partner_id),
+    // Until the one-time Setup repair runs, this partner's existing files are
+    // still under its bare id — matched by folder name so an event sharing
+    // that id cannot leak in.
+    legacy: {
+      key: legacyFileStoreKey('partner', partner.partner_id),
+      contextName: partner.display_name || '',
+    },
     // Drive folder name for this partner's uploads (analogous to the customer
     // name for opportunities and the title for events).
     getContextName: () => partner.display_name || '',
@@ -825,7 +837,15 @@ async function handleScanContacts(partner, btn) {
     // ── Stage 1: attachments (Drive files) ──────────────────────────
     let files = [];
     try {
-      files = await listEntityDocuments(partner.partner_id, { signal: scanTimeoutSignal(SCAN_LIST_FILES_TIMEOUT_MS) });
+      files = await listEntityDocuments(fileStoreKey('partner', partner.partner_id), {
+        signal: scanTimeoutSignal(SCAN_LIST_FILES_TIMEOUT_MS),
+        // Include attachments still filed under the bare id, so a scan run
+        // before the Setup repair does not silently skip them.
+        legacy: {
+          key: legacyFileStoreKey('partner', partner.partner_id),
+          contextName: partner.display_name || '',
+        },
+      });
     } catch (err) {
       warnings.push(`Could not list attachments: ${err.message}`);
     }

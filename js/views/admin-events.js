@@ -15,6 +15,7 @@ import { filterPartners, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { stripHtml, ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
+import { fileStoreKey, legacyFileStoreKey } from '../utils/file-store-keys.js';
 import {
   buildDescriptionsPanel,
   isDescriptionEmpty,
@@ -1137,7 +1138,17 @@ export async function openEventModal(event, container, onSaved) {
   // background (see refresh() call after openModal) so the Apps Script
   // round-trip doesn't block the modal from appearing.
   const docsHandle = buildDocumentsPanel({
-    entityId: isEdit ? event.event_id : null,
+    // Type-qualified: events and partners share one untyped file-store
+    // namespace, and legacy rows of both are numbered from 1 (see
+    // js/utils/file-store-keys.js). An event id the app generated is already
+    // prefixed and keys exactly as before.
+    entityId: isEdit ? fileStoreKey('event', event.event_id) : null,
+    // Until the one-time Setup repair runs, this event's existing files are
+    // still under its bare id — matched by folder name so a partner sharing
+    // that id cannot leak in.
+    legacy: isEdit
+      ? { key: legacyFileStoreKey('event', event.event_id), contextName: event.title || '' }
+      : undefined,
     getContextName: () => {
       const input = form.querySelector('[name="title"]');
       return (input && input.value) || (isEdit ? (event.title || '') : '');
