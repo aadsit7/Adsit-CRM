@@ -604,7 +604,7 @@ export async function render(container) {
         deletePresetBtn.disabled = true;
         deletePresetBtn.textContent = '...';
         try {
-          await deleteCustomPrompt(preset._rowIndex);
+          await deleteCustomPrompt(preset.prompt_id);
           showToast('Preset deleted', 'success');
           card.remove();
           refreshAddBtn();

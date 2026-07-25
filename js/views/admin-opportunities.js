@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, $, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO } from '../utils/date.js';
@@ -1183,9 +1183,12 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
         actionsEl.appendChild(standardizeBtn);
       }
 
-      // Inline Edit/Delete — only for sheet-backed descriptions with a row index.
+      // Inline Edit/Delete — only for sheet-backed descriptions. Gated on the
+      // id rather than on `_rowIndex` because that is what the delete now
+      // needs: a hand-entered row with a blank description_id would otherwise
+      // render an enabled Delete whose handler can only ever fail.
       // Hidden in selection mode (not rendered at all).
-      if (!selectionMode && desc._rowIndex) {
+      if (!selectionMode && desc.description_id) {
         const editBtn = el('button', {
           class: 'row-action-btn',
           type: 'button',
@@ -1221,11 +1224,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
             );
             if (!confirmed) return;
             try {
-              if (isConfigured()) {
-                await deleteRow(CONFIG.SHEET_OPP_DESCRIPTIONS, desc._rowIndex);
-              } else {
-                deleteDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, desc._rowIndex);
-              }
+              await deleteRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', desc.description_id);
               cardRow.remove();
               if (onDescriptionDeleted) onDescriptionDeleted(idx);
               showToast('Description removed', 'success');
@@ -2220,18 +2219,18 @@ export async function openOppModal(opp, container, onSaved) {
         }
       }
 
-      // Persist description changes to SHEET_OPP_DESCRIPTIONS.
-      // Process deletes before inserts so row indices stay valid when
-      // deleting the highest-index rows first.
-      const toDelete = workingDescriptions
-        .filter(d => d._deleted && d.description_id && d._rowIndex)
-        .sort((a, b) => b._rowIndex - a._rowIndex);
+      // Persist description changes to SHEET_OPP_DESCRIPTIONS. Each delete
+      // re-resolves its row by description_id, so the order no longer matters —
+      // this used to delete highest-index-first to keep the remaining indices
+      // valid, which only held while nothing else was writing to the sheet.
+      //
+      // missingOk because this modal stays open on failure: if a later step
+      // throws, the user hits Save again and these deletes re-run. Without it
+      // the second attempt fails on the row the first attempt already removed,
+      // and the modal can never be saved.
+      const toDelete = workingDescriptions.filter(d => d._deleted && d.description_id);
       for (const d of toDelete) {
-        if (isConfigured()) {
-          await deleteRow(CONFIG.SHEET_OPP_DESCRIPTIONS, d._rowIndex);
-        } else {
-          deleteDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, d._rowIndex);
-        }
+        await deleteRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', d.description_id, { missingOk: true });
       }
 
       // Skip updates that would blank out an existing row. This matches
@@ -2240,6 +2239,16 @@ export async function openOppModal(opp, container, onSaved) {
       const toUpdate = workingDescriptions.filter(d =>
         !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
       );
+      // FIXME(Phase 3): this loop is still addressed by `_rowIndex`, captured
+      // when the modal opened — which the delete loop above has just
+      // invalidated. Deleting one description and editing another in the same
+      // save writes the edit over the wrong row, and because the row carries
+      // its own id in column A that also creates a DUPLICATE description_id,
+      // which deleteRowById then refuses to touch. Descriptions added by the
+      // document-analysis flow are worse still: they have no `_rowIndex` at
+      // all, so the range comes out as `Aundefined:Fundefined`. The fix is
+      // updateRowById(sheet, 'description_id', d.description_id, values) —
+      // deliberately left for Phase 3 rather than half-converted here.
       for (const d of toUpdate) {
         const values = [
           d.description_id, opportunityId, data.deal_name,
@@ -2494,11 +2503,7 @@ async function handleDelete(opp) {
   if (!confirmed) return;
 
   try {
-    if (isConfigured()) {
-      await deleteRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex);
-    } else {
-      deleteDemoRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex);
-    }
+    await deleteRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id);
     showToast('Opportunity deleted', 'success');
     reRender();
   } catch (err) {
@@ -2537,8 +2542,9 @@ export const fileApiRequest = fileApiRequestImpl;
  */
 export const __inlineRowActionsInternals = {
   // Returns true when the inline Edit/Delete buttons should be rendered on a description row.
+  // Mirrors the production gate above — keep the two in step.
   shouldShowDescriptionActions: (desc, selectionMode) =>
-    !selectionMode && !!desc._rowIndex,
+    !selectionMode && !!desc.description_id,
 
   // Column values array sent to updateRow for an immediate description save.
   buildDescriptionUpdateValues: (desc, opp) => [
@@ -2558,11 +2564,7 @@ export const __inlineRowActionsInternals = {
         'Are you sure you want to remove this description? This cannot be undone.',
       );
       if (!confirmed) return;
-      if (deps.isConfigured()) {
-        await deps.deleteRow(deps.SHEET_OPP_DESCRIPTIONS, desc._rowIndex);
-      } else {
-        deps.deleteDemoRow(deps.SHEET_OPP_DESCRIPTIONS, desc._rowIndex);
-      }
+      await deps.deleteRowById(deps.SHEET_OPP_DESCRIPTIONS, 'description_id', desc.description_id);
       cardRow.remove();
       if (onDescriptionDeleted) onDescriptionDeleted(idx);
       deps.showToast('Description removed', 'success');

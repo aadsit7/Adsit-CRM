@@ -114,8 +114,8 @@ test('inline action buttons shown for sheet-backed description in normal mode', 
 });
 
 // ---- Test 2 ---------------------------------------------------------------
-// Delete description: confirmDialog=true → deleteRow called, callback fired, row removed.
-test('description delete handler calls deleteRow and onDescriptionDeleted when confirmed', async () => {
+// Delete description: confirmDialog=true → the row is deleted BY ID, callback fired, row removed.
+test('description delete handler deletes by description_id and fires onDescriptionDeleted', async () => {
   const desc = { description_id: 'dsc_2', _rowIndex: 7 };
   const SHEET = 'OPP_DESCRIPTIONS';
   const cardRow = { remove: mock.fn() };
@@ -124,9 +124,7 @@ test('description delete handler calls deleteRow and onDescriptionDeleted when c
 
   const deps = {
     confirmDialog: mock.fn(async () => true),
-    isConfigured: () => true,
-    deleteRow: mock.fn(async () => {}),
-    deleteDemoRow: mock.fn(),
+    deleteRowById: mock.fn(async () => {}),
     SHEET_OPP_DESCRIPTIONS: SHEET,
     showToast: mock.fn(),
   };
@@ -135,16 +133,16 @@ test('description delete handler calls deleteRow and onDescriptionDeleted when c
   await handler();
 
   assert.equal(deps.confirmDialog.mock.calls.length, 1, 'confirmDialog should be called once');
-  assert.equal(deps.deleteRow.mock.calls.length, 1, 'deleteRow should be called once');
-  assert.equal(deps.deleteRow.mock.calls[0].arguments[0], SHEET, 'deleteRow sheet arg correct');
-  assert.equal(deps.deleteRow.mock.calls[0].arguments[1], 7, 'deleteRow rowIndex arg correct');
+  assert.equal(deps.deleteRowById.mock.calls.length, 1, 'the delete should be issued once');
+  assert.deepEqual(deps.deleteRowById.mock.calls[0].arguments, [SHEET, 'description_id', 'dsc_2'],
+    'addressed by description_id — never by the _rowIndex captured when the card was drawn');
   assert.equal(cardRow.remove.mock.calls.length, 1, 'cardRow.remove should be called');
   assert.equal(onDescriptionDeleted.mock.calls.length, 1, 'onDescriptionDeleted should be called');
   assert.equal(deletedIdx, 2, 'onDescriptionDeleted should receive the correct index');
 });
 
 // ---- Test 3 ---------------------------------------------------------------
-// Delete description: confirmDialog=false → nothing happens (deleteRow NOT called).
+// Delete description: confirmDialog=false → nothing happens (no delete issued).
 test('description delete handler does nothing when user cancels confirmation', async () => {
   const desc = { description_id: 'dsc_3', _rowIndex: 9 };
   const cardRow = { remove: mock.fn() };
@@ -152,9 +150,7 @@ test('description delete handler does nothing when user cancels confirmation', a
 
   const deps = {
     confirmDialog: mock.fn(async () => false),
-    isConfigured: () => true,
-    deleteRow: mock.fn(async () => {}),
-    deleteDemoRow: mock.fn(),
+    deleteRowById: mock.fn(async () => {}),
     SHEET_OPP_DESCRIPTIONS: 'OPP_DESCRIPTIONS',
     showToast: mock.fn(),
   };
@@ -163,7 +159,7 @@ test('description delete handler does nothing when user cancels confirmation', a
   await handler();
 
   assert.equal(deps.confirmDialog.mock.calls.length, 1, 'confirmDialog should be called once');
-  assert.equal(deps.deleteRow.mock.calls.length, 0, 'deleteRow should NOT be called when cancelled');
+  assert.equal(deps.deleteRowById.mock.calls.length, 0, 'no delete should be issued when cancelled');
   assert.equal(cardRow.remove.mock.calls.length, 0, 'cardRow.remove should NOT be called');
   assert.equal(onDescriptionDeleted.mock.calls.length, 0, 'onDescriptionDeleted should NOT be called');
 });
@@ -207,16 +203,29 @@ test('inline action buttons hidden when selectionMode is active', () => {
 });
 
 // ---- Test 6 ---------------------------------------------------------------
-// Descriptions without a sheet row index (legacy / unsaved): no inline buttons.
-// This also covers the Edit-all modal separation — the edit modal's descriptionCard
-// components never produce .row-action-btn elements; the inline buttons only exist
-// in buildDetailsDescriptionsSection which guards on desc._rowIndex.
-test('inline action buttons hidden for descriptions without a sheet row index', () => {
-  const legacyDesc = { description_text: 'some text' }; // no _rowIndex, no description_id
+// Unsaved descriptions get no inline buttons. The gate is the description_id,
+// not the _rowIndex it used to be: the delete now addresses the row by that id,
+// so gating on anything else can render a Delete button whose handler is
+// guaranteed to fail. Unsaved cards carry a _tempId and no id (see
+// descriptions-panel.js), so they are still correctly excluded.
+test('inline action buttons hidden for descriptions that are not in the sheet', () => {
+  const legacyDesc = { description_text: 'some text' }; // never persisted
   assert.equal(shouldShowDescriptionActions(legacyDesc, false), false,
-    'shouldShowDescriptionActions should return false when desc._rowIndex is absent');
+    'no description_id — nothing to address a delete with');
 
-  const tempDesc = { description_id: 'dsc_6', _tempId: 'tmp_1' }; // _isNew desc, no _rowIndex
+  const tempDesc = { _tempId: 'tmp_1', _isNew: true, description_text: 'draft' };
   assert.equal(shouldShowDescriptionActions(tempDesc, false), false,
-    'shouldShowDescriptionActions should return false for an unsaved description with no _rowIndex');
+    'an unsaved card is removed locally, not deleted from the sheet');
+});
+
+// A description appended DURING this session — the document-analysis flow — has
+// a real id and a real sheet row but never gets a _rowIndex. The old
+// _rowIndex gate hid its Delete button, which is why deleting one used to
+// leave the sheet row orphaned.
+test('inline action buttons shown for a description appended during this session', () => {
+  const analyzed = { description_id: 'dsc_7', description_text: 'from a document' };
+  assert.equal(shouldShowDescriptionActions(analyzed, false), true,
+    'it is in the sheet and addressable, so it must be deletable');
+  assert.equal(shouldShowDescriptionActions(analyzed, /* selectionMode= */ true), false,
+    'still hidden in selection mode');
 });

@@ -481,9 +481,22 @@ export async function updateRowById(sheetName, idField, idValue, values, { expec
 /**
  * Delete the row identified by `idField`/`idValue`. Refuses rather than
  * deleting an unidentified row — see findRowById.
+ *
+ * Pass `{ missingOk: true }` when the goal is that the row not exist, rather
+ * than that this call be the one to remove it. A delete that runs twice — a
+ * retried batch, a double-click — should not fail the second time just because
+ * the first succeeded. This deliberately does NOT extend to the duplicate-id
+ * case: two rows sharing an id still refuses, because that is a sheet that
+ * needs a human, not a delete that already happened.
  */
-export async function deleteRowById(sheetName, idField, idValue) {
-  const row = await findRowById(sheetName, idField, idValue);
+export async function deleteRowById(sheetName, idField, idValue, { missingOk = false } = {}) {
+  let row;
+  try {
+    row = await findRowById(sheetName, idField, idValue);
+  } catch (err) {
+    if (missingOk && err.code === 'ROW_ID_NOT_RESOLVED' && /no longer in/.test(err.message)) return null;
+    throw err;
+  }
   return deleteRow(sheetName, row._rowIndex);
 }
 
@@ -608,6 +621,22 @@ const SHEET_HEADERS = {
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
   [CONFIG.SHEET_MEETING_INDEX]: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
 };
+
+/**
+ * The name of the column that identifies a row in `sheetName`, or null when the
+ * sheet has none.
+ *
+ * Every sheet here happens to put its identifier first, but that is a
+ * convention rather than a guarantee, so this checks the `_id` suffix instead
+ * of trusting position. Callers that know their sheet should pass the field
+ * name directly to findRowById/updateRowById/deleteRowById; this exists for the
+ * ones whose sheet is only known at runtime — see applyAction in
+ * utils/ai-actions.js, where Randy names the sheet.
+ */
+export function keyFieldFor(sheetName) {
+  const first = SHEET_HEADERS[sheetName]?.[0];
+  return typeof first === 'string' && first.endsWith('_id') ? first : null;
+}
 
 /**
  * Initialize the Google Sheet with the 3 required tabs and header rows.
@@ -835,8 +864,13 @@ export async function saveCustomPrompt(promptId, label, icon, instructions, rowI
   return appendRow(CONFIG.SHEET_CUSTOM_PROMPTS, row);
 }
 
-export async function deleteCustomPrompt(rowIndex) {
-  return deleteRow(CONFIG.SHEET_CUSTOM_PROMPTS, rowIndex);
+/**
+ * Delete a saved prompt by its id. Takes the id rather than a row number
+ * because the Setup screen holds a list read when the tab was opened, and
+ * deleting one prompt shifts every prompt below it.
+ */
+export async function deleteCustomPrompt(promptId) {
+  return deleteRowById(CONFIG.SHEET_CUSTOM_PROMPTS, 'prompt_id', promptId);
 }
 
 export async function saveReorderedPrompts(orderedPresets) {

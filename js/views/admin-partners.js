@@ -2,7 +2,7 @@
 // Admin Partner Management View
 // ============================================
 
-import { readSheetAsObjects, appendRow, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { sha256 } from '../utils/hash.js';
 import { el, mount, uuid, $, debounce, formatCurrency, collapsibleSection } from '../utils/dom.js';
@@ -364,11 +364,7 @@ async function handleDelete(partner) {
   if (!confirmed) return;
 
   try {
-    if (isConfigured()) {
-      await deleteRow(CONFIG.SHEET_PARTNERS, partner._rowIndex);
-    } else {
-      deleteDemoRow(CONFIG.SHEET_PARTNERS, partner._rowIndex);
-    }
+    await deleteRowById(CONFIG.SHEET_PARTNERS, 'partner_id', partner.partner_id);
     showToast('Partner deleted', 'success');
     reRender();
   } catch (err) {

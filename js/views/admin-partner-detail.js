@@ -2,7 +2,7 @@
 // Admin Partner Detail View
 // ============================================
 
-import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRow, isConfigured, addDemoRow, updateDemoRow, deleteDemoRow, ensureSheetWithHeaders } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow, ensureSheetWithHeaders } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, uuid } from '../utils/dom.js';
 import { formatDate, todayISO, nowISO } from '../utils/date.js';
@@ -759,7 +759,7 @@ async function handleDeleteContact(contact, partner) {
     // Let any in-flight contact backfill finish first — its in-place row
     // updates must not race a delete that shifts row indexes.
     if (contactBackfillPromise) await contactBackfillPromise;
-    await deleteRow(CONFIG.SHEET_PARTNER_CONTACTS, contact._rowIndex);
+    await deleteRowById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', contact.contact_id);
     showToast('Contact removed', 'success');
     reRender(partner.partner_id);
   } catch (err) {
@@ -1735,11 +1735,7 @@ async function handleDeleteTranscript(transcript, partner) {
   if (!confirmed) return;
 
   try {
-    if (isConfigured()) {
-      await deleteRow(CONFIG.SHEET_TRANSCRIPTS, transcript._rowIndex);
-    } else {
-      deleteDemoRow(CONFIG.SHEET_TRANSCRIPTS, transcript._rowIndex);
-    }
+    await deleteRowById(CONFIG.SHEET_TRANSCRIPTS, 'transcript_id', transcript.transcript_id);
     showToast('Transcript deleted', 'success');
     reRender(partner.partner_id);
   } catch (err) {
