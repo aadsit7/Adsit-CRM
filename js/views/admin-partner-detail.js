@@ -2,7 +2,7 @@
 // Admin Partner Detail View
 // ============================================
 
-import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow, ensureSheetWithHeaders } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRowById, deleteRowById, isConfigured, addDemoRow, ensureSheetWithHeaders } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, uuid } from '../utils/dom.js';
 import { formatDate, todayISO, nowISO } from '../utils/date.js';
@@ -395,9 +395,10 @@ let contactBackfillPromise = null;
 // open retries, and nothing else depends on it.
 async function persistContactBackfill(contacts) {
   for (const c of contacts) {
-    if (!c._rowIndex) continue;
+    if (!c.contact_id) continue;
     try {
-      await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, c._rowIndex, partnerContactRowValues(c));
+      await updateRowById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', c.contact_id,
+        (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...c }));
     } catch (err) {
       console.warn('[Partner Contacts] contact backfill not saved:', err.message);
       return; // the remaining rows would almost certainly fail the same way
@@ -687,16 +688,22 @@ function openContactModal(partner, existingContact, onSaved) {
         // wherever it's read.
         const companyVal = company.input.value.trim() || partnerCompany;
         if (isEdit) {
-          const updated = {
-            ...existingContact,
-            name: nameVal,
-            role: role.input.value.trim(),
-            company: companyVal,
-            email: emailVal,
-            phone: phone.input.value.trim(),
-            updated_at: now,
-          };
-          await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, existingContact._rowIndex, partnerContactRowValues(updated));
+          // Spread the row as it is in the sheet, not as it was when this
+          // modal opened, so editing a phone number cannot revert an analysis
+          // that finished in the meantime — analysis_json and friends are
+          // columns on this same row that nothing in this form touches.
+          await updateRowById(
+            CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', existingContact.contact_id,
+            (fresh) => partnerContactRowValues({
+              ...partnerContactFromRow(fresh),
+              name: nameVal,
+              role: role.input.value.trim(),
+              company: companyVal,
+              email: emailVal,
+              phone: phone.input.value.trim(),
+              updated_at: now,
+            }),
+          );
           showToast('Contact updated', 'success');
         } else {
           await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_CONTACTS, PARTNER_CONTACT_HEADERS);
@@ -964,8 +971,14 @@ async function handleScanContacts(partner, btn) {
     if (merge.toAppend.length) {
       await appendRows(CONFIG.SHEET_PARTNER_CONTACTS, merge.toAppend.map(partnerContactRowValues));
     }
+    // Merged onto the row as it stands, not as it was when the scan started.
+    // A scan runs attachment fetches and an AI pass, so minutes can pass; an
+    // analysis finishing in that window writes analysis_state/analysis_json on
+    // this same row, and writing the pre-scan snapshot back would blank it.
+    // Only the fields the merge actually computed are applied.
     for (const changed of merge.toUpdate) {
-      await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, changed._rowIndex, partnerContactRowValues(changed));
+      await updateRowById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', changed.contact_id,
+        (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...changed }));
     }
 
     warnings.forEach(w => console.warn('[Partner Contacts]', w));
@@ -1057,18 +1070,27 @@ function buildLeadCheckButton(partner, contact) {
  * overwritten, and the fingerprint check inside skips the fill when the
  * row's name/company/email changed mid-run.
  */
+// This was the local prototype of updateRowById — read fresh, find the row by
+// id, write it back — written here first because an analysis takes long enough
+// that the page it started from is reliably out of date by the time it lands.
+// It now uses the shared helper, with the partner_id check expressed as an
+// `expect` so a contact reassigned to another partner mid-analysis is refused
+// rather than overwritten.
 async function saveContactAnalysis(partner, contactId, { state, lastVerified, record }) {
-  const rows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS, { forceRefresh: true });
-  const row = rows.find(r =>
-    String(r.contact_id || '').trim() === contactId &&
-    String(r.partner_id || '').trim() === partner.partner_id);
-  if (!row) throw new Error('This contact no longer exists — the analysis result was not saved.');
-  const hydrated = partnerContactFromRow(row);
-  hydrated.analysis_state = state;
-  hydrated.analysis_last_verified = lastVerified;
-  const filledRole = applyAnalysisRoleToContact(hydrated, record, nowISO());
-  hydrated.analysis_json = JSON.stringify(shrinkAnalysisRecordToFit(record));
-  await updateRow(CONFIG.SHEET_PARTNER_CONTACTS, row._rowIndex, partnerContactRowValues(hydrated));
+  let hydrated;
+  let filledRole;
+  await updateRowById(
+    CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', contactId,
+    (fresh) => {
+      hydrated = partnerContactFromRow(fresh);
+      hydrated.analysis_state = state;
+      hydrated.analysis_last_verified = lastVerified;
+      filledRole = applyAnalysisRoleToContact(hydrated, record, nowISO());
+      hydrated.analysis_json = JSON.stringify(shrinkAnalysisRecordToFit(record));
+      return partnerContactRowValues(hydrated);
+    },
+    { expect: { partner_id: partner.partner_id } },
+  );
   return { contact: hydrated, filledRole };
 }
 
@@ -1673,19 +1695,17 @@ function openTranscriptModal(partner, existingTranscript, previousTranscripts, o
 
       try {
         if (isEdit) {
-          const values = [
-            existingTranscript.transcript_id,
-            partner.partner_id,
-            partner.display_name,
-            date,
-            text,
-            existingTranscript.created_at,
-          ];
-          if (isConfigured()) {
-            await updateRow(CONFIG.SHEET_TRANSCRIPTS, existingTranscript._rowIndex, values);
-          } else {
-            updateDemoRow(CONFIG.SHEET_TRANSCRIPTS, existingTranscript._rowIndex, values);
-          }
+          await updateRowById(
+            CONFIG.SHEET_TRANSCRIPTS, 'transcript_id', existingTranscript.transcript_id,
+            (fresh) => [
+              existingTranscript.transcript_id,
+              partner.partner_id,
+              partner.display_name,
+              date,
+              text,
+              fresh.created_at || existingTranscript.created_at,
+            ],
+          );
           showToast('Transcript updated', 'success');
         } else {
           const values = [

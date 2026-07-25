@@ -2,7 +2,7 @@
 // Admin Partner Management View
 // ============================================
 
-import { readSheetAsObjects, appendRow, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, updateRowById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { sha256 } from '../utils/hash.js';
 import { el, mount, uuid, $, debounce, formatCurrency, collapsibleSection } from '../utils/dom.js';
@@ -414,25 +414,26 @@ function openPartnerModal(partner) {
   const form = buildForm(fields, async (data) => {
     try {
       if (isEdit) {
-        const values = [
-          partner.partner_id,
+        // The columns this form edits come from `data`; the three it does not
+        // come from `fresh` — the row as it is in the sheet right now, not as
+        // it was when the modal opened. That matters most for password_hash:
+        // a partner who changed their password while an admin had this form
+        // open would otherwise have the old hash written back over it, locking
+        // them out. is_admin is the same shape of problem with worse
+        // consequences.
+        await updateRowById(CONFIG.SHEET_PARTNERS, 'partner_id', partner.partner_id, (fresh) => [
+          fresh.partner_id,
           data.username,
           data.display_name,
           data.partner_type,
           data.tier,
           data.region,
-          partner.created_at,
-          partner.is_admin || 'FALSE',
-          partner.password_hash || '',
+          fresh.created_at,
+          fresh.is_admin || 'FALSE',
+          fresh.password_hash || '',
           data.status,
           data.hq_location || '',
-        ];
-
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_PARTNERS, partner._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_PARTNERS, partner._rowIndex, values);
-        }
+        ]);
 
         showToast('Partner updated successfully!', 'success');
       } else {

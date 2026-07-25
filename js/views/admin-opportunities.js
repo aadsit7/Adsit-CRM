@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, updateRowById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, $, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO } from '../utils/date.js';
@@ -583,18 +583,15 @@ function renderBoard(opportunities) {
       if (!opp || opp.stage === stage) return;
 
       try {
-        const values = [
-          opp.opportunity_id, opp.partner_id, opp.deal_name, opp.customer_name,
-          opp.deal_value, opp.status, stage, opp.expected_close,
-          opp.description, opp.created_at, nowISO(),
-          opp.notes || '', opp.lead_source || 'salesperson',
-        ];
-
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-        }
+        // A drag changes exactly one column. Everything else is read back from
+        // the sheet rather than from the card, which may have been drawn before
+        // someone else edited the deal — dragging it must not revert their edit.
+        await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => [
+          fresh.opportunity_id, fresh.partner_id, fresh.deal_name, fresh.customer_name,
+          fresh.deal_value, fresh.status, stage, fresh.expected_close,
+          fresh.description, fresh.created_at, nowISO(),
+          fresh.notes || '', fresh.lead_source || 'salesperson',
+        ]);
 
         showToast(`Moved "${opp.deal_name}" to ${stage}`, 'success');
         reRender();
@@ -782,10 +779,18 @@ function stageBadge(value) {
   return el('span', { class: `stage-pill stage-pill--${mod}` }, label);
 }
 
-// Persist the full opportunity row back to Sheets with the current in-memory
-// values. Used by inline edits; mirrors the column order from the edit modal.
+// Persist the whole opportunity row after an inline field edit. Mirrors the
+// column order from the edit modal.
+//
+// The caller has already mutated `opp` for the one field being edited, so the
+// edited columns come from `opp`. The three columns no inline field can edit —
+// description, created_at, and notes — are read back from the sheet instead.
+// `notes` is the one that bites: it is the JSON array Randy appends to (see
+// ai.js), so writing it from `opp` reverts any note added since this page was
+// drawn. It used to be hardcoded '', which wiped the history outright.
 async function saveOppRow(opp) {
-  const values = [
+  const updatedAt = nowISO();
+  await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => [
     opp.opportunity_id,
     opp.partner_id || '',
     opp.deal_name || '',
@@ -794,22 +799,13 @@ async function saveOppRow(opp) {
     opp.status || 'Registered',
     opp.stage || '',
     opp.expected_close || '',
-    opp.description || '',
-    opp.created_at || nowISO(),
-    nowISO(),
-    // `notes` — the stringified JSON array Randy appends to (see ai.js). This
-    // slot was hardcoded '', so every inline field edit wiped the deal's entire
-    // note history even when it wrote to the right row. Carry the value through
-    // like every other column this function does not edit.
-    opp.notes || '',
+    fresh.description || '',
+    fresh.created_at || opp.created_at || updatedAt,
+    updatedAt,
+    fresh.notes || '',
     opp.lead_source || 'salesperson',
-  ];
-  opp.updated_at = values[10];
-  if (isConfigured()) {
-    await updateRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-  } else {
-    updateDemoRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-  }
+  ]);
+  opp.updated_at = updatedAt;
 }
 
 // Build an inline-editable field card.
@@ -2187,20 +2183,16 @@ export async function openOppModal(opp, container, onSaved) {
         opportunityId = opp.opportunity_id;
         createdAt = opp.created_at;
 
-        const values = [
+        await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opportunityId, (fresh) => [
           opportunityId, data.partner_id, data.deal_name, data.customer_name,
           data.deal_value, data.status || 'Registered', data.stage,
-          data.expected_close, latestDescText, createdAt, nowISO(),
-          // `notes` — carried through, not blanked. This form does not edit it,
-          // and hardcoding '' here destroyed Randy's note history on every save.
-          opp.notes || '', leadSource,
-        ];
-
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, values);
-        }
+          data.expected_close, latestDescText, fresh.created_at || createdAt, nowISO(),
+          // `notes` — this form does not edit it, so take it from the sheet as
+          // it stands. Hardcoding '' here used to destroy Randy's note history
+          // on every save; reading it off the snapshot instead would still
+          // revert any note added while the modal was open.
+          fresh.notes || '', leadSource,
+        ]);
       } else {
         opportunityId = uuid('opp');
         createdAt = nowISO();
@@ -2239,26 +2231,17 @@ export async function openOppModal(opp, container, onSaved) {
       const toUpdate = workingDescriptions.filter(d =>
         !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
       );
-      // FIXME(Phase 3): this loop is still addressed by `_rowIndex`, captured
-      // when the modal opened — which the delete loop above has just
-      // invalidated. Deleting one description and editing another in the same
-      // save writes the edit over the wrong row, and because the row carries
-      // its own id in column A that also creates a DUPLICATE description_id,
-      // which deleteRowById then refuses to touch. Descriptions added by the
-      // document-analysis flow are worse still: they have no `_rowIndex` at
-      // all, so the range comes out as `Aundefined:Fundefined`. The fix is
-      // updateRowById(sheet, 'description_id', d.description_id, values) —
-      // deliberately left for Phase 3 rather than half-converted here.
+      // Addressed by description_id, like the deletes above. This loop runs
+      // straight after them, so `_rowIndex` here was doubly wrong: stale from
+      // the modal opening, and then shifted again by every delete just made.
+      // Descriptions added by the document-analysis flow have no `_rowIndex`
+      // at all, which produced the range `Aundefined:Fundefined`.
       for (const d of toUpdate) {
         const values = [
           d.description_id, opportunityId, data.deal_name,
           d.description_date, d.description_text, d.created_at,
         ];
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_OPP_DESCRIPTIONS, d._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, d._rowIndex, values);
-        }
+        await updateRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', d.description_id, values);
       }
 
       // Skip brand-new cards where the user never actually typed anything.
@@ -2456,11 +2439,7 @@ function openDescriptionEditorDialog(desc, opp, { onSaved } = {}) {
         desc.description_text,
         desc.created_at,
       ];
-      if (isConfigured()) {
-        await updateRow(CONFIG.SHEET_OPP_DESCRIPTIONS, desc._rowIndex, values);
-      } else {
-        updateDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, desc._rowIndex, values);
-      }
+      await updateRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', desc.description_id, values);
       didSave = true;
       dismiss();
       if (onSaved) onSaved();

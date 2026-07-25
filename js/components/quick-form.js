@@ -8,7 +8,7 @@
 // record; Yes shows the full new-record creation fields.
 
 import { CONFIG } from '../config.js';
-import { appendRow, updateRow, isConfigured, addDemoRow, readSheetAsObjects } from '../sheets.js';
+import { appendRow, updateRowById, isConfigured, addDemoRow, readSheetAsObjects } from '../sheets.js';
 import { showToast } from './toast.js';
 import { uuid } from '../utils/dom.js';
 import { nowISO, todayISO } from '../utils/date.js';
@@ -831,14 +831,16 @@ async function submitOppNote(data) {
 
   if (isConfigured()) {
     await appendRow(CONFIG.SHEET_OPP_DESCRIPTIONS, descValues);
-    if (opp?._rowIndex) {
-      const oppValues = [
-        opp.opportunity_id, opp.partner_id, opp.deal_name, opp.customer_name,
-        opp.deal_value, opp.status, opp.stage, opp.expected_close,
-        data.description_text, opp.created_at, now,
-        opp.notes || '', opp.lead_source || 'salesperson',
-      ];
-      await updateRow(CONFIG.SHEET_OPPORTUNITIES, opp._rowIndex, oppValues);
+    if (opp?.opportunity_id) {
+      // Only `description` and `updated_at` are being set here; every other
+      // column is read back from the sheet so adding a description cannot
+      // revert an edit made elsewhere since this form was opened.
+      await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => [
+        fresh.opportunity_id, fresh.partner_id, fresh.deal_name, fresh.customer_name,
+        fresh.deal_value, fresh.status, fresh.stage, fresh.expected_close,
+        data.description_text, fresh.created_at, now,
+        fresh.notes || '', fresh.lead_source || 'salesperson',
+      ]);
     }
   } else {
     addDemoRow(CONFIG.SHEET_OPP_DESCRIPTIONS, descValues);

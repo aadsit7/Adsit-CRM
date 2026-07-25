@@ -575,7 +575,7 @@ export async function render(container) {
         savePresetBtn.disabled = true;
         savePresetBtn.textContent = 'Saving...';
         try {
-          await saveCustomPrompt(preset.prompt_id || null, label, icon, instructions, preset._rowIndex || null, provider);
+          await saveCustomPrompt(preset.prompt_id || null, label, icon, instructions, provider);
           showToast(`Preset saved — runs on ${providerLabel(provider)}`, 'success');
           preset.prompt_id = preset.prompt_id || label;
           preset.label = label;

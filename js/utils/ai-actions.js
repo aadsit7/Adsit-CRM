@@ -4,7 +4,7 @@
 // Used by both the AI Assistant chat view and the Randy voice assistant
 
 import { loadSheetData, invalidateSheetCache } from './ai.js';
-import { appendRow, updateRow, deleteRowById, keyFieldFor } from '../sheets.js';
+import { appendRow, updateRowById, deleteRowById, keyFieldFor } from '../sheets.js';
 
 // ── Sheet Headers (for write operations) ───────────────────────────
 export const SHEET_HEADERS = {
@@ -85,11 +85,18 @@ export async function executeAction(action) {
     if (!action.row_match || Object.keys(action.row_match).length === 0) throw new Error('No row_match specified');
     const row = findMatchingRow(rows, action.row_match);
     if (!row) throw new Error('No matching row found');
-    const values = headers.map(h => {
+    // Same identification as the delete branch below: row_match may key off
+    // any columns, so resolve the matched row by its own id before writing.
+    // The unchanged columns are taken from the sheet rather than from `rows`,
+    // which comes from a cache — an update touching one field must not revert
+    // another that changed since that cache was filled.
+    const keyField = keyFieldFor(action.sheet);
+    const keyValue = keyField ? row[keyField] : null;
+    if (!keyValue) throw new Error(`Cannot safely update ${action.sheet}: the matched row has no identifier.`);
+    await updateRowById(action.sheet, keyField, keyValue, (fresh) => headers.map(h => {
       if (action.changes && h in action.changes) return action.changes[h];
-      return row[h] || '';
-    });
-    await updateRow(action.sheet, row._rowIndex, values);
+      return fresh[h] || '';
+    }));
   } else if (action.type === 'create') {
     const values = headers.map(h => (action.changes && action.changes[h]) || '');
     await appendRow(action.sheet, values);
