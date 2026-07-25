@@ -347,6 +347,14 @@ export async function appendRows(sheetName, rows) {
 
 /**
  * Update a specific row.
+ *
+ * PREFER `updateRowById`. A row NUMBER is not a stable identity in a
+ * spreadsheet: deleting any row shifts every row beneath it up by one, so an
+ * index captured when a page loaded or a modal opened can address a completely
+ * different record by the time it is used — and this function overwrites a
+ * whole row, so landing on the wrong one destroys that record. This entry point
+ * stays for callers that genuinely own the index they just resolved.
+ *
  * @param {string} sheetName
  * @param {number} rowIndex - 1-based row number
  * @param {Array} values
@@ -373,6 +381,110 @@ export async function updateRow(sheetName, rowIndex, values) {
 
   invalidateSheetCache(sheetName);
   return res.json();
+}
+
+// ============================================
+// ID-addressed writes
+// ============================================
+// A row number is not an identity. `deleteRow` here — and `sheet.deleteRow()`
+// in the Apps Script's doDeleteFile — physically remove a row and shift every
+// row beneath it up by one. Any `_rowIndex` captured before that points at a
+// different record afterwards, and since these writes replace a whole row,
+// using one destroys whatever now sits there.
+//
+// These helpers take the record's own key instead. They re-read the sheet,
+// locate the row NOW, and refuse to write at all if they cannot identify
+// exactly one — because the alternative to writing nothing is writing over
+// something. The pattern is not new: saveContactAnalysis (admin-partner-detail),
+// Randy's ai-actions, and the attachment-key migration each built it locally
+// first; this is that pattern promoted to one tested place.
+//
+// Demo mode needs no special handling: `readSheetAsObjects` serves the demo
+// arrays, and `updateRow`/`deleteRow` already dispatch to their demo twins, so
+// resolving the index by id works identically there.
+
+function idMismatch(message) {
+  const err = new Error(message);
+  err.code = 'ROW_ID_NOT_RESOLVED';
+  return err;
+}
+
+/**
+ * Find the one row whose `idField` equals `idValue`, as the sheet is right now.
+ *
+ * Exported because read-transform-write callers need the row's CURRENT contents
+ * to merge into, not just its position — writing a full row assembled from a
+ * stale snapshot reverts every column the caller did not mean to touch, which
+ * is a separate defect that addressing the row correctly does not fix.
+ *
+ * @throws when no row matches, or when more than one does.
+ */
+export async function findRowById(sheetName, idField, idValue) {
+  const wanted = String(idValue == null ? '' : idValue).trim();
+  if (!wanted) throw idMismatch(`Cannot find a row in ${sheetName}: no ${idField} was given.`);
+
+  const rows = await readSheetAsObjects(sheetName, { forceRefresh: true });
+  const matches = rows.filter(r => String(r[idField] == null ? '' : r[idField]).trim() === wanted);
+
+  if (matches.length === 0) {
+    throw idMismatch(
+      `That record is no longer in ${sheetName} (${idField} ${wanted}) — it may have been deleted. `
+      + 'Nothing was changed; reload the page to see the current data.',
+    );
+  }
+  if (matches.length > 1) {
+    // Loud on purpose: duplicate ids mean the sheet is already inconsistent,
+    // and picking one at random would compound it invisibly.
+    throw idMismatch(
+      `${matches.length} rows in ${sheetName} share ${idField} ${wanted}, so it is not clear which to `
+      + 'change. Nothing was changed — please de-duplicate them in the spreadsheet.',
+    );
+  }
+  return matches[0];
+}
+
+/**
+ * Update the row identified by `idField`/`idValue`.
+ *
+ * @param {string} sheetName
+ * @param {string} idField   the sheet's natural key column (e.g. 'partner_id')
+ * @param {string} idValue   the record's id
+ * @param {Array|Function} values  the row values, or a `(freshRow) => values`
+ *   callback so a caller can merge into what is actually stored rather than
+ *   overwrite it with a snapshot.
+ * @param {Object} [opts]
+ * @param {Object} [opts.expect] extra column→value pairs the found row must
+ *   still match (e.g. `{ partner_id }`), for callers that want a second
+ *   opinion before replacing a row.
+ * @returns {Promise<Object>} the API response.
+ */
+export async function updateRowById(sheetName, idField, idValue, values, { expect } = {}) {
+  const row = await findRowById(sheetName, idField, idValue);
+
+  for (const [field, expected] of Object.entries(expect || {})) {
+    const actual = String(row[field] == null ? '' : row[field]).trim();
+    if (actual !== String(expected == null ? '' : expected).trim()) {
+      throw idMismatch(
+        `That record changed in ${sheetName} (${field} is now “${actual}”). Nothing was changed; `
+        + 'reload the page and try again.',
+      );
+    }
+  }
+
+  const finalValues = typeof values === 'function' ? values(row) : values;
+  if (!Array.isArray(finalValues)) {
+    throw idMismatch(`updateRowById: values for ${sheetName} must be an array.`);
+  }
+  return updateRow(sheetName, row._rowIndex, finalValues);
+}
+
+/**
+ * Delete the row identified by `idField`/`idValue`. Refuses rather than
+ * deleting an unidentified row — see findRowById.
+ */
+export async function deleteRowById(sheetName, idField, idValue) {
+  const row = await findRowById(sheetName, idField, idValue);
+  return deleteRow(sheetName, row._rowIndex);
 }
 
 /**

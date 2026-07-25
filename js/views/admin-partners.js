@@ -28,32 +28,38 @@ export async function render(container) {
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
-    const [partners, opportunities] = await Promise.all([
-      readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
-    ]);
-    allPartners = partners;
-    allOpportunities = opportunities;
-
-    // Compute revenue lookup per partner
-    partnerRevenue = {};
-    for (const opp of opportunities) {
-      const pid = opp.partner_id;
-      if (!partnerRevenue[pid]) partnerRevenue[pid] = { totalPipeline: 0, wonValue: 0, oppCount: 0 };
-      if (opp.status === 'Won') {
-        partnerRevenue[pid].wonValue += parseFloat(opp.deal_value) || 0;
-      } else {
-        partnerRevenue[pid].totalPipeline += parseFloat(opp.deal_value) || 0;
-      }
-      partnerRevenue[pid].oppCount += 1;
-    }
-
+    await loadPartnerData();
     renderWithTypeFilter(container);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading partners'),
       el('div', { class: 'empty-state__description' }, err.message)
     ));
+  }
+}
+
+// Pull the sheets this view renders from into module state. Split out of
+// render() so a re-render after a mutation can refresh them too — see
+// reRender().
+async function loadPartnerData() {
+  const [partners, opportunities] = await Promise.all([
+    readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+    readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+  ]);
+  allPartners = partners;
+  allOpportunities = opportunities;
+
+  // Compute revenue lookup per partner
+  partnerRevenue = {};
+  for (const opp of opportunities) {
+    const pid = opp.partner_id;
+    if (!partnerRevenue[pid]) partnerRevenue[pid] = { totalPipeline: 0, wonValue: 0, oppCount: 0 };
+    if (opp.status === 'Won') {
+      partnerRevenue[pid].wonValue += parseFloat(opp.deal_value) || 0;
+    } else {
+      partnerRevenue[pid].totalPipeline += parseFloat(opp.deal_value) || 0;
+    }
+    partnerRevenue[pid].oppCount += 1;
   }
 }
 
@@ -75,9 +81,28 @@ function renderWithTypeFilter(container) {
   renderView(container, tfPartners, filterBar);
 }
 
+// Re-render AFTER re-reading the sheet.
+//
+// This used to redraw the module-level `allPartners` without refetching, which
+// made every mutation leave the view describing a spreadsheet that no longer
+// existed. Deleting a partner is the sharp case: rows below the deleted one
+// shift up, but the in-memory rows kept their old `_rowIndex`, so the very next
+// Edit or Delete wrote a full 11-column row — partner_id, is_admin and
+// password_hash included — over an innocent partner. No second tab or race was
+// needed; two clicks did it. The deleted partner also stayed on screen, and a
+// newly added one never appeared.
+//
+// Writes invalidate that sheet's cache entry (see sheets.js), so this read is
+// fresh rather than served from the 30s TTL.
 function reRender() {
   const viewContainer = document.getElementById('view-container');
-  renderWithTypeFilter(viewContainer);
+  return loadPartnerData()
+    .then(() => renderWithTypeFilter(viewContainer))
+    .catch((err) => {
+      // Never leave the view showing pre-mutation data: the write already
+      // happened, so a silent failure here would be the same stale-list lie.
+      showToast(err.message || 'Saved, but the list could not be refreshed. Reload the page.', 'error');
+    });
 }
 
 function partnerInitials(name) {
