@@ -552,6 +552,23 @@ export async function updateRowsById(sheetName, idField, entries) {
 
   // Every row is resolved and validated before anything is written, so a bad
   // entry anywhere in the batch means none of it lands.
+  return writeRowRanges(sheetName, writes);
+}
+
+/**
+ * Write whole rows at known positions, in one request.
+ *
+ * The shared write half of updateRowsById — one ValueRange per row, so rows in
+ * between are never inside a range and nothing is rewritten by accident. Takes
+ * positions rather than ids because its other caller, saveReorderedPrompts, is
+ * deliberately positional.
+ *
+ * @param {string} sheetName
+ * @param {Array<{rowIndex:number, values:Array}>} writes
+ */
+async function writeRowRanges(sheetName, writes) {
+  if (!writes.length) return {};
+
   if (!isConfigured()) {
     for (const w of writes) updateDemoRow(sheetName, w.rowIndex, w.values);
     invalidateSheetCache(sheetName);
@@ -1015,11 +1032,15 @@ export async function saveReorderedPrompts(orderedPresets) {
     );
   }
 
-  for (let i = 0; i < orderedPresets.length; i++) {
-    const p = orderedPresets[i];
-    const row = [p.prompt_id, p.label, p.icon, p.instructions, p.created_at, normalizeProvider(p.provider)];
-    await updateRow(CONFIG.SHEET_CUSTOM_PROMPTS, i + 2, row);
-  }
+  // One request, so a reorder can no longer be interrupted part-way by the
+  // client — a dropped connection or a closed tab mid-loop used to leave some
+  // prompts at their new positions and some at their old. (values:batchUpdate
+  // is not documented as server-side atomic, so this narrows the window
+  // rather than closing it.)
+  return writeRowRanges(CONFIG.SHEET_CUSTOM_PROMPTS, orderedPresets.map((p, i) => ({
+    rowIndex: i + 2,
+    values: [p.prompt_id, p.label, p.icon, p.instructions, p.created_at, normalizeProvider(p.provider)],
+  })));
 }
 
 /**

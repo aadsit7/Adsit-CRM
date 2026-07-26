@@ -583,16 +583,7 @@ function renderBoard(opportunities) {
       if (!opp || opp.stage === stage) return;
 
       try {
-        // A drag changes exactly one column. Everything else is read back from
-        // the sheet rather than from the card, which may have been drawn before
-        // someone else edited the deal — dragging it must not revert their edit.
-        await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => [
-          fresh.opportunity_id, fresh.partner_id, fresh.deal_name, fresh.customer_name,
-          fresh.deal_value, fresh.status, stage, fresh.expected_close,
-          fresh.description, fresh.created_at, nowISO(),
-          fresh.notes || '', fresh.lead_source || 'salesperson',
-        ]);
-
+        await saveOppStage(opp.opportunity_id, stage);
         showToast(`Moved "${opp.deal_name}" to ${stage}`, 'success');
         reRender();
       } catch (err) {
@@ -777,6 +768,20 @@ function stageBadge(value) {
   const label = value || 'Unknown';
   const mod = slugifyToken(label) || 'unknown';
   return el('span', { class: `stage-pill stage-pill--${mod}` }, label);
+}
+
+// Move a deal to another stage.
+//
+// A drag changes exactly one column. Everything else is read back from the
+// sheet rather than from the card, which may have been drawn before someone
+// else edited the deal — dragging it must not revert their edit.
+async function saveOppStage(opportunityId, stage) {
+  return updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opportunityId, (fresh) => [
+    fresh.opportunity_id, fresh.partner_id, fresh.deal_name, fresh.customer_name,
+    fresh.deal_value, fresh.status, stage, fresh.expected_close,
+    fresh.description, fresh.created_at, nowISO(),
+    fresh.notes || '', fresh.lead_source || 'salesperson',
+  ]);
 }
 
 // Persist the whole opportunity row after an inline field edit. Mirrors the
@@ -2531,10 +2536,14 @@ export function cleanup() {
 export const fileApiRequest = fileApiRequestImpl;
 
 /**
- * Test-only: exposes the pure logic used by inline row action buttons so
- * tests can verify behaviour without a full DOM environment.
- * Not used by any production code path.
+ * The opportunity write paths, exposed so tests can drive them without a DOM.
+ *
+ * Unlike __inlineRowActionsInternals below, these ARE the production functions
+ * — the inline-edit commit and the kanban drop handler call exactly these, so
+ * a test that pins them pins what a user triggers.
  */
+export const __oppWriteInternals = { saveOppRow, saveOppStage };
+
 export const __inlineRowActionsInternals = {
   // Returns true when the inline Edit/Delete buttons should be rendered on a description row.
   // Mirrors the production gate above — keep the two in step.
