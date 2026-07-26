@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, appendRows, updateRow, deleteRowById, isConfigured, addDemoRow, updateDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRowById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO, parseDate, isDateInRange } from '../utils/date.js';
@@ -519,18 +519,16 @@ function renderBoard(events) {
       if (!evt || evt.status === status) return;
 
       try {
-        const values = [
-          evt.event_id, evt.title, evt.description, evt.event_date,
-          evt.end_date || evt.event_date, evt.event_type, evt.location,
-          evt.url, evt.created_by, evt.created_at, status, evt.partner_id || '',
-          evt.checklist || '',
-        ];
-
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_EVENTS, evt._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_EVENTS, evt._rowIndex, values);
-        }
+        // Same as the opportunities kanban: a drag sets one column, and the
+        // rest are read back from the sheet so the move cannot revert an edit
+        // made since this card was drawn. Note this writes A:M — lead_count and
+        // event_password sit past the end and are left alone.
+        await updateRowById(CONFIG.SHEET_EVENTS, 'event_id', evt.event_id, (fresh) => [
+          fresh.event_id, fresh.title, fresh.description, fresh.event_date,
+          fresh.end_date || fresh.event_date, fresh.event_type, fresh.location,
+          fresh.url, fresh.created_by, fresh.created_at, status, fresh.partner_id || '',
+          fresh.checklist || '',
+        ]);
 
         showToast(`Moved "${evt.title}" to ${status}`, 'success');
         reRender();
@@ -1053,19 +1051,17 @@ export async function openEventModal(event, container, onSaved) {
         eventId = event.event_id;
         createdAt = event.created_at;
 
-        const values = [
+        await updateRowById(CONFIG.SHEET_EVENTS, 'event_id', eventId, (fresh) => [
           eventId, data.title, latestDescPlain, data.event_date,
           data.end_date || data.event_date, data.event_type, data.location,
-          data.url, event.created_by, createdAt, data.status || 'Upcoming',
-          data.partner_id || '', checklistJson, leadCount,
+          data.url, fresh.created_by || event.created_by, fresh.created_at || createdAt,
+          data.status || 'Upcoming', data.partner_id || '',
+          // `checklist` is a pass-through column this form does not edit, so it
+          // comes from the sheet — reading it off the snapshot would revert a
+          // checklist change made since the modal opened.
+          fresh.checklist || '', leadCount,
           data.event_password || '',
-        ];
-
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_EVENTS, event._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_EVENTS, event._rowIndex, values);
-        }
+        ]);
       } else {
         eventId = uuid('evt');
         createdAt = nowISO();
@@ -1103,19 +1099,15 @@ export async function openEventModal(event, container, onSaved) {
       const toUpdate = workingDescriptions.filter(d =>
         !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
       );
-      // FIXME(Phase 3): still addressed by `_rowIndex`, captured when the modal
-      // opened and invalidated by the delete loop above — see the same note in
-      // admin-opportunities.js. updateRowById is the fix.
+      // Addressed by description_id — see the same note in
+      // admin-opportunities.js. This loop runs straight after the deletes
+      // above, which shift every row beneath them.
       for (const d of toUpdate) {
         const values = [
           d.description_id, eventId, data.title,
           d.description_date, d.description_text, d.created_at,
         ];
-        if (isConfigured()) {
-          await updateRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, d._rowIndex, values);
-        } else {
-          updateDemoRow(CONFIG.SHEET_EVENT_DESCRIPTIONS, d._rowIndex, values);
-        }
+        await updateRowById(CONFIG.SHEET_EVENT_DESCRIPTIONS, 'description_id', d.description_id, values);
       }
 
       // Skip brand-new cards where the user never actually typed anything.

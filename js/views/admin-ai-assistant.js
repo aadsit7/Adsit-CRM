@@ -11,7 +11,7 @@ import { parseActions, executeAction } from '../utils/ai-actions.js';
 import { activateVoiceMode, isVoiceModeActive, stopEverything as stopVoice } from '../components/voice-widget.js';
 import { attachSpeakerButton, autoSpeak, stopTTS, createSettingsButton, isTTSEnabled, extractVoiceText, extractVoiceTextFromString, isAutoSpeakEnabled, speak, cleanTextForSpeech } from '../components/tts.js';
 import { getCurrentUser } from '../auth.js';
-import { appendRow, updateRow, deleteRowById, readSheetAsObjects } from '../sheets.js';
+import { appendRow, updateRowById, deleteRowById, readSheetAsObjects } from '../sheets.js';
 import { showToast } from '../components/toast.js';
 
 // ── State ──────────────────────────────────────────────────────────
@@ -19,7 +19,6 @@ let conversationHistory = [];
 let isStreaming = false;
 let abortController = null;
 let currentConversationId = null;
-let currentConversationRow = null;
 let conversations = [];
 
 // ── Voice Mode ─────────────────────────────────────────────────────
@@ -210,12 +209,14 @@ async function saveConversation(isNew) {
       // Read back to get _rowIndex
       const all = await readSheetAsObjects(CONFIG.SHEET_AI_CONVERSATIONS);
       const saved = all.find(c => c.conversation_id === currentConversationId);
-      currentConversationRow = saved?._rowIndex || null;
-      conversations.unshift(saved || { conversation_id: currentConversationId, title, started_at: new Date().toISOString(), messages: messagesJson, _rowIndex: currentConversationRow });
-    } else if (currentConversationRow) {
+      conversations.unshift(saved || { conversation_id: currentConversationId, title, started_at: new Date().toISOString(), messages: messagesJson });
+    } else {
+      // Addressed by conversation_id — the row number this used to keep in
+      // module state was stale the moment any conversation above it was
+      // deleted, and the delete button is right there in the same list.
       const conv = conversations.find(c => c.conversation_id === currentConversationId);
       const values = [currentConversationId, user.username, conv?.started_at || '', title, messagesJson, 'active'];
-      await updateRow(CONFIG.SHEET_AI_CONVERSATIONS, currentConversationRow, values);
+      await updateRowById(CONFIG.SHEET_AI_CONVERSATIONS, 'conversation_id', currentConversationId, values);
       if (conv) { conv.messages = messagesJson; conv.title = title; }
     }
     flashSave(true);
@@ -249,7 +250,6 @@ function loadConversation(conv) {
     const msgs = JSON.parse(conv.messages || '[]');
     conversationHistory = msgs;
     currentConversationId = conv.conversation_id;
-    currentConversationRow = conv._rowIndex;
 
     const chatArea = document.getElementById('ai-chat-area');
     if (!chatArea) return;
@@ -264,7 +264,6 @@ function loadConversation(conv) {
 function startNewChat() {
   conversationHistory = [];
   currentConversationId = null;
-  currentConversationRow = null;
   const chatArea = document.getElementById('ai-chat-area');
   if (chatArea) {
     chatArea.innerHTML = `
@@ -328,7 +327,6 @@ export function renderAdminAIAssistant(container) {
 
   conversationHistory = [];
   currentConversationId = null;
-  currentConversationRow = null;
 
   const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 

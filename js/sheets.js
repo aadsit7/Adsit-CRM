@@ -854,14 +854,33 @@ export async function loadCustomPrompts() {
   }
 }
 
-export async function saveCustomPrompt(promptId, label, icon, instructions, rowIndex, provider) {
-  const now = new Date().toISOString();
+/**
+ * Save a prompt preset — updating the one with this id, or appending if there
+ * is none.
+ *
+ * This took a row number until the Setup screen's delete stopped re-rendering
+ * its list: deleting one preset shifts every preset below it, so the next Save
+ * wrote over a different preset and left two rows sharing a prompt_id — which
+ * deleteCustomPrompt then refuses to touch, making it undeletable.
+ *
+ * `created_at` is read back from the stored row rather than restamped, so
+ * editing a preset no longer resets when it was created.
+ */
+export async function saveCustomPrompt(promptId, label, icon, instructions, provider) {
   const id = promptId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `p_${Date.now()}`);
-  const row = [id, label, icon, instructions, now, normalizeProvider(provider)];
-  if (rowIndex) {
-    return updateRow(CONFIG.SHEET_CUSTOM_PROMPTS, rowIndex, row);
+  const provider_ = normalizeProvider(provider);
+
+  if (promptId) {
+    try {
+      return await updateRowById(CONFIG.SHEET_CUSTOM_PROMPTS, 'prompt_id', id, (fresh) =>
+        [id, label, icon, instructions, fresh.created_at || new Date().toISOString(), provider_]);
+    } catch (err) {
+      // Not there any more — fall through and re-create it rather than losing
+      // what the user just typed. A duplicate id still throws.
+      if (err.code !== 'ROW_ID_NOT_RESOLVED' || !/no longer in/.test(err.message)) throw err;
+    }
   }
-  return appendRow(CONFIG.SHEET_CUSTOM_PROMPTS, row);
+  return appendRow(CONFIG.SHEET_CUSTOM_PROMPTS, [id, label, icon, instructions, new Date().toISOString(), provider_]);
 }
 
 /**
@@ -873,7 +892,28 @@ export async function deleteCustomPrompt(promptId) {
   return deleteRowById(CONFIG.SHEET_CUSTOM_PROMPTS, 'prompt_id', promptId);
 }
 
+/**
+ * Rewrite the prompt rows in the given order.
+ *
+ * This one is positional by nature — reordering IS changing which row each
+ * prompt occupies — so instead of addressing rows by id it first checks that
+ * the sheet still holds exactly the prompts being reordered. Without that,
+ * reordering a list that has since had a prompt deleted elsewhere writes N
+ * rows over N-1, leaving a duplicate of the last one.
+ */
 export async function saveReorderedPrompts(orderedPresets) {
+  const stored = await readSheetAsObjects(CONFIG.SHEET_CUSTOM_PROMPTS, { forceRefresh: true });
+  const storedIds = new Set(stored.map(p => String(p.prompt_id || '').trim()));
+  const orderedIds = orderedPresets.map(p => String(p.prompt_id || '').trim());
+
+  const missing = orderedIds.filter(id => !storedIds.has(id));
+  if (missing.length || storedIds.size !== orderedIds.length) {
+    throw new Error(
+      'The saved prompts changed while you were reordering them, so the new order was not saved. '
+      + 'Reload the Setup page and try again.',
+    );
+  }
+
   for (let i = 0; i < orderedPresets.length; i++) {
     const p = orderedPresets[i];
     const row = [p.prompt_id, p.label, p.icon, p.instructions, p.created_at, normalizeProvider(p.provider)];

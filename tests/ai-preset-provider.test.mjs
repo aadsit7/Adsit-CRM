@@ -188,7 +188,7 @@ test('sheets.js persists and normalizes the provider column', async () => {
     'Custom_Prompts header must include a provider column',
   );
   assert.ok(
-    /saveCustomPrompt\(promptId, label, icon, instructions, rowIndex, provider\)/.test(src),
+    /saveCustomPrompt\(promptId, label, icon, instructions, provider\)/.test(src),
     'saveCustomPrompt must accept a provider argument',
   );
   assert.ok(/normalizeProvider\(provider\)/.test(src), 'saved provider must be normalized');
@@ -216,7 +216,7 @@ test('admin-setup.js renders a provider slider and persists the choice', async (
   assert.ok(/class:\s*'provider-slider'/.test(src), 'the slider uses the provider-slider class');
   assert.ok(/const provider = providerSlider\.get\(\)/.test(src), 'save reads the slider value');
   assert.ok(
-    /saveCustomPrompt\(preset\.prompt_id \|\| null, label, icon, instructions, preset\._rowIndex \|\| null, provider\)/.test(src),
+    /saveCustomPrompt\(preset\.prompt_id \|\| null, label, icon, instructions, provider\)/.test(src),
     'save passes the provider to saveCustomPrompt',
   );
 });

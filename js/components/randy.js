@@ -18,7 +18,7 @@ import { buildTimelinePdf, timelineFilename } from '../utils/timeline-pdf-builde
 import { createPill, updatePillStage, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
 import { CONFIG } from '../config.js';
 import { getCurrentUser } from '../auth.js';
-import { appendRow, updateRow, readSheetAsObjects, loadCustomPrompts } from '../sheets.js';
+import { appendRow, updateRowById, loadCustomPrompts } from '../sheets.js';
 import { isVoiceModeActive } from './voice-widget.js';
 import { openOppModal, openOppDetailsModal, fileApiRequest, addFileToActiveDocsPanel } from '../views/admin-opportunities.js';
 import { initQuickForm, toggleQuickForm } from './quick-form.js';
@@ -266,7 +266,6 @@ let autoSendTimer = null;
 let speechChainCancelled = false;
 let dragOffset = { x: 0, y: 0 };
 let currentConvId = null;
-let currentConvRow = null;
 let isSaving = false;
 let dragMoveHandler = null;
 let dragUpHandler = null;
@@ -484,7 +483,6 @@ function stopAll() {
   confirmAttempts = 0;
   accumulatedTranscript = '';
   currentConvId = null;
-  currentConvRow = null;
   convStartedAt = null;
   voiceEnabled = false;
   isDragging = false;
@@ -2692,25 +2690,14 @@ async function saveRandyConversation() {
       currentConvId = 'conv_randy_' + Date.now();
       convStartedAt = new Date().toISOString();
       await appendRow(CONFIG.SHEET_AI_CONVERSATIONS, [currentConvId, user.username, convStartedAt, title, messagesJson, 'active']);
-      // Read back row index for future updates
-      try {
-        const all = await readSheetAsObjects(CONFIG.SHEET_AI_CONVERSATIONS);
-        const saved = all.find(c => c.conversation_id === currentConvId);
-        currentConvRow = saved?._rowIndex || null;
-      } catch { /* ok */ }
-    } else if (currentConvRow) {
-      // Preserve original started_at timestamp on updates
-      await updateRow(CONFIG.SHEET_AI_CONVERSATIONS, currentConvRow, [currentConvId, user.username, convStartedAt || new Date().toISOString(), title, messagesJson, 'active']);
     } else {
-      // currentConvRow lookup failed earlier — retry the lookup
-      try {
-        const all = await readSheetAsObjects(CONFIG.SHEET_AI_CONVERSATIONS);
-        const saved = all.find(c => c.conversation_id === currentConvId);
-        if (saved?._rowIndex) {
-          currentConvRow = saved._rowIndex;
-          await updateRow(CONFIG.SHEET_AI_CONVERSATIONS, currentConvRow, [currentConvId, user.username, convStartedAt || new Date().toISOString(), title, messagesJson, 'active']);
-        }
-      } catch { /* ok */ }
+      // Addressed by conversation_id, which is why there is no row-index
+      // bookkeeping here any more: this used to read the sheet back after the
+      // append to learn a row number, keep it in module state, and retry that
+      // lookup when it failed — all to address a row that any delete elsewhere
+      // in the app could shift out from under it. `started_at` is preserved.
+      await updateRowById(CONFIG.SHEET_AI_CONVERSATIONS, 'conversation_id', currentConvId,
+        [currentConvId, user.username, convStartedAt || new Date().toISOString(), title, messagesJson, 'active']);
     }
   } catch (err) {
     console.warn('Randy: failed to save conversation', err);
@@ -3133,7 +3120,6 @@ function createWidget() {
     pendingActions = null;
     confirmAttempts = 0;
     currentConvId = null;
-    currentConvRow = null;
     convStartedAt = null;
     voiceEnabled = false;
     pendingMapIntent = null;
