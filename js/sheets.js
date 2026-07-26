@@ -479,6 +479,107 @@ export async function updateRowById(sheetName, idField, idValue, values, { expec
 }
 
 /**
+ * Update several rows in one pass.
+ *
+ * One read resolves every row, and one request writes them all. The loops that
+ * call this — a description modal save, a contact scan — used to spend a full
+ * forced read and a separate write PER ROW, so a 40-contact scan meant 40 reads
+ * of the whole tab.
+ *
+ * Sharing one resolution read across the batch is safe because an update never
+ * moves a row: only deletes and inserts renumber the sheet. Callers that delete
+ * must therefore finish their deletes before resolving here — which is the
+ * order they already use.
+ *
+ * @param {string} sheetName
+ * @param {string} idField
+ * @param {Array<{id: string, values: Array|Function, expect?: Object}>} entries
+ * @returns {Promise<Object>} the API response, or {} when nothing was passed.
+ */
+export async function updateRowsById(sheetName, idField, entries) {
+  const list = (entries || []).filter(Boolean);
+  if (!list.length) return {};
+
+  const rows = await readSheetAsObjects(sheetName, { forceRefresh: true });
+  const byId = new Map();
+  const counts = new Map();
+  for (const r of rows) {
+    const key = String(r[idField] == null ? '' : r[idField]).trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (!byId.has(key)) byId.set(key, r);
+  }
+
+  const writes = [];
+  const seen = new Set();
+  for (const entry of list) {
+    const wanted = String(entry.id == null ? '' : entry.id).trim();
+    if (!wanted) throw idMismatch(`Cannot update a row in ${sheetName}: no ${idField} was given.`);
+    if (seen.has(wanted)) {
+      // Two entries for one row would both be built from the same pre-write
+      // snapshot, so the second would silently discard the first's merge.
+      throw idMismatch(`updateRowsById: ${sheetName} ${idField} ${wanted} appears twice in one batch.`);
+    }
+    seen.add(wanted);
+    if ((counts.get(wanted) || 0) > 1) {
+      throw idMismatch(
+        `${counts.get(wanted)} rows in ${sheetName} share ${idField} ${wanted}, so it is not clear which to `
+        + 'change. Nothing was changed — please de-duplicate them in the spreadsheet.',
+      );
+    }
+    const row = byId.get(wanted);
+    if (!row) {
+      throw idMismatch(
+        `That record is no longer in ${sheetName} (${idField} ${wanted}) — it may have been deleted. `
+        + 'Nothing was changed; reload the page to see the current data.',
+      );
+    }
+    for (const [field, expected] of Object.entries(entry.expect || {})) {
+      const actual = String(row[field] == null ? '' : row[field]).trim();
+      if (actual !== String(expected == null ? '' : expected).trim()) {
+        throw idMismatch(
+          `That record changed in ${sheetName} (${field} is now “${actual}”). Nothing was changed; `
+          + 'reload the page and try again.',
+        );
+      }
+    }
+    const finalValues = typeof entry.values === 'function' ? entry.values(row) : entry.values;
+    if (!Array.isArray(finalValues)) {
+      throw idMismatch(`updateRowsById: values for ${sheetName} must be an array.`);
+    }
+    writes.push({ rowIndex: row._rowIndex, values: finalValues });
+  }
+
+  // Every row is resolved and validated before anything is written, so a bad
+  // entry anywhere in the batch means none of it lands.
+  if (!isConfigured()) {
+    for (const w of writes) updateDemoRow(sheetName, w.rowIndex, w.values);
+    invalidateSheetCache(sheetName);
+    return {};
+  }
+
+  const base = getBaseUrl();
+  const authParam = getAuthParam();
+  const url = `${base}/values:batchUpdate${authParam ? '?' + authParam : ''}`;
+  const res = await writeWithAuthRetry((token) => fetch(url, {
+    method: 'POST',
+    headers: writeHeaders(token),
+    body: JSON.stringify({
+      valueInputOption: 'USER_ENTERED',
+      data: writes.map(w => ({
+        range: `${sheetName}!A${w.rowIndex}:${columnLetter(w.values.length)}${w.rowIndex}`,
+        values: [w.values],
+      })),
+    }),
+  }));
+
+  if (!res.ok) await throwWriteError(res, `Failed to update ${sheetName}`);
+
+  invalidateSheetCache(sheetName);
+  return res.json();
+}
+
+/**
  * Delete the row identified by `idField`/`idValue`. Refuses rather than
  * deleting an unidentified row — see findRowById.
  *
@@ -598,7 +699,7 @@ export async function deleteRow(sheetName, rowIndex) {
 // Sheet Initialization & Seeding
 // ============================================
 
-const SHEET_HEADERS = {
+export const SHEET_HEADERS = {
   [CONFIG.SHEET_PARTNERS]: ['partner_id', 'username', 'display_name', 'partner_type', 'tier', 'region', 'created_at', 'is_admin', 'password_hash', 'status', 'hq_location'],
   [CONFIG.SHEET_OPPORTUNITIES]: ['opportunity_id', 'partner_id', 'deal_name', 'customer_name', 'deal_value', 'status', 'stage', 'expected_close', 'description', 'created_at', 'updated_at', 'notes', 'lead_source'],
   [CONFIG.SHEET_EVENTS]: ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count', 'event_password'],

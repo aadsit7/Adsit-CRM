@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, appendRows, updateRowById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRowById, updateRowsById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO, parseDate, isDateInRange } from '../utils/date.js';
@@ -1096,19 +1096,32 @@ export async function openEventModal(event, container, onSaved) {
       }
 
       // Skip updates that would blank out an existing row.
+      // Skipped rather than aborting the save when there is no id to address
+      // the write with — see the same note in admin-opportunities.js.
+      const editedButUnaddressable = workingDescriptions.filter(d =>
+        !d._deleted && !d._isNew && d._modified && !d.description_id && !isDescriptionEmpty(d)
+      );
+      if (editedButUnaddressable.length) {
+        console.warn(
+          `[Descriptions] ${editedButUnaddressable.length} edited description(s) have no `
+          + 'description_id and were not saved — add an id to those rows in the spreadsheet.',
+        );
+      }
       const toUpdate = workingDescriptions.filter(d =>
-        !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
+        !d._deleted && !d._isNew && d._modified && d.description_id && !isDescriptionEmpty(d)
       );
       // Addressed by description_id — see the same note in
       // admin-opportunities.js. This loop runs straight after the deletes
       // above, which shift every row beneath them.
-      for (const d of toUpdate) {
-        const values = [
+      // One read and one write for the batch — see the same note in
+      // admin-opportunities.js.
+      await updateRowsById(CONFIG.SHEET_EVENT_DESCRIPTIONS, 'description_id', toUpdate.map(d => ({
+        id: d.description_id,
+        values: [
           d.description_id, eventId, data.title,
           d.description_date, d.description_text, d.created_at,
-        ];
-        await updateRowById(CONFIG.SHEET_EVENT_DESCRIPTIONS, 'description_id', d.description_id, values);
-      }
+        ],
+      })));
 
       // Skip brand-new cards where the user never actually typed anything.
       const toInsert = workingDescriptions.filter(d =>

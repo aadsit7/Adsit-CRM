@@ -2,7 +2,7 @@
 // Admin Partner Detail View
 // ============================================
 
-import { readSheetAsObjects, appendRow, appendRows, updateRowById, deleteRowById, isConfigured, addDemoRow, ensureSheetWithHeaders } from '../sheets.js';
+import { readSheetAsObjects, appendRow, appendRows, updateRowById, updateRowsById, deleteRowById, isConfigured, addDemoRow, ensureSheetWithHeaders } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, uuid } from '../utils/dom.js';
 import { formatDate, todayISO, nowISO } from '../utils/date.js';
@@ -394,15 +394,19 @@ let contactBackfillPromise = null;
 // filled values are already on screen. A failure only logs: the next page
 // open retries, and nothing else depends on it.
 async function persistContactBackfill(contacts) {
-  for (const c of contacts) {
-    if (!c.contact_id) continue;
-    try {
-      await updateRowById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', c.contact_id,
-        (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...c }));
-    } catch (err) {
-      console.warn('[Partner Contacts] contact backfill not saved:', err.message);
-      return; // the remaining rows would almost certainly fail the same way
-    }
+  const entries = contacts
+    .filter(c => c.contact_id)
+    .map(c => ({
+      id: c.contact_id,
+      values: (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...c }),
+    }));
+  if (!entries.length) return;
+  try {
+    // One read and one write. This used to resolve each contact separately,
+    // which meant a full read of the tab per contact on every page open.
+    await updateRowsById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', entries);
+  } catch (err) {
+    console.warn('[Partner Contacts] contact backfill not saved:', err.message);
   }
 }
 
@@ -976,10 +980,19 @@ async function handleScanContacts(partner, btn) {
     // analysis finishing in that window writes analysis_state/analysis_json on
     // this same row, and writing the pre-scan snapshot back would blank it.
     // Only the fields the merge actually computed are applied.
-    for (const changed of merge.toUpdate) {
-      await updateRowById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', changed.contact_id,
-        (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...changed }));
-    }
+    // One read and one write for the batch: a scan can touch dozens of
+    // contacts, and resolving each one separately meant a full read of the
+    // tab per contact.
+    // Filtered on contact_id for the same reason persistContactBackfill is:
+    // the merge gates on `_rowIndex`, so a hand-entered row with a blank
+    // column A reaches here, and one unaddressable row would otherwise throw
+    // away every enrichment the scan just computed for all the others.
+    await updateRowsById(CONFIG.SHEET_PARTNER_CONTACTS, 'contact_id', merge.toUpdate
+      .filter(changed => changed.contact_id)
+      .map(changed => ({
+        id: changed.contact_id,
+        values: (fresh) => partnerContactRowValues({ ...partnerContactFromRow(fresh), ...changed }),
+      })));
 
     warnings.forEach(w => console.warn('[Partner Contacts]', w));
     const skipped = merge.skippedNew || [];
