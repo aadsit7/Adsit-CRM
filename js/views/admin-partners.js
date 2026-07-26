@@ -105,6 +105,35 @@ function reRender() {
     });
 }
 
+// Write an edited partner back.
+//
+// The columns this form edits come from `data`; the three it does not come
+// from `fresh` — the row as it is in the sheet right now, not as it was when
+// the modal opened. That matters most for password_hash: a partner who changed
+// their password while an admin had this form open would otherwise have the
+// old hash written back over it, locking them out. is_admin is the same shape
+// of problem with worse consequences.
+//
+// Split out of the form handler so it can be exercised directly — see
+// __partnerWriteInternals.
+async function savePartnerEdit(partnerId, data) {
+  return updateRowById(CONFIG.SHEET_PARTNERS, 'partner_id', partnerId, (fresh) => [
+    fresh.partner_id,
+    data.username,
+    data.display_name,
+    data.partner_type,
+    data.tier,
+    data.region,
+    fresh.created_at,
+    fresh.is_admin || 'FALSE',
+    fresh.password_hash || '',
+    data.status,
+    data.hq_location || '',
+  ]);
+}
+
+export const __partnerWriteInternals = { savePartnerEdit };
+
 function partnerInitials(name) {
   return (name || '').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase() || '?';
 }
@@ -414,27 +443,7 @@ function openPartnerModal(partner) {
   const form = buildForm(fields, async (data) => {
     try {
       if (isEdit) {
-        // The columns this form edits come from `data`; the three it does not
-        // come from `fresh` — the row as it is in the sheet right now, not as
-        // it was when the modal opened. That matters most for password_hash:
-        // a partner who changed their password while an admin had this form
-        // open would otherwise have the old hash written back over it, locking
-        // them out. is_admin is the same shape of problem with worse
-        // consequences.
-        await updateRowById(CONFIG.SHEET_PARTNERS, 'partner_id', partner.partner_id, (fresh) => [
-          fresh.partner_id,
-          data.username,
-          data.display_name,
-          data.partner_type,
-          data.tier,
-          data.region,
-          fresh.created_at,
-          fresh.is_admin || 'FALSE',
-          fresh.password_hash || '',
-          data.status,
-          data.hq_location || '',
-        ]);
-
+        await savePartnerEdit(partner.partner_id, data);
         showToast('Partner updated successfully!', 'success');
       } else {
         const passwordHash = await sha256(CONFIG.DEFAULT_PASSWORD);

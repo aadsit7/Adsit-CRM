@@ -135,6 +135,23 @@ function reRender() {
     });
 }
 
+// Move an event to another status.
+//
+// Same shape as the opportunities kanban: a drag sets one column and the rest
+// are read back from the sheet, so the move cannot revert an edit made since
+// this card was drawn. Writes A:M — lead_count and event_password sit past the
+// end of the range and are left alone.
+async function saveEventStatus(eventId, status) {
+  return updateRowById(CONFIG.SHEET_EVENTS, 'event_id', eventId, (fresh) => [
+    fresh.event_id, fresh.title, fresh.description, fresh.event_date,
+    fresh.end_date || fresh.event_date, fresh.event_type, fresh.location,
+    fresh.url, fresh.created_by, fresh.created_at, status, fresh.partner_id || '',
+    fresh.checklist || '',
+  ]);
+}
+
+export const __eventWriteInternals = { saveEventStatus };
+
 function getPartnerName(partnerId) {
   if (!partnerId || !cachedPartners) return '';
   const p = cachedPartners.find(p => p.partner_id === partnerId);
@@ -519,17 +536,7 @@ function renderBoard(events) {
       if (!evt || evt.status === status) return;
 
       try {
-        // Same as the opportunities kanban: a drag sets one column, and the
-        // rest are read back from the sheet so the move cannot revert an edit
-        // made since this card was drawn. Note this writes A:M — lead_count and
-        // event_password sit past the end and are left alone.
-        await updateRowById(CONFIG.SHEET_EVENTS, 'event_id', evt.event_id, (fresh) => [
-          fresh.event_id, fresh.title, fresh.description, fresh.event_date,
-          fresh.end_date || fresh.event_date, fresh.event_type, fresh.location,
-          fresh.url, fresh.created_by, fresh.created_at, status, fresh.partner_id || '',
-          fresh.checklist || '',
-        ]);
-
+        await saveEventStatus(evt.event_id, status);
         showToast(`Moved "${evt.title}" to ${status}`, 'success');
         reRender();
       } catch (err) {
