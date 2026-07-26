@@ -3,7 +3,7 @@
 // ============================================
 
 import { getCurrentUser } from '../auth.js';
-import { readSheetAsObjects, appendRow, updateRowById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
+import { readSheetAsObjects, appendRow, updateRowById, updateRowsById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, $, debounce, formatCurrency } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO } from '../utils/date.js';
@@ -2228,21 +2228,37 @@ export async function openOppModal(opp, container, onSaved) {
       // Skip updates that would blank out an existing row. This matches
       // the card-local Save validation so modal-level Save can't bypass it
       // when the user clears the editor and hits Save Changes directly.
+      // `description_id` is required to address the write, so a row without
+      // one is skipped rather than aborting the whole save. That only happens
+      // for a hand-entered sheet row with a blank column A — the delete filter
+      // above has excluded the same rows since the deletes moved onto ids.
+      const editedButUnaddressable = workingDescriptions.filter(d =>
+        !d._deleted && !d._isNew && d._modified && !d.description_id && !isDescriptionEmpty(d)
+      );
+      if (editedButUnaddressable.length) {
+        console.warn(
+          `[Descriptions] ${editedButUnaddressable.length} edited description(s) have no `
+          + 'description_id and were not saved — add an id to those rows in the spreadsheet.',
+        );
+      }
       const toUpdate = workingDescriptions.filter(d =>
-        !d._deleted && !d._isNew && d._modified && !isDescriptionEmpty(d)
+        !d._deleted && !d._isNew && d._modified && d.description_id && !isDescriptionEmpty(d)
       );
       // Addressed by description_id, like the deletes above. This loop runs
       // straight after them, so `_rowIndex` here was doubly wrong: stale from
       // the modal opening, and then shifted again by every delete just made.
       // Descriptions added by the document-analysis flow have no `_rowIndex`
       // at all, which produced the range `Aundefined:Fundefined`.
-      for (const d of toUpdate) {
-        const values = [
+      // One read and one write for the whole batch, not one of each per
+      // description. Safe to resolve them together because the deletes above
+      // have already finished — an update never moves a row.
+      await updateRowsById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', toUpdate.map(d => ({
+        id: d.description_id,
+        values: [
           d.description_id, opportunityId, data.deal_name,
           d.description_date, d.description_text, d.created_at,
-        ];
-        await updateRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', d.description_id, values);
-      }
+        ],
+      })));
 
       // Skip brand-new cards where the user never actually typed anything.
       const toInsert = workingDescriptions.filter(d =>

@@ -4,18 +4,34 @@
 // Used by both the AI Assistant chat view and the Randy voice assistant
 
 import { loadSheetData, invalidateSheetCache } from './ai.js';
-import { appendRow, updateRowById, deleteRowById, keyFieldFor } from '../sheets.js';
+import { appendRow, updateRowById, deleteRowById, keyFieldFor, SHEET_HEADERS as ALL_SHEET_HEADERS } from '../sheets.js';
 
-// ── Sheet Headers (for write operations) ───────────────────────────
-export const SHEET_HEADERS = {
-  Partners: ['partner_id', 'username', 'display_name', 'partner_type', 'tier', 'region', 'created_at', 'is_admin', 'password_hash', 'status', 'hq_location'],
-  Opportunities: ['opportunity_id', 'partner_id', 'deal_name', 'customer_name', 'deal_value', 'status', 'stage', 'expected_close', 'description', 'created_at', 'updated_at', 'notes', 'lead_source'],
-  Events: ['event_id', 'title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'url', 'created_by', 'created_at', 'status', 'partner_id', 'checklist', 'lead_count'],
-  Transcripts: ['transcript_id', 'partner_id', 'partner_name', 'conversation_date', 'transcript_text', 'created_at'],
-  Meeting_Index: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
-  AI_Conversations: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
-};
-export const BLOCKED_FIELDS = ['password_hash', 'is_admin'];
+// ── Sheets the AI may write to ─────────────────────────────────────
+// The allowlist is the sheet NAMES; the column order comes from sheets.js, so
+// this file cannot drift from the schema the write helpers resolve rows
+// against.
+//
+// Deriving it did change one thing, and not for the better: this file's Events
+// row used to stop at `lead_count`, one short of `event_password`, so an AI
+// update wrote the range A:N and simply could not reach that column. That was
+// protection by accident, but it was real protection — `event_password` is the
+// Event Workspace access gate, and the confirmation card an admin approves
+// shows the sheet, the action type and the row match, never `action.changes`.
+// So it is blocked explicitly below instead.
+export const AI_WRITABLE_SHEETS = [
+  'Partners', 'Opportunities', 'Events', 'Transcripts', 'Meeting_Index', 'AI_Conversations',
+];
+
+export const SHEET_HEADERS = Object.fromEntries(
+  AI_WRITABLE_SHEETS
+    .map(name => [name, ALL_SHEET_HEADERS[name]])
+    .filter(([, headers]) => Array.isArray(headers)),
+);
+
+// Columns no AI action may set, whatever it asks for. These are credentials
+// and privilege flags: a change to one is never what the summary on the
+// confirmation card says it is.
+export const BLOCKED_FIELDS = ['password_hash', 'is_admin', 'event_password'];
 
 // ── Action Parser ──────────────────────────────────────────────────
 export function parseActions(responseText) {

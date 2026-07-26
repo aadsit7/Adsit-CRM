@@ -512,6 +512,16 @@ export async function loadSheetData(forceRefresh = false) {
     return safe;
   });
 
+  // Events carry `event_password`, the Event Workspace access gate, and the
+  // whole row is serialized into every prompt — so it was being handed to the
+  // model provider on each turn and could be read back out of any chat. Strip
+  // it like the partner credentials above. Writes are unaffected: an AI update
+  // rebuilds the row from a fresh read of the sheet, not from this copy.
+  const sanitizedEvents = events.map(e => {
+    const { event_password, ...safe } = e;
+    return safe;
+  });
+
   const transcriptIndex = transcripts.map(t => ({
     transcript_id: t.transcript_id,
     partner_id: t.partner_id,
@@ -536,7 +546,7 @@ export async function loadSheetData(forceRefresh = false) {
   cachedSheetData = {
     partners: sanitizedPartners,
     opportunities: opportunities,
-    events: events,
+    events: sanitizedEvents,
     meetingIndex: meetingIndex,
     transcriptIndex: transcriptIndex,
     fullTranscripts: transcripts,
