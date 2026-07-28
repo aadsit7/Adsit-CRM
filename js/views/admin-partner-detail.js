@@ -503,45 +503,56 @@ function bioLinkCell(href) {
   }, prettyUrlLabel(s));
 }
 
-function bioMatrixRow(label, valueNode) {
-  return el('tr', {},
-    el('th', { class: 'partner-bio__matrix-label', scope: 'row' }, label),
-    el('td', { class: 'partner-bio__matrix-value' }, valueNode),
+// Long enough that the two-line clamp in the profile grid could hide something.
+// Anything past this carries the full text as its own tooltip.
+const BIO_TOOLTIP_AT = 56;
+
+/**
+ * One fact in the profile grid: a micro label with its value underneath.
+ * `variant` picks the overflow behaviour — plain text clamps to two lines,
+ * a link truncates to one with an ellipsis, a badge is left alone.
+ */
+function bioFact(label, valueNode, { variant = '', title = '' } = {}) {
+  return el('div', { class: 'partner-bio__fact' },
+    el('dt', { class: 'partner-bio__fact-label' }, label),
+    el('dd', {
+      class: `partner-bio__fact-value${variant ? ` partner-bio__fact-value--${variant}` : ''}`,
+      title: title || undefined,
+    }, valueNode),
   );
 }
 
+function bioTextFact(label, value) {
+  const s = String(value == null ? '' : value).trim();
+  const long = s && s !== NA && s.length > BIO_TOOLTIP_AT;
+  return bioFact(label, bioValueCell(value), { variant: 'text', title: long ? s : '' });
+}
+
 /**
- * The profile matrix — the field/detail table the bio is read from, with the
- * website and LinkedIn page as live links.
+ * The profile grid — the researched facts as label-above-value cells, three to
+ * a row on desktop, with the website and LinkedIn page as live links. This was
+ * a full-width Field/Detail table; nine one-line facts spent nine tall rows and
+ * half the page width on an empty label column, which is what made a finished
+ * bio read as messy. Same nine facts, a third of the height, nothing dropped.
  */
-function buildPartnerBioMatrix(bio) {
+function buildPartnerBioFacts(bio) {
   const rating = bio.research_competency_rating == null ? NA : `${bio.research_competency_rating}/10`;
   const sources = bio.verification_level == null
     ? NA
-    : `${bio.verification_level} sources confirmed each data point`;
+    : `${bio.verification_level} per data point`;
 
-  return el('div', { class: 'events-page__table-wrapper partner-bio__table-wrapper' },
-    el('table', { class: 'events-page__table events-page__table--compact partner-bio__matrix' },
-      el('thead', {},
-        el('tr', {},
-          el('th', {}, 'Field'),
-          el('th', {}, 'Detail'),
-        )
-      ),
-      el('tbody', {},
-        bioMatrixRow('Company name', bioValueCell(bio.company_name)),
-        bioMatrixRow('Company industry', bioValueCell(bio.company_industry)),
-        bioMatrixRow('Company website', bioLinkCell(bio.company_website)),
-        bioMatrixRow('Company LinkedIn', bioLinkCell(bio.company_linkedin_url)),
-        bioMatrixRow('Headquarters', bioValueCell(bio.headquarters)),
-        bioMatrixRow('Number of employees', bioValueCell(bio.number_of_employees)),
-        bioMatrixRow('Partner fit category', bio.partner_fit_category && bio.partner_fit_category !== NA
-          ? el('span', { class: 'partner-bio__fit' }, bio.partner_fit_category)
-          : bioValueCell(NA)),
-        bioMatrixRow('Research competency rating', bioValueCell(rating)),
-        bioMatrixRow('Verification level', bioValueCell(sources)),
-      )
-    )
+  return el('dl', { class: 'partner-bio__facts' },
+    bioTextFact('Company', bio.company_name),
+    bioTextFact('Industry', bio.company_industry),
+    bioTextFact('Headquarters', bio.headquarters),
+    bioFact('Website', bioLinkCell(bio.company_website), { variant: 'link' }),
+    bioFact('LinkedIn', bioLinkCell(bio.company_linkedin_url), { variant: 'link' }),
+    bioTextFact('Employees', bio.number_of_employees),
+    bioFact('Partner fit', bio.partner_fit_category && bio.partner_fit_category !== NA
+      ? el('span', { class: 'partner-bio__fit' }, bio.partner_fit_category)
+      : bioValueCell(NA)),
+    bioFact('Research confidence', bioValueCell(rating), { variant: 'text' }),
+    bioFact('Sources confirmed', bioValueCell(sources), { variant: 'text' }),
   );
 }
 
@@ -595,7 +606,7 @@ function buildPartnerBioContent(partner, bioRecord) {
           'This bio has not been saved to the spreadsheet — it will be lost when you reload. '
           + 'Check the Setup page, then run Analyze again.')
       : null,
-    buildPartnerBioMatrix(bio),
+    buildPartnerBioFacts(bio),
     el('div', { class: 'partner-bio__blocks' },
       buildPartnerBioList('What they do', bio.what_they_do),
       buildPartnerBioList('How Recast brings value', bio.how_recast_brings_value),
