@@ -498,7 +498,7 @@ test('the partner PDF renders the org chart section with statuses and the SAVED 
     { name: 'Zoe Alvarez — VP Alliances', status: 'engaged', depth: 0, contact_id: 'ct2' },
     { name: 'CTO (not yet identified)', status: 'missing', depth: 1 },
   ]);
-  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {}, health: { status: 'watch', label: 'Watch' } });
+  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {} });
   const texts = textStrings(calls);
   assert.ok(texts.some(t => /LIKELY ORG CHART/i.test(t)), 'org chart heading drawn');
   assert.ok(texts.some(t => /not an official org chart/i.test(t)), 'disclaimer drawn');
@@ -514,7 +514,7 @@ test('the PDF carries per-node provenance: corroboration, evidence sightings and
     { name: 'Bob Unger — Marketing Lead', status: 'introduced', depth: 1, line_confidence: 'observed', line_basis: 'cc’d for sign-off' },
     { name: 'Invented Person — COO', status: 'identified', depth: 1 },
   ], { anchors: EVIDENCE_ANCHORS });
-  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {}, health: { status: 'watch', label: 'Watch' } });
+  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {} });
   const texts = textStrings(calls);
   assert.ok(texts.some(t => t === 'ENGAGED · SAVED · CORROBORATED'), 'roster+evidence person tagged corroborated');
   assert.ok(texts.some(t => t === 'INTRODUCED · IN EVIDENCE · LINE OBSERVED'), 'evidence person carries its line rung');
@@ -526,6 +526,6 @@ test('the PDF carries per-node provenance: corroboration, evidence sightings and
 test('a PDF for an analysis without an org chart simply omits the section', async () => {
   const calls = installJsPdfShim();
   const analysis = parseWithOrgMap([]);
-  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {}, health: { status: 'watch', label: 'Watch' } });
+  await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: {} });
   assert.ok(!textStrings(calls).some(t => /LIKELY ORG CHART/i.test(t)));
 });

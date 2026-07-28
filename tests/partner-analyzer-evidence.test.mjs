@@ -16,7 +16,6 @@ import {
   isWonOpp, isActiveOpp, isLostOpp,
   buildPartnerKpis, buildContactAggregates, buildPartnerCriteriaFacts,
   assemblePartnerEvidence, collectPartnerAnchors, withCoverageFailures,
-  computeHealthSignals, detectRecentRiskEvidence,
 } from '../js/utils/partner-analyzer-evidence.js';
 
 const TODAY = '2026-07-21';
@@ -295,37 +294,4 @@ test('collectPartnerAnchors ties narrative ids to the right link target', () => 
   assert.equal(anchors.relatedById.get('ed1'), 'e1', 'event note links to its event');
   assert.equal(anchors.relatedById.get('t1'), 'p1', 'transcript links to the partner');
   assert.ok(anchors.structuredIds.has('o1') && anchors.structuredIds.has('e1') && anchors.structuredIds.has('p1'));
-});
-
-// ── Health signals + risk detection ──────────────────────────────────
-test('computeHealthSignals derives lastActivity, active signal, evidence count', () => {
-  const scoped = {
-    transcripts: selectPartnerTranscripts(TRANSCRIPTS, 'p1'),
-    opportunityDescriptions: selectOpportunityDescriptions(OPP_DESCRIPTIONS, collectOpportunityIds(selectPartnerOpportunities(OPPS, 'p1'))),
-    eventDescriptions: selectEventDescriptionsForPartner(EVENT_DESCRIPTIONS, collectEventIds(selectPartnerEvents(EVENTS, 'p1'))),
-    opportunities: selectPartnerOpportunities(OPPS, 'p1'),
-    events: selectPartnerEvents(EVENTS, 'p1'),
-  };
-  const kpis = buildPartnerKpis({ partner: P1, meetings: [], documents: [], ...scoped, today: TODAY });
-  const sig = computeHealthSignals({ partner: P1, kpis, ...scoped, today: TODAY });
-  assert.equal(sig.hasActiveSignal, true, 'active opp + upcoming event');
-  assert.equal(sig.createdAt, '2026-01-15');
-  assert.equal(sig.firstActivityDate, '2026-04-01', 'earliest touchpoint exposed for age fallback');
-  assert.ok(sig.evidenceCount > 0);
-  assert.equal(sig.recentRiskEvidence, false);
-});
-
-test('detectRecentRiskEvidence flags a recent risk note and a recent Lost opp', () => {
-  assert.equal(detectRecentRiskEvidence({
-    transcripts: [{ conversation_date: '2026-07-01', transcript_text: '<p>They want to cancel the partnership.</p>' }],
-    today: TODAY,
-  }), true);
-  // A Lost opp from long ago is NOT recent.
-  assert.equal(detectRecentRiskEvidence({
-    opportunities: [{ status: 'Lost', updated_at: '2025-01-01' }], today: TODAY,
-  }), false);
-  // A recent Lost opp IS recent risk.
-  assert.equal(detectRecentRiskEvidence({
-    opportunities: [{ status: 'Lost', updated_at: '2026-07-01' }], today: TODAY,
-  }), true);
 });

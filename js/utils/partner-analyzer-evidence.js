@@ -11,7 +11,6 @@
 //     model): counts, active pipeline value, won revenue, activity dates
 //   • deterministic + structured CRITERIA FACTS for the strict parser
 //   • bounded, privacy-safe EVIDENCE assembly with an explicit COVERAGE object
-//   • deterministic HEALTH SIGNALS for partner-analyzer-health.js
 //   • parser ANCHORS (valid ids/dates + source text for grounding)
 //
 // Privacy: EVENT contact rows (attendees) are reduced to counts only
@@ -28,7 +27,6 @@
 import { stripHtml } from './forecast-prompts.js';
 import { buildContactAggregates } from './event-analyzer-evidence.js';
 import { parseSavedPlaybook } from './event-analyzer-evidence.js';
-import { containsRiskLanguage, HEALTH_HEALTHY_MAX_DAYS, HEALTH_WATCH_MAX_DAYS } from './partner-analyzer-health.js';
 
 // Re-export so the Analyzer view and client can aggregate contacts without a
 // second import path.
@@ -776,88 +774,4 @@ export function collectPartnerAnchors(evidence, ids = {}) {
   contactIds.forEach(id => structuredIds.add(id));
 
   return { narrativeIds, narrativeDates, textById, textByDate, structuredIds, relatedById, partnerId, contactIds, contactNamesById };
-}
-
-// ── Health signals (deterministic inputs for the health function) ───
-/**
- * Compute the deterministic signals partner-analyzer-health.js consumes.
- *
- * @param {object} params
- * @param {object} params.partner
- * @param {object} params.kpis   Result of buildPartnerKpis().
- * @param {Array} [params.transcripts]
- * @param {Array} [params.opportunityDescriptions]
- * @param {Array} [params.eventDescriptions]
- * @param {Array} [params.opportunities]
- * @param {Array} [params.events]
- * @param {string} [params.today]
- * @returns {{ lastActivityDate, createdAt, firstActivityDate, hasActiveSignal, recentRiskEvidence, evidenceCount }}
- */
-export function computeHealthSignals({
-  partner, kpis, transcripts = [], opportunityDescriptions = [], eventDescriptions = [],
-  opportunities = [], events = [], today,
-} = {}) {
-  const k = kpis || {};
-  const todayISO = String(today || k.today || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  const todayMs = toMs(todayISO);
-
-  // Concrete active signal: active opportunity, upcoming partner-specific
-  // event, or a recent meeting/transcript (a documented next step proxy).
-  const recentInteraction = (() => {
-    const cutoff = todayMs - HEALTH_HEALTHY_MAX_DAYS * 86_400_000;
-    const dates = [];
-    (transcripts || []).forEach(t => dates.push(firstDate(t.conversation_date, t.created_at)));
-    const anyRecent = dates.some(d => { const ms = toMs(d); return ms != null && ms <= todayMs && ms >= cutoff; });
-    return anyRecent;
-  })();
-  const hasActiveSignal = (k.activeOppCount || 0) > 0 || (k.upcomingEventCount || 0) > 0 || recentInteraction;
-
-  const recentRiskEvidence = detectRecentRiskEvidence({
-    transcripts, opportunityDescriptions, eventDescriptions, opportunities, events,
-    today: todayISO, windowDays: HEALTH_WATCH_MAX_DAYS,
-  });
-
-  const evidenceCount = (k.transcriptCount || 0) + (k.standaloneMeetingCount || 0) + (k.documentCount || 0)
-    + (k.totalOpps || 0) + (k.eventCount || 0)
-    + (opportunityDescriptions || []).length + (eventDescriptions || []).length;
-
-  return {
-    lastActivityDate: k.mostRecentActivityDate || '',
-    createdAt: String(partner && partner.created_at || k.created_at || '').trim(),
-    firstActivityDate: k.firstActivityDate || '',
-    hasActiveSignal,
-    recentRiskEvidence,
-    evidenceCount,
-  };
-}
-
-/**
- * Deterministically detect whether a RECENT source explicitly documents a
- * relationship risk: risk language in a recent transcript/note, a recently
- * Lost opportunity, or a recently Cancelled partner event.
- */
-export function detectRecentRiskEvidence({
-  transcripts = [], opportunityDescriptions = [], eventDescriptions = [],
-  opportunities = [], events = [], today, windowDays = HEALTH_WATCH_MAX_DAYS,
-} = {}) {
-  const todayMs = toMs(String(today || new Date().toISOString().slice(0, 10)).slice(0, 10));
-  const cutoff = todayMs - windowDays * 86_400_000;
-  const isRecent = (d) => { const ms = toMs(d); return ms != null && ms <= todayMs && ms >= cutoff; };
-
-  for (const t of transcripts) {
-    if (isRecent(firstDate(t.conversation_date, t.created_at)) && containsRiskLanguage(stripHtml(t.transcript_text || ''))) return true;
-  }
-  for (const d of opportunityDescriptions) {
-    if (isRecent(firstDate(d.description_date, d.created_at)) && containsRiskLanguage(stripHtml(d.description_text || d.text || ''))) return true;
-  }
-  for (const d of eventDescriptions) {
-    if (isRecent(firstDate(d.description_date, d.created_at)) && containsRiskLanguage(stripHtml(d.description_text || d.text || ''))) return true;
-  }
-  for (const o of opportunities) {
-    if (isLostOpp(o) && isRecent(firstDate(o.updated_at, o.created_at))) return true;
-  }
-  for (const e of events) {
-    if (String(e.status || '').trim().toLowerCase() === 'cancelled' && isRecent(firstDate(e.event_date, e.created_at))) return true;
-  }
-  return false;
 }

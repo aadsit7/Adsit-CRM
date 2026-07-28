@@ -9,9 +9,9 @@ The Analyzer tab (`/admin/forecast`) now supports **three** entity modes:
 | **Partner** | **Partner Maturity** | **`js/utils/partner-analyzer-stages.js`** |
 
 Partner mode lets an administrator pick a partner and generate an
-evidence‑grounded assessment of that partner's **maturity**, **relationship
-health**, enablement, joint activity, pipeline and revenue progress — using the
-same methodology as the other two analyzers: collect CRM evidence, separate
+evidence‑grounded assessment of that partner's **maturity**, enablement, joint
+activity, pipeline and revenue progress — using the same methodology as the
+other two analyzers: collect CRM evidence, separate
 deterministic facts from AI interpretation, score every criterion, require
 traceable evidence, strictly parse/validate the model output, and derive stage
 status from the validated criteria.
@@ -69,39 +69,6 @@ Profile & Fit maturity so far."* The Analyzer never modifies `tier` or `status`.
 
 ---
 
-## Relationship health (separate from maturity)
-
-Health is derived **deterministically** (never by the model) in
-`js/utils/partner-analyzer-health.js`, with named, tunable thresholds:
-
-- **Healthy** — meaningful activity within `HEALTH_HEALTHY_MAX_DAYS` (45) **and**
-  a concrete active signal (active opportunity, upcoming partner event, recent
-  meeting/next step).
-- **Watch** — no meaningful activity for 46–90 days, or relationship evidence
-  with no concrete next step / active motion, **or** a brand-new partnership
-  whose early conversation contains cautionary language (see below).
-- **At Risk** — no meaningful activity for >90 days, or a **recent** source that
-  explicitly documents disengagement / blocked progress / cancellation — **but
-  only once the partnership is past the new-partner grace window**.
-- **Insufficient history** — a new partner (created within
-  `NEW_PARTNER_GRACE_DAYS`, 90) with little/no activity is treated fairly, not
-  automatically At Risk.
-
-**Partnership age is a first-class input.** Health factors in *how long the
-partnership has existed*, measured from the Partners row `created_at`; when that
-is missing it falls back to the **earliest known interaction** (`firstActivityDate`
-— "when we first engaged"). A relationship that has only just begun **cannot be
-At Risk** — it has not had time to deteriorate. So if the very first call happens
-to use words like "blocked", "on hold" or "not interested" (usually describing
-the *prospect's* situation, not the partnership), a partnership inside the grace
-window is surfaced as **Watch**, not At Risk. This is why the create date is
-recorded for partners, opportunities and events.
-
-An inactive CRM `status` is shown separately; it never silently becomes a health
-label. Boundary dates (exactly 45 / 90) are tested exactly.
-
----
-
 ## Deterministic vs AI‑derived
 
 | Computed in application code (deterministic) | Interpreted by the model (then validated) |
@@ -111,11 +78,10 @@ label. Boundary dates (exactly 45 / 90) are tested exactly.
 | **Active pipeline value**, **won revenue** | Summary, next actions, gaps, questions, risks, momentum |
 | Stage distribution, nearest expected close | Confidence label |
 | Most recent meaningful activity date | — |
-| Relationship health label | *(never — the model must not invent it)* |
 | Operational + furthest stage, completion % | *(never — recomputed from validated criteria)* |
 
-The model is **never** trusted for CRM metrics, the health label, tier, status,
-pipeline, revenue, event count or opportunity count.
+The model is **never** trusted for CRM metrics, tier, status, pipeline, revenue,
+event count or opportunity count.
 
 ---
 
@@ -269,8 +235,7 @@ anti‑hallucination Golden Rule:
 | Module | Responsibility |
 | --- | --- |
 | `js/utils/partner-analyzer-stages.js` | Framework definitions + board derivation |
-| `js/utils/partner-analyzer-health.js` | Deterministic relationship health |
-| `js/utils/partner-analyzer-evidence.js` | Strict scoping, KPIs, criteria facts, bounded evidence, coverage, anchors, health signals, saved-contact roster |
+| `js/utils/partner-analyzer-evidence.js` | Strict scoping, KPIs, criteria facts, bounded evidence, coverage, anchors, saved-contact roster |
 | `js/utils/partner-analyzer-schema.js` | Strict parser / validator + org-chart validation & tree/stat derivations |
 | `js/utils/partner-analyzer-prompts.js` | Prompt builder |
 | `js/utils/partner-analyzer-client.js` | Anthropic client + orchestration (`preparePartnerAnalysis`, `requestPartnerAnalysisJson`) |
@@ -278,7 +243,7 @@ anti‑hallucination Golden Rule:
 | `js/utils/analyzer-job-key.js` | `{ entityType, entityId, runId }` background‑job key |
 | `js/views/admin-forecast.js` | Analyzer view — adds Partner mode (isolated state/job) |
 
-Tests: `tests/partner-analyzer-{stages,health,evidence,schema,prompts,integration,pdf-builder,org-chart}.test.mjs`.
+Tests: `tests/partner-analyzer-{stages,evidence,schema,prompts,integration,pdf-builder,org-chart}.test.mjs`.
 Run with `npm test`.
 
 ### Background‑job & mode isolation

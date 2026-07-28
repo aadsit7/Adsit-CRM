@@ -23,8 +23,8 @@
 //
 // Stage status, the operational + furthest-demonstrated stages and the
 // completion percentage are ALWAYS recomputed from the validated criteria —
-// the model can never self-award its stage, its CRM metrics, its health label,
-// its tier or its status.
+// the model can never self-award its stage, its CRM metrics, its tier or its
+// status.
 // ============================================================
 
 import {
