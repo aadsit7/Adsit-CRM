@@ -90,6 +90,11 @@ export const CONFIG = {
   // Contacts extracted from a partner's description notes and attachments
   // (see js/utils/partner-contacts.js for the row contract).
   SHEET_PARTNER_CONTACTS: 'Partner_Contacts',
+  // One researched company profile per partner — the Partner Bio the
+  // "Analyze" button on the partner page produces from public sources
+  // (see js/utils/partner-bio-schema.js for the row contract). Created on
+  // first save, so older spreadsheets simply have no such tab yet.
+  SHEET_PARTNER_BIOS: 'Partner_Bios',
   // Saved partner-event playbook state, one row per event. Written by the
   // standalone Event Workspace (savePlaybook Apps Script action) and read by
   // the Event Analyzer as an optional evidence source. See apps-script/Code.gs

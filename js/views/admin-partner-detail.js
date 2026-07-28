@@ -51,6 +51,15 @@ import {
   leadCheckReportToPlainText,
 } from '../utils/partner-contact-leadcheck.js';
 import { requestLeadCheckAnalysis } from '../utils/partner-contact-leadcheck-client.js';
+import {
+  PARTNER_BIO_HEADERS,
+  NA,
+  partnerBioRowValues,
+  partnerBioToMarkdown,
+  partnerBioIsEmpty,
+  selectPartnerBioRow,
+} from '../utils/partner-bio-schema.js';
+import { requestPartnerBio } from '../utils/partner-bio-client.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 
 export const title = 'Partner Detail';
@@ -77,13 +86,16 @@ export async function render(container, params) {
     // parallel with the reads the page already needs, so it costs no extra
     // wall-clock, and a failure (or a spreadsheet with no such tab yet) just
     // means no links, never a broken page.
-    const [partners, opportunities, events, transcripts, contactRows, documentRows] = await Promise.all([
+    const [partners, opportunities, events, transcripts, contactRows, documentRows, bioRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_PARTNERS),
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
       readSheetAsObjects(CONFIG.SHEET_EVENTS),
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS),
       readSheetAsObjects(CONFIG.SHEET_PARTNER_CONTACTS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITY_DOCUMENTS).catch(() => []),
+      // Partner_Bios is created on the first Analyze run, so a spreadsheet
+      // that has never had one simply has no such tab — never a page error.
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_BIOS).catch(() => []),
     ]);
 
     const partner = partners.find(p => p.partner_id === partnerId);
@@ -131,7 +143,13 @@ export async function render(container, params) {
     // ever surface on their row.
     const contactPdfIndex = indexContactAnalyzerPdfs(documentRows);
 
-    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex);
+    // The saved Partner Bio, if this partner has been researched. The
+    // session fallback covers the window where the write did not land (demo
+    // mode, or a save that failed after the research succeeded) — the user
+    // still sees the profile they just paid for instead of an empty panel.
+    const bioRecord = selectPartnerBioRow(bioRows, partnerId) || partnerBioSessionCache.get(partnerId) || null;
+
+    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex, bioRecord);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading data'),
@@ -145,7 +163,7 @@ function reRender(partnerId) {
   render(viewContainer, { id: partnerId });
 }
 
-function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = [], contactPdfIndex = null) {
+function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = [], contactPdfIndex = null, bioRecord = null) {
   const tierClass = tierSlug(partner.tier);
   const pipelineValue = opportunities.filter(o => o.status !== 'Won').reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
   const wonDeals = opportunities.filter(o => o.status === 'Won');
@@ -189,6 +207,9 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
               partner.tier
                 ? el('span', { class: 'partner-detail-page__hero-tier' }, partner.tier)
                 : null,
+              // Sits with the name because that is what it researches — the
+              // company, not the CRM relationship.
+              buildBioAnalyzeButton(partner, bioRecord),
             ),
             metaParts.length > 1
               ? el('div', { class: 'partner-detail-page__hero-meta' },
@@ -222,6 +243,11 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
       ),
       buildPartnerRevenueByEvent(partnerEvents, opportunities),
     ),
+
+    // Section 0: Partner Bio — the researched company profile, directly under
+    // the hero because it answers "who is this company" before anything about
+    // our pipeline with them makes sense.
+    buildPartnerBioSection(partner, bioRecord),
 
     // Section 1: Upcoming Joint Events
     buildUpcomingEventsSection(sortedEvents, partner, container),
@@ -366,6 +392,376 @@ function buildPartnerStatCell(label, value) {
     el('div', { class: 'partner-detail-page__stat-label' }, label),
     el('div', { class: 'partner-detail-page__stat-value' }, value),
   );
+}
+
+// ============================================
+// Partner Bio — the researched company profile
+// ============================================
+// One AI research pass over the authoritative public sources (Crunchbase,
+// LinkedIn, SEC EDGAR, Bloomberg, Hoovers, Glassdoor, CRN, Channel Futures,
+// ISG, Google News — see js/utils/partner-bio-prompts.js) fills the profile
+// matrix and the three value sections below.
+//
+// Nothing in this panel is CRM data. The partner's name is only the search
+// seed; every field has to be confirmed against those sources or it shows as
+// NA. That is why an NA here is a result, not a bug — it says the research
+// could not verify the field to the required standard, which is more useful
+// than a plausible guess.
+//
+// This is the complement to the Partner Analyzer: that scores OUR relationship
+// from OUR notes, this describes THEIR company from the public record.
+
+// Which partners' bio panels the user has collapsed, surviving the full-page
+// re-renders every mutation in this view performs. Absence means open — the
+// default for every partner.
+const collapsedBioSections = new Set();
+
+// partner_id → the record produced in this session. Read ONLY as a fallback
+// when the sheet has no row for the partner: in demo mode, or when the save
+// failed after the research succeeded. Several minutes of research is too
+// expensive to lose to a failed write, and the panel says so when that is why
+// it is showing.
+const partnerBioSessionCache = new Map();
+
+// The partner_id whose research is running, or null. A partner id rather than
+// a bare boolean so a re-rendered button shows the correct per-partner state.
+let bioRunInFlight = null;
+
+// The research legitimately runs for minutes across several rounds of
+// searching, so the pill gets a budget that matches the work — on the default
+// 4-minute timeout it would declare a healthy run failed while it was still
+// going, and then give no success signal when it finished.
+const BIO_PILL_TIMEOUT_MS = 20 * 60 * 1000;
+
+function bioAnalyzeIconSvg() {
+  return '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">'
+    + '<path d="M5.6 1.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1 1-2.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '<path d="M10.6 7.9l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>'
+    + '</svg>';
+}
+
+/**
+ * The Analyze button. The same control appears beside the partner's name and
+ * in the Bio section header, so whichever one the user reaches for does the
+ * same thing. It reads the in-flight state at build time, so a re-render
+ * during a run rebuilds it as "Analyzing…" rather than looking idle.
+ */
+function buildBioAnalyzeButton(partner, bioRecord, { className = 'partner-bio__analyze' } = {}) {
+  const running = bioRunInFlight === partner.partner_id;
+  const hasBio = !!(bioRecord && bioRecord.bio && !partnerBioIsEmpty(bioRecord.bio));
+  const btn = el('button', {
+    class: `${className}${running ? ' partner-bio__analyze--running' : ''}`,
+    disabled: running || undefined,
+    title: hasBio
+      ? 'Research this company again and replace the saved bio'
+      : 'Research this company on the authoritative sources and build its bio',
+    onClick: (e) => {
+      e.stopPropagation();
+      runPartnerBioAnalysis(partner, btn);
+    },
+  },
+    running ? null : el('span', { class: 'partner-bio__analyze-icon', html: bioAnalyzeIconSvg() }),
+    running ? 'Analyzing…' : (hasBio ? 'Re-analyze' : 'Analyze'),
+  );
+  return btn;
+}
+
+// A verified value, or the honest NA the research protocol requires.
+function bioValueCell(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s || s === NA) {
+    return el('span', {
+      class: 'partner-bio__na',
+      title: 'Not confirmed across the authoritative sources',
+    }, NA);
+  }
+  return s;
+}
+
+// linkedin.com/company/acme rather than the full query-string-laden URL. The
+// href keeps the exact URL the research verified; only the label is shortened.
+function prettyUrlLabel(href) {
+  try {
+    const u = new URL(href);
+    const host = u.hostname.replace(/^www\./i, '');
+    const path = u.pathname.replace(/\/+$/, '');
+    return `${host}${path}`;
+  } catch {
+    return href;
+  }
+}
+
+function bioLinkCell(href) {
+  const s = String(href == null ? '' : href).trim();
+  if (!s || s === NA) return bioValueCell(NA);
+  return el('a', {
+    class: 'partner-bio__link',
+    href: s,
+    target: '_blank',
+    rel: 'noopener',
+    title: s,
+  }, prettyUrlLabel(s));
+}
+
+function bioMatrixRow(label, valueNode) {
+  return el('tr', {},
+    el('th', { class: 'partner-bio__matrix-label', scope: 'row' }, label),
+    el('td', { class: 'partner-bio__matrix-value' }, valueNode),
+  );
+}
+
+/**
+ * The profile matrix — the field/detail table the bio is read from, with the
+ * website and LinkedIn page as live links.
+ */
+function buildPartnerBioMatrix(bio) {
+  const rating = bio.research_competency_rating == null ? NA : `${bio.research_competency_rating}/10`;
+  const sources = bio.verification_level == null
+    ? NA
+    : `${bio.verification_level} sources confirmed each data point`;
+
+  return el('div', { class: 'events-page__table-wrapper partner-bio__table-wrapper' },
+    el('table', { class: 'events-page__table events-page__table--compact partner-bio__matrix' },
+      el('thead', {},
+        el('tr', {},
+          el('th', {}, 'Field'),
+          el('th', {}, 'Detail'),
+        )
+      ),
+      el('tbody', {},
+        bioMatrixRow('Company name', bioValueCell(bio.company_name)),
+        bioMatrixRow('Company industry', bioValueCell(bio.company_industry)),
+        bioMatrixRow('Company website', bioLinkCell(bio.company_website)),
+        bioMatrixRow('Company LinkedIn', bioLinkCell(bio.company_linkedin_url)),
+        bioMatrixRow('Headquarters', bioValueCell(bio.headquarters)),
+        bioMatrixRow('Number of employees', bioValueCell(bio.number_of_employees)),
+        bioMatrixRow('Partner fit category', bio.partner_fit_category && bio.partner_fit_category !== NA
+          ? el('span', { class: 'partner-bio__fit' }, bio.partner_fit_category)
+          : bioValueCell(NA)),
+        bioMatrixRow('Research competency rating', bioValueCell(rating)),
+        bioMatrixRow('Verification level', bioValueCell(sources)),
+      )
+    )
+  );
+}
+
+function buildPartnerBioList(title, items) {
+  const list = (items || []).filter(Boolean);
+  return el('div', { class: 'partner-bio__block' },
+    el('div', { class: 'partner-bio__block-title' }, title),
+    list.length
+      ? el('ul', { class: 'partner-bio__list' }, ...list.map(line => el('li', {}, line)))
+      : el('div', { class: 'partner-bio__block-empty' },
+          'Nothing the research could support from the authoritative sources.'),
+  );
+}
+
+async function copyPartnerBio(bio) {
+  const markdown = partnerBioToMarkdown(bio);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(markdown);
+      showToast('Bio copied as markdown', 'success');
+      return;
+    }
+    throw new Error('clipboard unavailable');
+  } catch {
+    // The async Clipboard API needs a secure context; the legacy path still
+    // works over plain http and in older browsers.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = markdown;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast(ok ? 'Bio copied as markdown' : 'Could not copy the bio', ok ? 'success' : 'error');
+    } catch {
+      showToast('Could not copy the bio', 'error');
+    }
+  }
+}
+
+function buildPartnerBioContent(partner, bioRecord) {
+  const bio = bioRecord.bio;
+  const unsaved = !bioRecord._rowIndex && partnerBioSessionCache.has(partner.partner_id);
+
+  return el('div', { class: 'partner-bio__content' },
+    unsaved
+      ? el('div', { class: 'partner-bio__banner' },
+          'This bio has not been saved to the spreadsheet — it will be lost when you reload. '
+          + 'Check the Setup page, then run Analyze again.')
+      : null,
+    buildPartnerBioMatrix(bio),
+    el('div', { class: 'partner-bio__blocks' },
+      buildPartnerBioList('What they do', bio.what_they_do),
+      buildPartnerBioList('How Recast brings value', bio.how_recast_brings_value),
+      buildPartnerBioList('Why partner', bio.why_partner),
+    ),
+    el('div', { class: 'partner-bio__footnote' },
+      'Researched only on Crunchbase, LinkedIn, SEC EDGAR, Bloomberg, Hoovers, Glassdoor, CRN, '
+      + 'Channel Futures, ISG and Google News. "NA" means the field could not be confirmed across '
+      + 'those sources.'),
+  );
+}
+
+function buildPartnerBioSection(partner, bioRecord) {
+  const bio = bioRecord && bioRecord.bio ? bioRecord.bio : null;
+  const hasBio = !!(bio && !partnerBioIsEmpty(bio));
+  const isOpen = !collapsedBioSections.has(partner.partner_id);
+
+  const chevron = el('span', {
+    class: `partner-bio__chevron${isOpen ? ' partner-bio__chevron--open' : ''}`,
+    html: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  });
+
+  const body = el('div', {
+    class: `partner-bio__body${isOpen ? '' : ' partner-bio__body--collapsed'}`,
+  },
+    hasBio
+      ? buildPartnerBioContent(partner, bioRecord)
+      : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
+          el('div', { class: 'empty-state__title' }, 'No bio yet'),
+          el('div', { class: 'empty-state__description' },
+            'Click "Analyze" to research this company on Crunchbase, LinkedIn, SEC EDGAR, Bloomberg '
+            + 'and the other authoritative sources, and build its profile.'),
+        )
+  );
+
+  const researched = hasBio ? String(bioRecord.researched_at || '').slice(0, 10) : '';
+  const subtitle = hasBio
+    ? (researched ? `researched ${formatDate(researched) || researched}` : 'researched from public sources')
+    : 'not researched yet';
+
+  const header = el('div', {
+    class: 'partner-detail-page__section-header partner-bio__header',
+    onClick: () => {
+      const nowOpen = body.classList.toggle('partner-bio__body--collapsed') === false;
+      chevron.classList.toggle('partner-bio__chevron--open', nowOpen);
+      if (nowOpen) collapsedBioSections.delete(partner.partner_id);
+      else collapsedBioSections.add(partner.partner_id);
+    },
+  },
+    el('div', { class: 'partner-detail-page__section-title' },
+      'Partner Bio',
+      el('span', { class: 'partner-detail-page__section-subtitle' }, subtitle),
+      chevron,
+    ),
+    el('div', { class: 'partner-detail-page__section-actions' },
+      hasBio
+        ? el('button', {
+            class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+            onClick: (e) => { e.stopPropagation(); copyPartnerBio(bio); },
+          }, 'Copy')
+        : null,
+      buildBioAnalyzeButton(partner, bioRecord, { className: 'partner-detail-page__section-cta' }),
+    ),
+  );
+
+  return el('div', { class: 'partner-detail-page__section partner-bio' }, header, body);
+}
+
+/**
+ * Persist one researched bio. There is exactly one row per partner: a
+ * re-analysis replaces it, so the sheet always shows the current profile
+ * rather than a pile of historical passes.
+ */
+async function savePartnerBio(record) {
+  await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_BIOS, PARTNER_BIO_HEADERS);
+  const values = partnerBioRowValues(record);
+  const rows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_BIOS, { forceRefresh: true }).catch(() => []);
+  const exists = rows.some(r => String(r.partner_id || '').trim() === record.partner_id);
+  if (exists) {
+    await updateRowById(CONFIG.SHEET_PARTNER_BIOS, 'partner_id', record.partner_id, values);
+  } else {
+    await appendRow(CONFIG.SHEET_PARTNER_BIOS, values);
+  }
+}
+
+async function runPartnerBioAnalysis(partner, btn) {
+  const partnerId = String(partner.partner_id || '').trim();
+  if (!partnerId) {
+    showToast('This partner has no record id — reload the page and try again.', 'error');
+    return;
+  }
+  if (bioRunInFlight) {
+    showToast(bioRunInFlight === partnerId
+      ? 'This partner is already being analyzed.'
+      : 'Another partner analysis is still running.', 'info');
+    return;
+  }
+  bioRunInFlight = partnerId;
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
+
+  // Progress rides the global Randy pill so it stays visible after the user
+  // leaves this partner page — the research keeps running either way.
+  const pill = createPill('Researching…', {
+    label: partner.display_name || 'Partner',
+    hardTimeoutMs: BIO_PILL_TIMEOUT_MS,
+  });
+  let researched = false;
+
+  try {
+    const bio = await requestPartnerBio({
+      partner,
+      today: todayISO(),
+      onProgress: (round) => updatePillStage(pill, round <= 1 ? 'Researching…' : `Researching… (pass ${round})`),
+    });
+
+    // An all-NA profile is a failed run, not a result worth storing over a
+    // previous good one.
+    if (partnerBioIsEmpty(bio)) {
+      throw new Error('The authoritative sources returned nothing verifiable for this company.');
+    }
+
+    updatePillStage(pill, 'Saving…');
+    const now = nowISO();
+    const record = {
+      partner_id: partnerId,
+      partner_name: partner.display_name || '',
+      researched_at: now,
+      updated_at: now,
+      bio,
+    };
+    partnerBioSessionCache.set(partnerId, record);
+    researched = true;
+
+    let saveError = '';
+    try {
+      await savePartnerBio(record);
+      // The write landed, so the sheet is the source of truth again.
+      partnerBioSessionCache.delete(partnerId);
+    } catch (err) {
+      saveError = err.message || 'the spreadsheet write failed';
+      console.warn('[Partner Bio] not saved:', err);
+    }
+
+    collapsedBioSections.delete(partnerId);
+    markPillSuccess(pill, saveError ? 'Researched (not saved)' : 'Bio ready');
+    showToast(saveError ? `Bio ready, but not saved: ${saveError}` : 'Partner bio ready',
+      saveError ? 'error' : 'success');
+
+    // Only re-render if the user is still on THIS partner's page — the bio is
+    // saved regardless, and the pill has already reported completion.
+    if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partnerId) {
+      reRender(partnerId);
+    }
+  } catch (err) {
+    markPillFailure(pill, 'Analysis failed');
+    showToast(err.message || 'Failed to analyze this partner', 'error');
+  } finally {
+    bioRunInFlight = null;
+    // Usually moot — the re-render replaces this button — but a run that
+    // failed, or finished after the user navigated back, must not leave a
+    // button stuck on "Analyzing…".
+    if (btn && btn.isConnected) {
+      btn.disabled = false;
+      btn.textContent = researched ? 'Re-analyze' : 'Analyze';
+    }
+  }
 }
 
 // ============================================
