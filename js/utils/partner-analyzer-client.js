@@ -7,29 +7,28 @@
 //
 // This is the single orchestration point for a partner analysis. It:
 //   1. strictly scopes every source to the selected partner,
-//   2. computes deterministic KPIs + relationship health in APP CODE,
+//   2. computes deterministic KPIs in APP CODE,
 //   3. assembles bounded, privacy-safe evidence + a coverage report,
 //   4. builds the deterministic/structured criteria facts,
 //   5. builds the prompt, calls Claude, and hands the raw text to the STRICT
 //      parser together with the anchors + facts so the parser can reject
 //      unsupported claims and overlay the hard CRM facts itself.
 //
-// The KPIs and health returned here are the SAME ones fed into the prompt, so
-// the board the view renders can never disagree with what the model was shown.
+// The KPIs returned here are the SAME ones fed into the prompt, so the board
+// the view renders can never disagree with what the model was shown.
 // ============================================================
 
 import { getRuntimeConfig } from '../config.js';
 import { buildPartnerAnalyzerPrompt } from './partner-analyzer-prompts.js';
 import { parsePartnerAnalysisResponse } from './partner-analyzer-schema.js';
 import { parseSavedPlaybook, buildContactAggregates } from './event-analyzer-evidence.js';
-import { derivePartnerHealth } from './partner-analyzer-health.js';
 import {
   selectPartnerTranscripts, selectPartnerMeetings, selectPartnerDocuments,
   selectPartnerOpportunities, collectOpportunityIds, selectOpportunityDescriptions,
   selectPartnerEvents, collectEventIds, selectEventDescriptionsForPartner, selectEventContactsForPartner,
   selectPartnerContacts, buildPartnerContactRoster,
   buildPartnerKpis, assemblePartnerEvidence, withCoverageFailures,
-  buildPartnerCriteriaFacts, collectPartnerAnchors, computeHealthSignals,
+  buildPartnerCriteriaFacts, collectPartnerAnchors,
 } from './partner-analyzer-evidence.js';
 
 const PARTNER_MODEL = 'claude-opus-4-8';
@@ -79,10 +78,10 @@ function aggregatePartnerSavedPlaybook(rows, eventIds) {
 
 /**
  * Scope, aggregate, and deterministically evaluate everything for one partner.
- * Pure (no network) — exported so the view can render the KPI strip / health
- * even before wiring the AI call, and so tests can assert scoping.
+ * Pure (no network) — exported so the view can render the KPI strip even
+ * before wiring the AI call, and so tests can assert scoping.
  *
- * @returns {{ scoped, kpis, health, contactsAgg, savedPlaybook, contactRoster,
+ * @returns {{ scoped, kpis, contactsAgg, savedPlaybook, contactRoster,
  *   evidence, coverage, facts, anchors }}
  */
 export function preparePartnerAnalysis({
@@ -135,12 +134,6 @@ export function preparePartnerAnalysis({
     contacts: contactRoster.included,
   });
 
-  const healthSignals = computeHealthSignals({
-    partner, kpis, transcripts: pTranscripts, opportunityDescriptions: pOppDesc,
-    eventDescriptions: pEventDesc, opportunities: pOpps, events: pEvents, today,
-  });
-  const health = derivePartnerHealth(healthSignals, { today });
-
   return {
     scoped: {
       transcripts: pTranscripts, meetings: pMeetings, documents: pDocuments,
@@ -149,7 +142,7 @@ export function preparePartnerAnalysis({
       partnerContacts: pContacts,
       oppIds, eventIds,
     },
-    kpis, health, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors,
+    kpis, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors,
   };
 }
 
@@ -158,14 +151,14 @@ export function preparePartnerAnalysis({
  *
  * @param {object} params  See preparePartnerAnalysis(), plus:
  * @param {AbortSignal} [params.signal]
- * @returns {Promise<{ analysis, kpis, health, coverage }>}
+ * @returns {Promise<{ analysis, kpis, coverage }>}
  */
 export async function requestPartnerAnalysisJson(params = {}) {
   const apiKey = requireApiKey();
   const { partner, today, signal } = params;
 
   const prep = preparePartnerAnalysis(params);
-  const { kpis, health, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors } = prep;
+  const { kpis, contactsAgg, savedPlaybook, contactRoster, evidence, coverage, facts, anchors } = prep;
 
   const prompt = buildPartnerAnalyzerPrompt({ partner, kpis, evidence, contactsAgg, savedPlaybook, contactRoster, today });
 
@@ -210,5 +203,5 @@ export async function requestPartnerAnalysisJson(params = {}) {
     facts,
   });
 
-  return { analysis, kpis, health, coverage };
+  return { analysis, kpis, coverage };
 }

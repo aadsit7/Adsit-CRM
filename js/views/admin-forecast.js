@@ -135,7 +135,7 @@ let partnerJob = null;
 //   { key: { entityType:'partner', entityId, runId }, label,
 //     status: 'running' | 'done' | 'error',
 //     controller: AbortController, pill,
-//     result: { analysis, board, kpis, health, partner, coverage } | null,
+//     result: { analysis, board, kpis, partner, coverage } | null,
 //     error: string | null }
 
 // ── Contact Analyzer state (parallel to the three above) ─────────────
@@ -1814,8 +1814,8 @@ function sourceTypeLabel(sourceType) {
 //
 // Partner mode shows NO forecast probability and NO event-countdown language.
 // Maturity is scored ONLY from validated evidence; the CRM tier/status are
-// shown as context and never substituted for maturity evidence. KPIs and
-// relationship health are computed deterministically in the client (app code).
+// shown as context and never substituted for maturity evidence. KPIs are
+// computed deterministically in the client (app code).
 // ============================================================
 
 // ── Partner panel + empty state ─────────────────────────────────────
@@ -1968,7 +1968,7 @@ async function runPartnerAnalysis(explicitOption = null) {
     if (!stillCurrent()) return;
     updatePillStage(pill, 'Randy is scoring partner maturity…');
 
-    const { analysis, kpis, health, coverage } = await requestPartnerAnalysisJson({
+    const { analysis, kpis, coverage } = await requestPartnerAnalysisJson({
       partner,
       transcripts, meetings, documents,
       opportunities, opportunityDescriptions,
@@ -1984,7 +1984,7 @@ async function runPartnerAnalysis(explicitOption = null) {
 
     const board = derivePartnerBoard(analysis);
     job.status = 'done';
-    job.result = { analysis, board, kpis, health, partner, coverage };
+    job.result = { analysis, board, kpis, partner, coverage };
     markPillSuccess(pill, 'Analysis ready');
     paintPartnerResult(job);
     notifyPartnerIfAway(job);
@@ -2002,15 +2002,15 @@ async function runPartnerAnalysis(explicitOption = null) {
 }
 
 // ── Partner board render ────────────────────────────────────────────
-function renderPartnerBoard({ analysis, board, kpis, health, partner, coverage }) {
+function renderPartnerBoard({ analysis, board, kpis, partner, coverage }) {
   const frag = el('div', { class: 'partner-board' });
 
-  frag.appendChild(buildPartnerBoardActions({ analysis, board, kpis, health, partner, coverage }));
+  frag.appendChild(buildPartnerBoardActions({ analysis, board, kpis, partner, coverage }));
 
   const banner = buildPartnerCoverage(coverage);
   if (banner) frag.appendChild(banner);
 
-  frag.appendChild(buildPartnerSummary({ analysis, board, kpis, health, partner }));
+  frag.appendChild(buildPartnerSummary({ analysis, board, kpis, partner }));
   frag.appendChild(buildPartnerKpiStrip(kpis));
   frag.appendChild(buildPartnerLegend());
 
@@ -2028,24 +2028,24 @@ function renderPartnerBoard({ analysis, board, kpis, health, partner, coverage }
 }
 
 // ── PDF export toolbar ──────────────────────────────────────────────
-function buildPartnerBoardActions({ analysis, board, kpis, health, partner, coverage }) {
+function buildPartnerBoardActions({ analysis, board, kpis, partner, coverage }) {
   const btn = el('button', {
     class: 'btn btn--secondary btn--sm partner-board__pdf-btn',
     type: 'button',
   }, el('span', { class: 'forecast-board__pdf-icon', html: pdfIcon() }), 'Create PDF');
 
-  btn.addEventListener('click', () => handleCreatePartnerPdf({ analysis, board, kpis, health, partner, coverage, btn }));
+  btn.addEventListener('click', () => handleCreatePartnerPdf({ analysis, board, kpis, partner, coverage, btn }));
   return el('div', { class: 'forecast-board__actions' }, btn);
 }
 
-async function handleCreatePartnerPdf({ analysis, board, kpis, health, partner, coverage, btn }) {
+async function handleCreatePartnerPdf({ analysis, board, kpis, partner, coverage, btn }) {
   if (btn.disabled) return;
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.textContent = 'Building PDF…';
   try {
     const blob = await buildPartnerAnalysisPdf({
-      analysis, board, partner, kpis, health,
+      analysis, board, partner, kpis,
       coverageWarnings: (coverage && coverage.warnings) || [],
     });
     const contextName = partner?.display_name || analysis.partner_name || 'Partner';
@@ -2086,9 +2086,9 @@ function buildPartnerCoverage(coverage) {
 // Partner maturity has NO forecast bucket and NO win probability. The summary
 // shows the operational maturity stage, completed-stage count, criteria
 // completion %, confidence, the CRM tier + status (as CONTEXT), partner type +
-// region, last meaningful activity, and relationship health (separate from
-// maturity). A note surfaces a tier-vs-evidence discrepancy when present.
-function buildPartnerSummary({ analysis, board, kpis, health, partner }) {
+// region, and last meaningful activity. A note surfaces a tier-vs-evidence
+// discrepancy when present.
+function buildPartnerSummary({ analysis, board, kpis, partner }) {
   const confidence = String(analysis.confidence || 'low');
   const pos = resolvePartnerPosition(board);
   const furthest = resolveFurthestDemonstrated(board);
@@ -2102,7 +2102,6 @@ function buildPartnerSummary({ analysis, board, kpis, health, partner }) {
     el('span', { class: 'event-summary__stage-chip' }, headline),
     el('span', { class: 'event-summary__pct-chip' }, `${board.completionPct}% of criteria`),
     el('span', { class: `event-summary__confidence event-summary__confidence--${confidence}` }, `Confidence: ${confidence}`),
-    buildHealthChip(health),
   );
 
   const facts = el('div', { class: 'event-summary__facts' },
@@ -2160,11 +2159,6 @@ function tierDiscrepancyNote(tier, pos, board) {
   return '';
 }
 
-function buildHealthChip(health) {
-  const status = String(health && health.status || 'insufficient_history');
-  const label = String(health && health.label || 'Insufficient history');
-  return el('span', { class: `partner-health-chip partner-health-chip--${status}` }, `Health: ${label}`);
-}
 // (summaryFact is shared with the Event summary above.)
 
 // ── Deterministic KPI strip ─────────────────────────────────────────

@@ -3,10 +3,10 @@
 // ============================================================
 // A Recast-branded, print-friendly PDF of the Partner Analyzer's maturity
 // board: partner identity + CRM context, the operational maturity position,
-// completion %, relationship health, a deterministic KPI strip, the
-// seven-stage / 21-criterion board with per-criterion status and source
-// dates, the likely org chart, then Next Best Actions, Maturity Gaps, Open
-// Questions, Risks, Momentum and any coverage warnings.
+// completion %, a deterministic KPI strip, the seven-stage / 21-criterion
+// board with per-criterion status and source dates, the likely org chart,
+// then Next Best Actions, Maturity Gaps, Open Questions, Risks, Momentum and
+// any coverage warnings.
 //
 // The board is derived with derivePartnerBoard() — the SAME pure function the
 // on-screen view uses — so the PDF can never disagree with the page; the org
@@ -116,14 +116,6 @@ function criterionLabel(status) {
     default: return 'No evidence';
   }
 }
-function healthColor(status) {
-  switch (status) {
-    case 'healthy': return SUCCESS;
-    case 'watch': return WARNING;
-    case 'at_risk': return DANGER;
-    default: return MUTED_TEXT;
-  }
-}
 // Org-chart node statuses — the same palette the Contact brief's org map
 // uses (engaged/introduced/missing/identified).
 function orgStatusColor(status) {
@@ -224,7 +216,7 @@ function isFull(doc, y, needed) {
 }
 
 // ── Position + completion strip ───────────────────────────────
-function drawPositionStrip(doc, ctx, board, position, furthest, confidence, health, yStart) {
+function drawPositionStrip(doc, ctx, board, position, furthest, confidence, yStart) {
   let y = drawHeading(doc, 'Maturity Position', yStart) + 16;
 
   const posLabel = position.def
@@ -249,25 +241,6 @@ function drawPositionStrip(doc, ctx, board, position, furthest, confidence, heal
     doc.setFontSize(9);
     doc.text(wrap(doc, `Demonstrates later-stage behavior up to “${furthest.def.name}” despite earlier gaps.`, CONTENT_W)[0], MARGIN, y);
     y += 12;
-  }
-
-  // Health chip line + the deterministic reason, so the label is transparent
-  // and defensible (e.g. why a brand-new partnership is Watch, not At Risk).
-  if (health && health.label) {
-    setText(doc, healthColor(health.status));
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.text(`Relationship health: ${health.label}`, MARGIN, y);
-    y += 12;
-    const reason = String(health.reason || '').trim();
-    if (reason) {
-      setText(doc, MUTED_TEXT);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      const rlines = wrap(doc, reason, CONTENT_W).slice(0, 3);
-      doc.text(rlines, MARGIN, y);
-      y += rlines.length * 9.5 + 3;
-    }
   }
 
   // Completion bar.
@@ -642,12 +615,11 @@ function formatGenDate() {
  * @param {object} [payload.board]   Pre-derived board; derived from analysis when omitted.
  * @param {object} [payload.partner] Partners row (title/subtitle source).
  * @param {object} [payload.kpis]    Deterministic KPI strip.
- * @param {object} [payload.health]  Relationship health { status, label }.
  * @param {string[]} [payload.coverageWarnings]  Non-fatal coverage notes.
  * @param {object} [options]  { timeoutMs } forwarded to waitForJsPdf.
  * @returns {Promise<Blob>}
  */
-export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, health, coverageWarnings = [] } = {}, options) {
+export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, coverageWarnings = [] } = {}, options) {
   if (!analysis || typeof analysis !== 'object') {
     throw new Error('buildPartnerAnalysisPdf: expected a parsed partner analysis object');
   }
@@ -667,7 +639,7 @@ export async function buildPartnerAnalysisPdf({ analysis, board, partner, kpis, 
   drawHeaderBand(doc, title, formatSubtitle(partner, kpis), genDate);
   let y = HEADER_H + 22;
 
-  y = drawPositionStrip(doc, ctx, resolvedBoard, position, furthest, confidence, health, y);
+  y = drawPositionStrip(doc, ctx, resolvedBoard, position, furthest, confidence, y);
   y = drawContext(doc, ctx, kpis, y);
   y = drawOverview(doc, ctx, analysis, y);
   y = drawStageBoard(doc, ctx, resolvedBoard, y);

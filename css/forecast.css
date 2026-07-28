@@ -976,23 +976,9 @@
    PARTNER ANALYZER — the third entity mode. Reuses the event board,
    summary, legend, evidence and list styles above (identical structure:
    7 stages × 3 criteria, every status ALSO labelled in text). Only the
-   partner-specific pieces below are new: the deterministic KPI strip, the
-   relationship-health chip (separate from maturity), and the summary notes.
+   partner-specific pieces below are new: the deterministic KPI strip and the
+   summary notes.
    ============================================================ */
-
-/* ── Relationship health chip (separate from maturity) ────── */
-.partner-health-chip {
-  font-size: var(--text-xs);
-  font-weight: var(--font-bold);
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-}
-.partner-health-chip--healthy { color: var(--color-success); border-color: var(--color-success); }
-.partner-health-chip--watch { color: var(--color-warning); border-color: var(--color-warning); }
-.partner-health-chip--at_risk { color: var(--color-danger); border-color: var(--color-danger); }
-.partner-health-chip--insufficient_history { color: var(--color-text-muted); }
 
 /* ── Summary notes (later-stage demo + tier discrepancy) ──── */
 .partner-summary__note {

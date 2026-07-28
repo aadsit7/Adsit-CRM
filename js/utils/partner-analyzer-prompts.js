@@ -52,9 +52,9 @@ function buildProfileBlock(partner, kpis) {
   lines.push(`HQ / location: ${orNone(p.hq_location)}`);
   lines.push(`Created: ${orNone(p.created_at)}`);
   lines.push('');
-  lines.push('CRM CLASSIFICATIONS (contextual only — these are NOT maturity evidence and NOT relationship health):');
+  lines.push('CRM CLASSIFICATIONS (contextual only — these are NOT maturity evidence):');
   lines.push(`- CRM tier: ${orNone(p.tier)}  (a commercial classification; a high tier does NOT imply a high maturity stage)`);
-  lines.push(`- CRM status: ${orNone(p.status)}  (an administrative status; “active” does NOT prove maturity, “inactive” is not a health label)`);
+  lines.push(`- CRM status: ${orNone(p.status)}  (an administrative status; “active” does NOT prove maturity)`);
   lines.push('If the CRM tier looks more advanced than the evidence supports, SAY SO in the summary or a gap (e.g. “CRM tier is Premier/Strategic, but the available evidence only supports Pipeline Execution maturity.”).');
   return lines.join('\n');
 }

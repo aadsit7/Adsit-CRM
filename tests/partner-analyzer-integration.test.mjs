@@ -72,13 +72,12 @@ function restoreFetch() { globalThis.fetch = REAL_FETCH; }
 function setApiKey() { globalThis.localStorage.setItem('pp_runtime_config', JSON.stringify({ ANTHROPIC_API_KEY: 'test-key' })); }
 
 // ── preparePartnerAnalysis (pure scoping — no network) ───────────────
-test('preparePartnerAnalysis scopes strictly and computes KPIs + health', () => {
+test('preparePartnerAnalysis scopes strictly and computes KPIs', () => {
   const prep = preparePartnerAnalysis(commonArgs(PARTNER_A));
   assert.equal(prep.kpis.totalOpps, 2, 'only p1 opps (o9 excluded)');
   assert.equal(prep.kpis.wonRevenue, 75000, 'p2 999999 win never leaks');
   assert.equal(prep.scoped.events.length, 1, 'unassigned event excluded');
   assert.equal(prep.scoped.events[0].event_id, 'e1');
-  assert.ok(prep.health && prep.health.label, 'health derived deterministically');
   // Anchors only carry p1's transcript.
   assert.ok(prep.anchors.narrativeIds.has('t1') && !prep.anchors.narrativeIds.has('t9'));
 });
@@ -87,7 +86,7 @@ test('preparePartnerAnalysis scopes strictly and computes KPIs + health', () => 
 test('pipeline: grounded claim survives, fabricated one is downgraded, facts overlaid', async () => {
   setApiKey(); stubModel(modelBoard());
   try {
-    const { analysis, kpis, health, coverage } = await requestPartnerAnalysisJson(commonArgs(PARTNER_A));
+    const { analysis, kpis, coverage } = await requestPartnerAnalysisJson(commonArgs(PARTNER_A));
     const rel = analysis.stages.find(s => s.stage_id === 'relationship_alignment');
     const rev = analysis.stages.find(s => s.stage_id === 'revenue_growth');
     assert.equal(rel.criteria.find(c => c.criterion_id === 'goals_priorities_aligned').status, 'met', 'grounded quote survives');
@@ -97,9 +96,8 @@ test('pipeline: grounded claim survives, fabricated one is downgraded, facts ove
     assert.equal(pipe.criteria.find(c => c.criterion_id === 'opportunities_created').status, 'met');
     assert.equal(pipe.criteria.find(c => c.criterion_id === 'active_pipeline').status, 'met');
     assert.equal(rev.criteria.find(c => c.criterion_id === 'revenue_won').status, 'met');
-    // KPIs + health returned for the view; board is derivable.
+    // KPIs returned for the view; board is derivable.
     assert.equal(kpis.wonRevenue, 75000);
-    assert.ok(health.label);
     assert.ok(!coverage.hasOmissions);
     assert.equal(analysis.partner_id, 'p1');
     assert.equal(derivePartnerBoard(analysis).stages.length, 7);

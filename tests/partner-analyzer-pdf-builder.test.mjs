@@ -2,7 +2,7 @@
 // Uses the same minimal jsPDF shim as the event/forecast PDF suites and
 // asserts the public surface: a safe Partner filename, partner vocabulary (no
 // forecast probabilities / event countdowns), all seven maturity stages, the
-// KPI + health strip, long-content pagination, and missing-input handling.
+// KPI strip, long-content pagination, and missing-input handling.
 import './_setup.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -94,7 +94,6 @@ function hasText(calls, re) {
 
 const PARTNER = { partner_id: 'p1', display_name: 'Nerdio', partner_type: 'Technology', tier: 'Premier/Strategic', region: 'North America' };
 const KPIS = { tier: 'Premier/Strategic', status: 'active', partner_type: 'Technology', region: 'North America', transcriptCount: 3, meetingCount: 2, documentCount: 1, eventCount: 2, upcomingEventCount: 1, completedEventCount: 1, totalOpps: 3, activeOppCount: 1, activePipelineValue: 150000, wonOppCount: 1, wonRevenue: 75000, nearestExpectedClose: '2026-09-15', mostRecentActivityDate: '2026-06-25' };
-const HEALTH = { status: 'watch', label: 'Watch' };
 
 function sampleAnalysis() {
   const raw = {
@@ -124,20 +123,19 @@ function sampleAnalysis() {
 // ── buildPartnerAnalysisPdf ──────────────────────────────────
 test('returns an application/pdf blob', async () => {
   installJsPdfShim();
-  const blob = await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS, health: HEALTH });
+  const blob = await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS });
   assert.equal(blob.type, 'application/pdf');
   assert.ok(blob.size > 0);
 });
 
-test('renders partner identity, position, KPIs, health, board and lists (partner vocabulary)', async () => {
+test('renders partner identity, position, KPIs, board and lists (partner vocabulary)', async () => {
   installJsPdfShim();
-  const blob = await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS, health: HEALTH });
+  const blob = await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS });
   const c = blob.__calls;
   assert.ok(hasText(c, /PARTNER MATURITY ANALYSIS/), 'header eyebrow');
   assert.ok(hasText(c, /Nerdio/), 'partner name');
   assert.ok(hasText(c, /MATURITY POSITION/), 'position heading');
   assert.ok(hasText(c, /CRM CONTEXT & KPIS/), 'KPI heading');
-  assert.ok(hasText(c, /Relationship health: Watch/), 'health label');
   assert.ok(hasText(c, /Premier\/Strategic/), 'CRM tier shown as context');
   assert.ok(hasText(c, /MATURITY BOARD/), 'board heading');
   assert.ok(hasText(c, /DO THIS NEXT/), 'next actions heading');
@@ -149,11 +147,14 @@ test('renders partner identity, position, KPIs, health, board and lists (partner
   // Partner vocabulary only — no forecast probability / event countdown.
   assert.ok(!hasText(c, /probability/i), 'no forecast probability language');
   assert.ok(!hasText(c, /days until the event/i), 'no event countdown language');
+  // Relationship health was removed from the analyzer entirely — the maturity
+  // position must never carry a health label again.
+  assert.ok(!hasText(c, /relationship health/i), 'no relationship-health section');
 });
 
 test('renders all seven maturity stage names', async () => {
   const calls = installJsPdfShim();
-  await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS, health: HEALTH });
+  await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS });
   for (const name of ['Profile & Fit', 'Relationship & Alignment', 'Enablement & Readiness', 'Joint Go-to-Market Planning', 'Market Engagement', 'Pipeline Execution', 'Revenue & Growth']) {
     assert.ok(hasText(calls, new RegExp(name.replace(/[-&]/g, '.'))), `${name} must render`);
   }
@@ -162,7 +163,7 @@ test('renders all seven maturity stage names', async () => {
 test('renders coverage warnings when provided', async () => {
   const calls = installJsPdfShim();
   await buildPartnerAnalysisPdf({
-    analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS, health: HEALTH,
+    analysis: sampleAnalysis(), partner: PARTNER, kpis: KPIS,
     coverageWarnings: ['5 transcripts were not sent to Randy due to size limits.'],
   });
   assert.ok(hasText(calls, /COVERAGE NOTES/), 'coverage heading');
@@ -177,7 +178,7 @@ test('never exceeds the page cap, even with pathological input', async () => {
   analysis.gaps = Array.from({ length: 40 }, (_, i) => `Gap ${i} which is intentionally quite long to force wrapping across multiple lines in the output`);
   analysis.risks = Array.from({ length: 40 }, (_, i) => `Risk ${i} written to be long enough that it wraps across a couple of lines each time`);
   analysis.momentum = Array.from({ length: 40 }, (_, i) => `Momentum ${i} also long enough to wrap onto multiple lines in the rendered PDF output`);
-  const blob = await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: KPIS, health: HEALTH });
+  const blob = await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: KPIS });
   assert.ok(blob.__pages <= 4, `expected <= 4 pages, got ${blob.__pages}`);
 });
 
@@ -185,7 +186,7 @@ test('caps long lists with a "+N more" note', async () => {
   installJsPdfShim();
   const analysis = sampleAnalysis();
   analysis.gaps = Array.from({ length: 25 }, (_, i) => `Gap ${i}`);
-  const blob = await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: KPIS, health: HEALTH });
+  const blob = await buildPartnerAnalysisPdf({ analysis, partner: PARTNER, kpis: KPIS });
   assert.ok(hasText(blob.__calls, /\+\d+ more/), 'over-cap lists must show a +N more note');
 });
 
@@ -195,7 +196,7 @@ test('throws when the analysis is missing', async () => {
   await assert.rejects(() => buildPartnerAnalysisPdf(), /expected a parsed partner analysis object/);
 });
 
-test('tolerates missing kpis / health without throwing', async () => {
+test('tolerates missing kpis without throwing', async () => {
   installJsPdfShim();
   const blob = await buildPartnerAnalysisPdf({ analysis: sampleAnalysis(), partner: PARTNER });
   assert.equal(blob.type, 'application/pdf');
