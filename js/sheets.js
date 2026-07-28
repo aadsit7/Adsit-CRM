@@ -6,6 +6,7 @@ import { CONFIG, getRuntimeConfig } from './config.js';
 import { getAccessToken, getCurrentUser, clearAccessToken } from './auth.js';
 import { normalizeProvider } from './utils/ai-providers.js';
 import { PARTNER_CONTACT_HEADERS, isHeaderPrefixOf } from './utils/partner-contacts.js';
+import { PARTNER_BIO_HEADERS } from './utils/partner-bio-schema.js';
 
 /**
  * Get the effective Spreadsheet ID (runtime override or hardcoded).
@@ -735,6 +736,10 @@ export const SHEET_HEADERS = {
   // description notes and Drive attachments. Header lives with the
   // extraction/merge logic so the two can never drift apart.
   [CONFIG.SHEET_PARTNER_CONTACTS]: PARTNER_CONTACT_HEADERS,
+  // Partner_Bios: one researched company profile per partner, produced by the
+  // Analyze button on the partner page. Header lives with the parser/storage
+  // contract so the two can never drift apart.
+  [CONFIG.SHEET_PARTNER_BIOS]: PARTNER_BIO_HEADERS,
   [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at', 'provider'],
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
   [CONFIG.SHEET_MEETING_INDEX]: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
@@ -778,7 +783,7 @@ export async function initializeSheet() {
 
   // 2. Build batchUpdate requests to add missing tabs
   const requests = [];
-  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabsToCreate) {
     if (!existingSheets.includes(tabName)) {
@@ -900,7 +905,7 @@ export async function syncHeaders() {
   if (!token) throw new Error('OAuth token required — please log in with Google SSO first.');
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabs) {
     const headerRow = SHEET_HEADERS[tabName];
