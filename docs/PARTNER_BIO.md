@@ -3,9 +3,21 @@
 Every partner's detail page carries an **Analyze** button beside the partner's
 name. It researches that company on a fixed list of authoritative public
 sources (Anthropic's server-side `web_search` tool) and fills a **Partner Bio**
-drop-down section: a field/detail matrix — including live links to the
-company's website and LinkedIn page — plus three narrative blocks (*What they
-do*, *How Recast brings value*, *Why partner*).
+drop-down section: a profile grid — including live links to the company's
+website and LinkedIn page — plus three narrative blocks (*What they do*, *How
+Recast brings value*, *Why partner*).
+
+**The profile grid.** Nine facts as label-above-value cells: three to a row on
+a full-width panel, two on a narrow one, stacked on a phone. The column count
+follows the *panel's* width via a container query, because the panel is the
+viewport minus a sidebar that collapses on phones and widens at one breakpoint.
+A wordy value (an employee count carrying its source and date, a long industry
+line) is clamped to two lines with the full text as its tooltip, so one long
+answer cannot stretch the row it sits in. **Copy** is never clamped.
+
+This replaced a full-width Field/Detail table, where nine one-line facts cost
+nine tall rows and — `table-layout: fixed` sizes columns from the header row,
+which carried no width — half the page went to an empty label column.
 
 This is the complement to the Partner Analyzer, not a replacement for it. The
 Analyzer scores **our** relationship from **our** CRM notes; the Bio describes
@@ -18,7 +30,7 @@ from the CRM.
 | --- | --- | --- |
 | never researched | **Analyze** | empty state explaining what Analyze does |
 | researching | **Analyzing…** (disabled) | previous content, if any |
-| researched | **Re-analyze** | matrix + blocks, `researched <date>` in the header |
+| researched | **Re-analyze** | profile grid + blocks, `researched <date>` in the header |
 
 The section header repeats the same Analyze button and adds **Copy**, which
 puts the profile on the clipboard as markdown in exactly the structure the
@@ -81,7 +93,7 @@ plausible. Credentials, usernames and password hashes never reach the prompt
 - unknown, blank, `n/a`, and echoed template placeholders (`[Verified name]`)
   all collapse to the literal **`NA`** the research brief requires;
 - **URLs must parse** and use http(s) or they become `NA` — a broken link in
-  the matrix is worse than an honest `NA`. The LinkedIn field additionally has
+  the grid is worse than an honest `NA`. The LinkedIn field additionally has
   to be a `linkedin.com` URL, and the website field must *not* be a LinkedIn or
   Crunchbase page (those are profiles *of* the company, not its site);
 - the **partner fit category** is canonicalized to the allowed set, so the
@@ -114,8 +126,8 @@ verification_level · bio_json · researched_at · updated_at
 
 The flat columns exist so the spreadsheet is readable on its own; `bio_json`
 is the source of truth the app re-renders from. A row whose JSON was
-hand-edited into something unparseable still yields the matrix from its flat
-columns rather than nothing.
+hand-edited into something unparseable still yields the profile fields from its
+flat columns rather than nothing.
 
 Re-analysis **replaces** the partner's row (`updateRowById` on `partner_id`),
 so the tab always shows the current profile rather than a pile of historical
@@ -131,7 +143,7 @@ with a banner saying it was not saved, instead of being silently lost.
 | `js/utils/partner-bio-schema.js` | Strict parser, markdown renderer, and the `Partner_Bios` row contract |
 | `js/utils/partner-bio-client.js` | Messages API call with `web_search` + the `pause_turn` continuation loop |
 | `js/views/admin-partner-detail.js` | Hero button, the collapsible section, the run orchestration and the save |
-| `css/partner-bio.css` | Panel and button styling (including the phone layout for the matrix) |
+| `css/partner-bio.css` | Panel and button styling (including the profile grid's column breakpoints) |
 | `tests/partner-bio-schema.test.mjs` | Parser, NA discipline, URL rejection, storage round-trip |
 | `tests/partner-bio-prompts.test.mjs` | Source list, protocols, seed framing, no secrets |
 | `tests/partner-bio-client.test.mjs` | Request shape (pinned tool version + allowlist), pause_turn loop, error paths |
