@@ -21,8 +21,19 @@ const MIC_SVG = `
 // ---- HTML helpers ----
 
 export function stripHtml(html) {
+  // textContent flattens markup with NO separator between adjacent blocks,
+  // so "<p>…Objective</p><p>Wipro is…</p>" reads back as "ObjectiveWipro
+  // is…". Every consumer of this text suffers: analyzers are shown run-on
+  // words, previews glue sentences, and the verbatim evidence gates reject
+  // snippets that begin at a block boundary because the snippet appears to
+  // start mid-word. Materialize the visual line breaks in the markup itself
+  // (a real </p> etc. can only be a tag — inside text it would be entity-
+  // encoded), then let the DOM decode tags and entities as before.
+  const withBreaks = String(html == null ? '' : html)
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|blockquote|pre|h[1-6])\s*>/gi, '\n</$1>');
   const tmp = document.createElement('div');
-  tmp.innerHTML = html;
+  tmp.innerHTML = withBreaks;
   return tmp.textContent || tmp.innerText || '';
 }
 

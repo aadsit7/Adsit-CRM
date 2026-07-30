@@ -15,7 +15,8 @@
 //   • a proposed step survives only if its `evidence` — a verbatim snippet
 //     the model must copy from the notes — is literally present in one of
 //     the selected sources (normalized for case/whitespace/curly quotes,
-//     boundary-clean, via the same tested matcher Partner Contacts uses).
+//     via the shared snippet matcher — no word-boundary guard, since the
+//     distinctiveness floor below already rules out incidental matches).
 //     The snippet must also clear a distinctiveness floor (MIN_EVIDENCE_*):
 //     a generic two-word phrase occurs in almost any note, so matching one
 //     proves nothing. A step whose evidence cannot be found word-for-word,
@@ -45,10 +46,14 @@
 // ============================================================
 
 // The balanced-object extractor (fence stripping + truncation salvage) and
-// the verbatim phrase matcher are shared with the sibling analyzers — one
-// tested implementation, not two.
+// the verbatim snippet matcher are shared with the sibling analyzers — one
+// tested implementation, not two. snippetFoundInText (not fieldFoundInText):
+// evidence snippets clear a 20-char/3-word distinctiveness floor, so the
+// short-field word-boundary guard adds nothing here — while it WOULD wrongly
+// reject a snippet that starts at a glued block boundary in stripped note
+// text ("…ObjectiveWipro is evaluating…").
 import { extractJsonObject } from './contact-analyzer-schema.js';
-import { fieldFoundInText } from './partner-contacts.js';
+import { snippetFoundInText } from './partner-contacts.js';
 
 // ── Sheet contract (the Partner_Next_Steps tab) ─────────────────────
 // One row per next step. Flat columns so the spreadsheet reads on its own:
@@ -280,11 +285,11 @@ export function parsePartnerNextStepsResponse(rawText, { sources = [], truncated
       .map(id => String(id == null ? '' : id).trim())
       .filter(id => sourceById.has(id));
     const candidates = citedIds.length ? citedIds : [...sourceById.keys()];
-    const verifiedIds = candidates.filter(id => fieldFoundInText(evidence, sourceById.get(id).text));
+    const verifiedIds = candidates.filter(id => snippetFoundInText(evidence, sourceById.get(id).text));
     if (!verifiedIds.length && citedIds.length) {
       // Cited sources don't contain it — check the rest before giving up.
       for (const id of sourceById.keys()) {
-        if (!citedIds.includes(id) && fieldFoundInText(evidence, sourceById.get(id).text)) {
+        if (!citedIds.includes(id) && snippetFoundInText(evidence, sourceById.get(id).text)) {
           verifiedIds.push(id);
         }
       }

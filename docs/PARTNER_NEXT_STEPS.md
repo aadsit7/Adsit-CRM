@@ -83,11 +83,13 @@ anything is saved:
 - **Verbatim evidence gate** — every proposed step must carry an `evidence`
   snippet copied character-for-character from one of the selected notes. The
   parser checks the snippet against the exact text the model saw (normalized
-  only for case/whitespace/curly quotes, boundary-clean, via the same tested
-  matcher Partner Contacts uses). The snippet must also clear a
-  distinctiveness floor (at least 20 characters / 3 words) — a generic
-  fragment like "follow up" occurs in almost any note, so matching one
-  proves nothing. A step whose snippet is not literally in the notes, or is
+  only for case/whitespace/curly quotes, via the shared snippet matcher —
+  deliberately no word-boundary guard, because HTML-stripped notes can glue a
+  heading onto the first word of the clause being quoted, and a clause-length
+  snippet cannot occur inside another word anyway). The snippet must also
+  clear a distinctiveness floor (at least 20 characters / 3 words) — a
+  generic fragment like "follow up" occurs in almost any note, so matching
+  one proves nothing. A step whose snippet is not literally in the notes, or is
   too generic to tie the step to a note, is dropped and reported — never
   saved. Long quotes are verified in full and stored cut on a word boundary,
   so the stored snippet stays a findable verbatim phrase. The gate applies

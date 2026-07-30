@@ -440,6 +440,24 @@ export function fieldFoundInText(value, text) {
   return findPhrasePositions(t, v).length > 0;
 }
 
+/**
+ * Is this multi-word snippet literally present in the text?
+ * Same normalization as fieldFoundInText but WITHOUT the word-boundary
+ * requirement. The boundary rule protects short fields from word-internal
+ * hits ("ann" inside "annette"); a distinctive clause-length snippet cannot
+ * occur inside another word, while text stripped from rich notes can still
+ * carry a glued block boundary ("…ObjectiveWipro is evaluating…") that
+ * makes a genuinely verbatim snippet look word-internal. Callers must
+ * enforce their own distinctiveness floor (length / word count) — this
+ * matcher trades the boundary guard for immunity to glued boundaries.
+ */
+export function snippetFoundInText(value, text) {
+  const v = normalizeForMatch(value);
+  const t = normalizeForMatch(text);
+  if (!v || !t) return false;
+  return t.includes(v);
+}
+
 // ── Source collection (strictly partner-scoped) ─────────────────────
 function truncateText(text, cap) {
   const s = String(text || '');
