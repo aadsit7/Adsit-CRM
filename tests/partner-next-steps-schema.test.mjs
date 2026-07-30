@@ -8,11 +8,16 @@ import assert from 'node:assert/strict';
 
 import {
   PARTNER_NEXT_STEP_HEADERS,
+  NEXT_STEP_STATUSES,
   NEXT_STEPS_SCHEMA_EXAMPLE,
   isoDateOrEmpty,
   normalizeStepKey,
+  normalizeNextStepStatus,
+  normalizeNextStepKind,
   parsePartnerNextStepsResponse,
   dedupeNextSteps,
+  nextStepProgressed,
+  mergeNextStepUpdate,
   nextStepRowValues,
   nextStepFromRow,
   selectPartnerNextSteps,
@@ -40,13 +45,21 @@ const GOOD = {
   next_steps: [
     {
       next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team.',
+      kind: 'step',
+      owner: 'Both teams',
+      status: 'Next',
       due_date: 'NA',
+      timing: 'NA',
       evidence: 'We will schedule a professional services demo of Application Workspace for their services team.',
       source_ids: ['trn_1'],
     },
     {
       next_step: 'Adam Duffy to review the business justification with his leadership and confirm sponsorship.',
+      kind: 'gate',
+      owner: 'Insight (Adam Duffy)',
+      status: 'In Progress',
       due_date: '2026-08-05',
+      timing: 'NA',
       evidence: 'Adam Duffy to review the business justification with his leadership by 2026-08-05',
       source_ids: ['trn_2'],
     },
@@ -57,7 +70,7 @@ const GOOD = {
 const asReply = (obj) => JSON.stringify(obj);
 
 // ── Happy path ───────────────────────────────────────────────────────
-test('keeps verified steps with their dates, evidence and source ids', () => {
+test('keeps verified steps with their plan fields, dates, evidence and source ids', () => {
   const result = parsePartnerNextStepsResponse(asReply(GOOD), { sources: SOURCES });
   assert.equal(result.steps.length, 2);
   assert.equal(result.dropped.length, 0);
@@ -66,10 +79,64 @@ test('keeps verified steps with their dates, evidence and source ids', () => {
   const [demo, review] = result.steps;
   assert.match(demo.next_step, /professional services demo/);
   assert.equal(demo.due_date, '');
+  assert.equal(demo.owner, 'Both teams');
+  assert.equal(demo.status, 'Next');
+  assert.equal(demo.timing, ''); // "NA" placeholder reads as empty
+  assert.equal(demo.kind, 'step');
   assert.deepEqual(demo.source_ids, ['trn_1']);
 
   assert.equal(review.due_date, '2026-08-05');
+  assert.equal(review.owner, 'Insight (Adam Duffy)');
+  assert.equal(review.status, 'In Progress');
+  assert.equal(review.kind, 'gate');
   assert.deepEqual(review.source_ids, ['trn_2']);
+});
+
+// ── The plan vocabulary gates ────────────────────────────────────────
+test('normalizeNextStepStatus canonicalizes the fixed set and rejects everything else', () => {
+  assert.equal(normalizeNextStepStatus('Complete'), 'Complete');
+  assert.equal(normalizeNextStepStatus('completed'), 'Complete');
+  assert.equal(normalizeNextStepStatus('IN PROGRESS'), 'In Progress');
+  assert.equal(normalizeNextStepStatus('in-progress'), 'In Progress');
+  assert.equal(normalizeNextStepStatus('next'), 'Next');
+  assert.equal(normalizeNextStepStatus('Scheduled'), 'Scheduled');
+  assert.equal(normalizeNextStepStatus('pending'), 'Pending');
+  // Never a made-up state — and never the alarm vocabulary.
+  assert.equal(normalizeNextStepStatus('Blocked'), '');
+  assert.equal(normalizeNextStepStatus('At risk'), '');
+  assert.equal(normalizeNextStepStatus('On track'), '');
+  assert.equal(normalizeNextStepStatus(''), '');
+  assert.equal(normalizeNextStepStatus(null), '');
+  for (const s of NEXT_STEP_STATUSES) assert.equal(normalizeNextStepStatus(s), s);
+});
+
+test('normalizeNextStepKind maps gate synonyms and defaults to step', () => {
+  assert.equal(normalizeNextStepKind('gate'), 'gate');
+  assert.equal(normalizeNextStepKind('Milestone'), 'gate');
+  assert.equal(normalizeNextStepKind('step'), 'step');
+  assert.equal(normalizeNextStepKind('whatever'), 'step');
+  assert.equal(normalizeNextStepKind(''), 'step');
+});
+
+test('a garbage status or kind from the model survives only as canonical or empty', () => {
+  const reply = {
+    next_steps: [{
+      next_step: 'Schedule the services demo.',
+      kind: 'CRITICAL',
+      owner: 'NA',
+      status: 'stalled',
+      due_date: 'NA',
+      timing: 'when possible',
+      evidence: 'professional services demo of Application Workspace',
+      source_ids: ['trn_1'],
+    }],
+  };
+  const result = parsePartnerNextStepsResponse(asReply(reply), { sources: SOURCES });
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0].status, '');       // "stalled" is not on the plan's vocabulary
+  assert.equal(result.steps[0].kind, 'step');
+  assert.equal(result.steps[0].owner, '');        // "NA" placeholder → empty, never guessed
+  assert.equal(result.steps[0].timing, 'when possible');
 });
 
 test('reads JSON out of a fenced reply with surrounding prose', () => {
@@ -263,17 +330,95 @@ test('duplicate steps within one reply collapse to one', () => {
   assert.equal(result.steps.length, 1);
 });
 
-// ── Dedupe against the saved agenda ──────────────────────────────────
-test('dedupeNextSteps skips steps already on the agenda', () => {
-  const existing = [{ next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team.' }];
-  const proposed = [
-    { next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team' }, // trailing period differs
-    { next_step: 'A genuinely new step.' },
+// ── The living-plan rule (dedupe + merge) ────────────────────────────
+test('dedupeNextSteps splits proposals into fresh, updates and skipped', () => {
+  const existing = [
+    { step_id: 'pns_1', next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team.', status: 'In Progress', due_date: '' },
+    { step_id: 'pns_2', next_step: 'Complete the security questionnaire.', status: 'Scheduled', due_date: '2026-08-01' },
   ];
-  const { fresh, skipped } = dedupeNextSteps(existing, proposed);
+  const proposed = [
+    // Same step, trailing period differs, and the newest notes say it is DONE.
+    { next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team', status: 'Complete', due_date: '' },
+    // Same step, same state — nothing to do.
+    { next_step: 'Complete the security questionnaire.', status: 'Scheduled', due_date: '2026-08-01' },
+    { next_step: 'A genuinely new step.', status: 'Pending', due_date: '' },
+  ];
+  const { fresh, updates, skipped } = dedupeNextSteps(existing, proposed);
   assert.equal(fresh.length, 1);
   assert.equal(fresh[0].next_step, 'A genuinely new step.');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].existing.step_id, 'pns_1');
+  assert.equal(updates[0].proposed.status, 'Complete');
   assert.equal(skipped.length, 1);
+});
+
+test('nextStepProgressed fires on status moves and date changes, not on rewording', () => {
+  // Status moved forward.
+  assert.equal(nextStepProgressed({ status: 'In Progress' }, { status: 'Complete' }), true);
+  // Date firmed up on a row that had none.
+  assert.equal(nextStepProgressed({ status: 'Scheduled', due_date: '' }, { status: 'Scheduled', due_date: '2026-09-01' }), true);
+  // Date moved.
+  assert.equal(nextStepProgressed({ due_date: '2026-08-01' }, { due_date: '2026-09-01' }), true);
+  // Same state — no churn.
+  assert.equal(nextStepProgressed({ status: 'Pending', due_date: '' }, { status: 'Pending', due_date: '' }), false);
+  // An empty proposal never counts as progression (it would blank the plan).
+  assert.equal(nextStepProgressed({ status: 'Complete' }, { status: '' }), false);
+  // Owner/timing rewording alone is not progression.
+  assert.equal(nextStepProgressed({ status: 'Pending', owner: 'Recast' }, { status: 'Pending', owner: 'Recast (Aaron)' }), false);
+});
+
+test('mergeNextStepUpdate moves the row forward without rewriting its identity', () => {
+  const record = {
+    step_id: 'pns_1',
+    partner_id: 'p_1',
+    next_step: 'Schedule the demo.',
+    status: 'In Progress',
+    due_date: '',
+    owner: '',
+    timing: 'After the security review',
+    kind: 'step',
+    evidence: 'old snippet from the June note',
+    source_dates: '2026-06-12',
+    analyzed_at: '2026-06-12T10:00:00.000Z',
+    created_at: '2026-06-12T10:00:00.000Z',
+    updated_at: '2026-06-12T10:00:00.000Z',
+  };
+  const proposed = {
+    next_step: 'Schedule the demo',
+    status: 'Complete',
+    due_date: '2026-07-20',
+    owner: 'Recast',
+    timing: '',
+    kind: 'gate',
+    evidence: 'the demo ran on July 20 with the full services team',
+  };
+  const merged = mergeNextStepUpdate(record, proposed, { analyzedAt: '2026-07-30T09:00:00.000Z', sourceDates: '2026-07-17' });
+  // Identity untouched.
+  assert.equal(merged.step_id, 'pns_1');
+  assert.equal(merged.next_step, 'Schedule the demo.');
+  assert.equal(merged.created_at, '2026-06-12T10:00:00.000Z');
+  // Progressed fields move; empty proposals never blank stored values.
+  assert.equal(merged.status, 'Complete');
+  assert.equal(merged.due_date, '2026-07-20');
+  assert.equal(merged.owner, 'Recast');
+  assert.equal(merged.timing, 'After the security review');
+  // Gate is sticky in the promoting direction.
+  assert.equal(merged.kind, 'gate');
+  // Provenance refreshes to the newest analysis.
+  assert.equal(merged.evidence, 'the demo ran on July 20 with the full services team');
+  assert.equal(merged.source_dates, '2026-07-17');
+  assert.equal(merged.analyzed_at, '2026-07-30T09:00:00.000Z');
+  assert.equal(merged.updated_at, '2026-07-30T09:00:00.000Z');
+});
+
+test('mergeNextStepUpdate never downgrades a gate to a step', () => {
+  const merged = mergeNextStepUpdate(
+    { next_step: 'Budget approval.', kind: 'gate', status: 'Pending' },
+    { next_step: 'Budget approval.', kind: 'step', status: 'Complete' },
+    { analyzedAt: '2026-07-30T09:00:00.000Z' },
+  );
+  assert.equal(merged.kind, 'gate');
+  assert.equal(merged.status, 'Complete');
 });
 
 test('normalizeStepKey treats case, whitespace and trailing periods as one identity', () => {
@@ -295,6 +440,10 @@ test('row values follow the header order and round-trip through nextStepFromRow'
     analyzed_at: '2026-07-30T12:00:00.000Z',
     created_at: '2026-07-30T12:00:00.000Z',
     updated_at: '2026-07-30T12:00:00.000Z',
+    owner: 'Insight (Adam Duffy)',
+    status: 'Scheduled',
+    timing: 'Post-ARB approval',
+    kind: 'gate',
   };
   const values = nextStepRowValues(record);
   assert.equal(values.length, PARTNER_NEXT_STEP_HEADERS.length);
@@ -307,6 +456,10 @@ test('row values follow the header order and round-trip through nextStepFromRow'
   assert.equal(back.source, 'analysis');
   assert.equal(back.source_dates, '2026-06-12; 2026-07-17');
   assert.equal(back.analyzed_at, '2026-07-30T12:00:00.000Z');
+  assert.equal(back.owner, 'Insight (Adam Duffy)');
+  assert.equal(back.status, 'Scheduled');
+  assert.equal(back.timing, 'Post-ARB approval');
+  assert.equal(back.kind, 'gate');
 });
 
 test('a row with no source column infers analysis vs manual from analyzed_at', () => {
@@ -314,22 +467,35 @@ test('a row with no source column infers analysis vs manual from analyzed_at', (
   assert.equal(nextStepFromRow({ next_step: 'x' }).source, 'manual');
 });
 
-test('a hand-edited garbage due_date in the sheet reads back as empty', () => {
+test('hand-edited garbage cells in the sheet read back as empty/canonical, never displayed raw', () => {
   assert.equal(nextStepFromRow({ next_step: 'x', due_date: 'ASAP' }).due_date, '');
+  // A status typed into the sheet outside the plan vocabulary reads as
+  // empty — the section never shows "Blocked" or a red state.
+  assert.equal(nextStepFromRow({ next_step: 'x', status: 'Blocked!!' }).status, '');
+  assert.equal(nextStepFromRow({ next_step: 'x', status: 'completed' }).status, 'Complete');
+  assert.equal(nextStepFromRow({ next_step: 'x', kind: 'huge' }).kind, 'step');
+  // Pre-MAP rows (no plan columns at all) degrade cleanly.
+  const legacy = nextStepFromRow({ next_step: 'x' });
+  assert.equal(legacy.owner, '');
+  assert.equal(legacy.status, '');
+  assert.equal(legacy.timing, '');
+  assert.equal(legacy.kind, 'step');
 });
 
-// ── Agenda selection & ordering ──────────────────────────────────────
-test('selectPartnerNextSteps filters by partner and orders as an agenda', () => {
+// ── Plan selection & ordering ────────────────────────────────────────
+test('selectPartnerNextSteps filters by partner and preserves plan (stored) order', () => {
   const rows = [
-    { partner_id: 'p_1', step_id: 's1', next_step: 'Undated early', created_at: '2026-07-01T00:00:00Z' },
-    { partner_id: 'p_1', step_id: 's2', next_step: 'Due later', due_date: '2026-09-01', created_at: '2026-07-02T00:00:00Z' },
+    // Stored order IS plan order — a dated later step must not float above
+    // the undated gate that precedes it in the plan.
+    { partner_id: 'p_1', step_id: 's1', next_step: 'Budget approval', created_at: '2026-07-01T00:00:00Z' },
+    { partner_id: 'p_1', step_id: 's2', next_step: 'POC kickoff', due_date: '2026-09-01', created_at: '2026-07-02T00:00:00Z' },
     { partner_id: 'p_2', step_id: 's3', next_step: 'Other partner', due_date: '2026-08-01' },
-    { partner_id: 'p_1', step_id: 's4', next_step: 'Due soon', due_date: '2026-08-01', created_at: '2026-07-03T00:00:00Z' },
-    { partner_id: 'p_1', step_id: 's5', next_step: 'Undated late', created_at: '2026-07-04T00:00:00Z' },
+    { partner_id: 'p_1', step_id: 's4', next_step: 'POC validation', due_date: '2026-08-01', created_at: '2026-07-03T00:00:00Z' },
+    { partner_id: 'p_1', step_id: 's5', next_step: 'Final decision', created_at: '2026-07-04T00:00:00Z' },
     { partner_id: 'p_1', step_id: 's6', next_step: '' }, // no text — ignored
   ];
   const steps = selectPartnerNextSteps(rows, 'p_1');
-  assert.deepEqual(steps.map(s => s.step_id), ['s4', 's2', 's1', 's5']);
+  assert.deepEqual(steps.map(s => s.step_id), ['s1', 's2', 's4', 's5']);
 });
 
 test('lastAnalyzedAt picks the newest analysis stamp', () => {
@@ -356,7 +522,13 @@ test('sanitizeNoteTextForAnalysis neutralizes block delimiters and fences', () =
 // ── Schema example stays in sync with the parser ─────────────────────
 test('the schema example shown to the model parses as JSON-shaped guidance', () => {
   assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"next_steps"/);
+  assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"kind"/);
+  assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"owner"/);
+  assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"status"/);
   assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"due_date"/);
+  assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"timing"/);
   assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"evidence"/);
   assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /"source_ids"/);
+  // Every status the example promises is one the parser accepts.
+  assert.match(NEXT_STEPS_SCHEMA_EXAMPLE, /Complete \| In Progress \| Next \| Scheduled \| Pending/);
 });

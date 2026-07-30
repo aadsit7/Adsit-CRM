@@ -1161,7 +1161,7 @@ let demoNextSteps = [
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 19; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 20; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {
