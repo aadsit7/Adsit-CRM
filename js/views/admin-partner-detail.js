@@ -60,6 +60,15 @@ import {
   selectPartnerBioRow,
 } from '../utils/partner-bio-schema.js';
 import { requestPartnerBio } from '../utils/partner-bio-client.js';
+import {
+  PARTNER_NEXT_STEP_HEADERS,
+  nextStepRowValues,
+  selectPartnerNextSteps,
+  dedupeNextSteps,
+  lastAnalyzedAt,
+  sanitizeNoteTextForAnalysis,
+} from '../utils/partner-next-steps-schema.js';
+import { requestPartnerNextSteps } from '../utils/partner-next-steps-client.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 
 export const title = 'Partner Detail';
@@ -86,7 +95,7 @@ export async function render(container, params) {
     // parallel with the reads the page already needs, so it costs no extra
     // wall-clock, and a failure (or a spreadsheet with no such tab yet) just
     // means no links, never a broken page.
-    const [partners, opportunities, events, transcripts, contactRows, documentRows, bioRows] = await Promise.all([
+    const [partners, opportunities, events, transcripts, contactRows, documentRows, bioRows, nextStepRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_PARTNERS),
       readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
       readSheetAsObjects(CONFIG.SHEET_EVENTS),
@@ -96,6 +105,9 @@ export async function render(container, params) {
       // Partner_Bios is created on the first Analyze run, so a spreadsheet
       // that has never had one simply has no such tab — never a page error.
       readSheetAsObjects(CONFIG.SHEET_PARTNER_BIOS).catch(() => []),
+      // Partner_Next_Steps is created on the first Analyze / Add Step, so a
+      // spreadsheet without it simply shows an empty agenda — never an error.
+      readSheetAsObjects(CONFIG.SHEET_PARTNER_NEXT_STEPS).catch(() => []),
     ]);
 
     const partner = partners.find(p => p.partner_id === partnerId);
@@ -149,7 +161,11 @@ export async function render(container, params) {
     // still sees the profile they just paid for instead of an empty panel.
     const bioRecord = selectPartnerBioRow(bioRows, partnerId) || partnerBioSessionCache.get(partnerId) || null;
 
-    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex, bioRecord);
+    // The saved forward agenda: analysis rows and manual rows together,
+    // ordered as an agenda (dated steps first).
+    const partnerNextSteps = selectPartnerNextSteps(nextStepRows, partnerId);
+
+    renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex, bioRecord, partnerNextSteps);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading data'),
@@ -163,7 +179,7 @@ function reRender(partnerId) {
   render(viewContainer, { id: partnerId });
 }
 
-function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = [], contactPdfIndex = null, bioRecord = null) {
+function renderDetail(container, partner, opportunities, partnerEvents, transcripts, partnerContacts = [], contactPdfIndex = null, bioRecord = null, nextSteps = []) {
   const tierClass = tierSlug(partner.tier);
   const pipelineValue = opportunities.filter(o => o.status !== 'Won').reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
   const wonDeals = opportunities.filter(o => o.status === 'Won');
@@ -248,6 +264,11 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
     // the hero because it answers "who is this company" before anything about
     // our pipeline with them makes sense.
     buildPartnerBioSection(partner, bioRecord),
+
+    // Section 0.5: Next Steps — the forward agenda, between the bio (who the
+    // company is) and the events/pipeline (what we are doing with them),
+    // because "what happens next" is the question those notes answer.
+    buildNextStepsSection(partner, nextSteps, transcripts),
 
     // Section 1: Upcoming Joint Events
     buildUpcomingEventsSection(sortedEvents, partner, container),
@@ -772,6 +793,539 @@ async function runPartnerBioAnalysis(partner, btn) {
       btn.disabled = false;
       btn.textContent = researched ? 'Re-analyze' : 'Analyze';
     }
+  }
+}
+
+// ============================================
+// Next Steps — the forward agenda from the description notes
+// ============================================
+// The section between the Partner Bio and Upcoming Joint Events. "Analyze"
+// asks the user to SELECT description notes (one or many), reasons over
+// exactly those notes — extended thinking, no tools, no outside knowledge —
+// and appends the verified steps to the agenda table. Every saved analysis
+// row passed the verbatim evidence gate in
+// js/utils/partner-next-steps-schema.js: its supporting snippet is literally
+// present in a selected note, its applicable date is a real calendar date
+// the notes stated, and its provenance (which notes, analyzed when) is on
+// the row. Manual "Add Step" rows sit in the same table, labeled as manual.
+
+// Which partners' Next Steps panels the user has collapsed, surviving the
+// full-page re-renders every mutation in this view performs. Absence means
+// open — the default for every partner.
+const collapsedNextStepsSections = new Set();
+
+// The partner_id whose next-steps analysis is running, or null. A partner id
+// rather than a bare boolean so a re-rendered button shows the correct
+// per-partner state.
+let nextStepsRunInFlight = null;
+
+// The analysis reads at most this much of each selected note — the same
+// per-item cap the contacts scan applies to description notes.
+const NEXT_STEPS_CHARS_PER_NOTE = 6000;
+
+// Reasoning over many notes takes a while; the pill budget matches the
+// client's request timeout rather than the default 4 minutes.
+const NEXT_STEPS_PILL_TIMEOUT_MS = 10 * 60 * 1000;
+
+function nextStepsAnalyzeIconSvg() {
+  return '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">'
+    + '<path d="M5.6 1.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1 1-2.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
+    + '<path d="M10.6 7.9l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>'
+    + '</svg>';
+}
+
+/**
+ * The section's Analyze button. Reads the in-flight state at build time so a
+ * re-render during a run rebuilds it as "Analyzing…" rather than idle.
+ * `hasAnalysis` flips the label to "Re-analyze" once an analysis has landed.
+ */
+function buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis) {
+  const running = nextStepsRunInFlight === partner.partner_id;
+  const btn = el('button', {
+    class: 'partner-detail-page__section-cta',
+    disabled: running || undefined,
+    title: hasAnalysis
+      ? 'Select description notes and analyze them again — verified new steps are added to the agenda'
+      : 'Select description notes to analyze into a next-steps agenda',
+    onClick: (e) => {
+      e.stopPropagation();
+      openNextStepsSourceModal(partner, transcripts);
+    },
+  },
+    running ? null : el('span', { class: 'partner-next-steps__analyze-icon', html: nextStepsAnalyzeIconSvg() }),
+    running ? 'Analyzing…' : (hasAnalysis ? 'Re-analyze' : 'Analyze'),
+  );
+  return btn;
+}
+
+/** "Jun 12, 2026 · Jul 17, 2026" from the stored "2026-06-12; 2026-07-17". */
+function nextStepSourceDatesLabel(step) {
+  const dates = String(step.source_dates || '')
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(d => formatDate(d))
+    .filter(d => d && d !== '—');
+  return dates.join(' · ');
+}
+
+function buildNextStepsTable(partner, steps) {
+  return el('div', { class: 'events-page__table-wrapper partner-next-steps__table-wrapper' },
+    el('table', { class: 'events-page__table events-page__table--compact partner-next-steps__table' },
+      el('thead', {},
+        el('tr', {},
+          el('th', {}, 'Next Step'),
+          el('th', {}, 'Applicable Date'),
+          el('th', {}, 'From'),
+          el('th', {}, 'Analyzed / Added'),
+          el('th', {}, 'Actions'),
+        )
+      ),
+      el('tbody', {},
+        ...steps.map(step => {
+          const isAnalysis = step.source === 'analysis';
+          const noteDates = isAnalysis ? nextStepSourceDatesLabel(step) : '';
+          const stampISO = isAnalysis ? step.analyzed_at : step.created_at;
+          const stampDate = formatDate(String(stampISO || '').slice(0, 10));
+          return el('tr', {},
+            el('td', { class: 'partner-next-steps__step-cell' },
+              el('div', {
+                class: 'partner-next-steps__step-text',
+                // The verbatim note snippet this step was verified against.
+                title: step.evidence ? `From the notes: “${step.evidence}”` : undefined,
+              }, step.next_step),
+            ),
+            el('td', {},
+              step.due_date
+                ? el('span', { class: 'partner-next-steps__due' }, formatDate(step.due_date))
+                : el('span', {
+                    class: 'partner-contacts__muted',
+                    title: 'The selected notes did not state a date for this step',
+                  }, '—'),
+            ),
+            el('td', {},
+              isAnalysis
+                ? el('span', {
+                    class: 'partner-next-steps__source-chip',
+                    title: noteDates ? `Analyzed from the description note(s) of ${noteDates}` : 'Analyzed from the selected description notes',
+                  }, noteDates ? `Notes · ${noteDates}` : 'Notes')
+                : el('span', {
+                    class: 'partner-next-steps__source-chip partner-next-steps__source-chip--manual',
+                    title: 'Added by hand',
+                  }, 'Manual'),
+            ),
+            el('td', {},
+              stampDate && stampDate !== '—'
+                ? el('span', { class: 'partner-next-steps__stamp' },
+                    `${isAnalysis ? 'Analyzed' : 'Added'} ${stampDate}`)
+                : el('span', { class: 'partner-contacts__muted' }, '—'),
+            ),
+            el('td', { class: 'events-page__td--actions' },
+              el('button', {
+                class: 'events-page__action-link events-page__action-link--danger',
+                onClick: () => handleDeleteNextStep(step, partner),
+              }, 'Delete'),
+            ),
+          );
+        })
+      )
+    )
+  );
+}
+
+function buildNextStepsSection(partner, steps, transcripts) {
+  const isOpen = !collapsedNextStepsSections.has(partner.partner_id);
+  const hasAnalysis = steps.some(s => s.source === 'analysis');
+  const analyzed = lastAnalyzedAt(steps);
+
+  const chevron = el('span', {
+    class: `partner-next-steps__chevron${isOpen ? ' partner-next-steps__chevron--open' : ''}`,
+    html: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  });
+
+  const body = el('div', {
+    class: `partner-next-steps__body${isOpen ? '' : ' partner-next-steps__body--collapsed'}`,
+  },
+    steps.length > 0
+      ? buildNextStepsTable(partner, steps)
+      : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
+          el('div', { class: 'empty-state__title' }, 'No next steps yet'),
+          el('div', { class: 'empty-state__description' },
+            'Click "Analyze" to pick the description notes to read — the AI builds the '
+            + 'next-steps agenda from exactly the notes you select. You can also add steps by hand.'),
+          el('div', { class: 'partner-next-steps__empty-cta' },
+            buildNextStepsAnalyzeButton(partner, transcripts, false)),
+        )
+  );
+
+  const subtitle = steps.length
+    ? (analyzed
+        ? `analyzed ${formatDate(String(analyzed).slice(0, 10)) || String(analyzed).slice(0, 10)}`
+        : 'added by hand')
+    : 'from your description notes';
+
+  const header = el('div', {
+    class: 'partner-detail-page__section-header partner-next-steps__header',
+    onClick: () => {
+      const nowOpen = body.classList.toggle('partner-next-steps__body--collapsed') === false;
+      chevron.classList.toggle('partner-next-steps__chevron--open', nowOpen);
+      if (nowOpen) collapsedNextStepsSections.delete(partner.partner_id);
+      else collapsedNextStepsSections.add(partner.partner_id);
+    },
+  },
+    el('div', { class: 'partner-detail-page__section-title' },
+      'Next Steps',
+      steps.length ? el('span', { class: 'partner-detail-page__section-count' }, String(steps.length)) : null,
+      el('span', { class: 'partner-detail-page__section-subtitle' }, subtitle),
+      chevron,
+    ),
+    el('div', { class: 'partner-detail-page__section-actions' },
+      el('button', {
+        class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+        onClick: (e) => {
+          e.stopPropagation();
+          openAddNextStepModal(partner);
+        },
+      },
+        el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
+        'Add Step',
+      ),
+      buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis),
+    ),
+  );
+
+  return el('div', { class: 'partner-detail-page__section partner-next-steps' }, header, body);
+}
+
+// ── Note-selection modal ─────────────────────────────────────────────
+// The user picks WHICH description notes feed the analysis — one or many.
+// Notes are the partner's Transcripts rows, listed newest first exactly as
+// the Descriptions section shows them.
+function openNextStepsSourceModal(partner, transcripts) {
+  if (nextStepsRunInFlight) {
+    showToast(nextStepsRunInFlight === partner.partner_id
+      ? 'This partner\'s next steps are already being analyzed.'
+      : 'Another next-steps analysis is still running.', 'info');
+    return;
+  }
+
+  // A note needs its transcript_id to be citable as a step's source, so
+  // hand-entered sheet rows missing one are excluded — and SAID to be, not
+  // silently hidden while the Descriptions section shows them.
+  const withText = (transcripts || []).filter(t => stripHtml(t.transcript_text || '').trim());
+  const notes = withText.filter(t => String(t.transcript_id || '').trim());
+  const missingId = withText.length - notes.length;
+  if (!notes.length) {
+    showToast(missingId
+      ? `${missingId} description note${missingId === 1 ? ' is' : 's are'} missing a transcript_id in the Transcripts sheet and can't be analyzed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Transcript".`
+      : 'This partner has no description notes to analyze yet — add one under Descriptions first.', 'info');
+    return;
+  }
+  if (missingId) {
+    showToast(`${missingId} note${missingId === 1 ? '' : 's'} without a transcript_id ${missingId === 1 ? 'is' : 'are'} not listed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Transcript" to make ${missingId === 1 ? 'it' : 'them'} analyzable.`, 'info');
+  }
+
+  const selected = new Set();
+  const rowInputs = new Map();
+
+  const analyzeBtn = el('button', {
+    class: 'btn btn--primary',
+    disabled: true,
+    onClick: () => {
+      const chosen = notes.filter(t => selected.has(t.transcript_id));
+      if (!chosen.length) return;
+      closeModal();
+      runNextStepsAnalysis(partner, chosen);
+    },
+  }, 'Analyze');
+
+  const selectAllInput = el('input', { type: 'checkbox', class: 'partner-next-steps-select__checkbox' });
+
+  const syncControls = () => {
+    analyzeBtn.disabled = selected.size === 0;
+    analyzeBtn.textContent = selected.size
+      ? `Analyze ${selected.size} note${selected.size === 1 ? '' : 's'}`
+      : 'Analyze';
+    selectAllInput.checked = selected.size === notes.length;
+    selectAllInput.indeterminate = selected.size > 0 && selected.size < notes.length;
+  };
+
+  selectAllInput.addEventListener('change', () => {
+    if (selectAllInput.checked) notes.forEach(t => selected.add(t.transcript_id));
+    else selected.clear();
+    rowInputs.forEach((input, id) => { input.checked = selected.has(id); });
+    syncControls();
+  });
+
+  const rows = notes.map(t => {
+    const input = el('input', {
+      type: 'checkbox',
+      class: 'partner-next-steps-select__checkbox',
+      onChange: () => {
+        if (input.checked) selected.add(t.transcript_id);
+        else selected.delete(t.transcript_id);
+        syncControls();
+      },
+    });
+    rowInputs.set(t.transcript_id, input);
+    const dateStr = formatDate(t.conversation_date) !== '—'
+      ? formatDate(t.conversation_date)
+      : formatDate(t.created_at);
+    const plain = stripHtml(t.transcript_text || '');
+    const preview = plain.slice(0, 140) + (plain.length > 140 ? '…' : '');
+    return el('label', { class: 'partner-next-steps-select__row' },
+      input,
+      el('span', { class: 'partner-next-steps-select__date' }, dateStr),
+      el('span', { class: 'partner-next-steps-select__preview' }, preview),
+    );
+  });
+
+  openModal({
+    title: 'Analyze Description Notes',
+    className: 'modal--wide',
+    content: el('div', { class: 'partner-next-steps-select' },
+      el('p', { class: 'partner-next-steps-select__intro' },
+        'Select the description notes to analyze. The AI reads ONLY the notes you select, works out '
+        + 'what is still open, and adds the verified next steps to the agenda — every step is checked '
+        + 'word-for-word against the notes before it is saved.'),
+      el('label', { class: 'partner-next-steps-select__row partner-next-steps-select__row--all' },
+        selectAllInput,
+        el('span', { class: 'partner-next-steps-select__date' }, 'Select all'),
+        el('span', { class: 'partner-next-steps-select__preview' },
+          `${notes.length} description note${notes.length === 1 ? '' : 's'}`),
+      ),
+      el('div', { class: 'partner-next-steps-select__list' }, ...rows),
+    ),
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
+      analyzeBtn,
+    ],
+  });
+}
+
+// ── Analysis run ─────────────────────────────────────────────────────
+async function runNextStepsAnalysis(partner, chosenTranscripts) {
+  const partnerId = String(partner.partner_id || '').trim();
+  if (!partnerId) {
+    showToast('This partner has no record id — reload the page and try again.', 'error');
+    return;
+  }
+  if (nextStepsRunInFlight) {
+    showToast('A next-steps analysis is already running.', 'info');
+    return;
+  }
+  nextStepsRunInFlight = partnerId;
+  // Rebuild the section so its Analyze buttons show the running state — the
+  // click came from the (now closed) selection modal, so unlike the bio flow
+  // there is no on-screen button to flip in place. Same page guard as the
+  // finally-block re-render, which restores the idle state when the run ends.
+  if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partnerId) {
+    reRender(partnerId);
+  }
+
+  // Progress rides the global Randy pill so it stays visible after the user
+  // leaves this partner page — the analysis keeps running either way.
+  const pill = createPill('Analyzing notes…', {
+    label: partner.display_name || 'Partner',
+    hardTimeoutMs: NEXT_STEPS_PILL_TIMEOUT_MS,
+  });
+
+  try {
+    // The sources exactly as the parser will verify against them: HTML
+    // stripped, prompt-structure markers neutralized, bounded per note. The
+    // model and the evidence gate must see the SAME text or verbatim
+    // verification would be meaningless.
+    const sources = chosenTranscripts.map(t => ({
+      source_id: String(t.transcript_id || '').trim(),
+      label: 'Description',
+      date: String(t.conversation_date || t.created_at || '').trim().slice(0, 10),
+      text: sanitizeNoteTextForAnalysis(stripHtml(t.transcript_text || '')).slice(0, NEXT_STEPS_CHARS_PER_NOTE),
+    })).filter(s => s.source_id && s.text.trim());
+    if (!sources.length) throw new Error('The selected notes have no readable text.');
+
+    const result = await requestPartnerNextSteps({
+      partnerName: partner.display_name || '',
+      sources,
+      today: todayISO(),
+    });
+
+    if (result.dropped.length) {
+      console.info('[Partner Next Steps] proposals rejected by the verbatim evidence check:', result.dropped);
+    }
+
+    updatePillStage(pill, 'Saving…');
+
+    let records = [];
+    let skipped = [];
+    if (result.steps.length) {
+      // The tab must exist BEFORE the dedupe read: with it guaranteed, a
+      // failed read below is a genuine transient error and aborts the save
+      // (via the outer catch) rather than silently deduping against an
+      // empty list and re-appending every step the previous run saved.
+      await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_NEXT_STEPS, PARTNER_NEXT_STEP_HEADERS);
+      // Fresh read so the dedupe sees steps added since this page rendered —
+      // a re-analysis appends, and the same step must not pile up.
+      const existingRows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_NEXT_STEPS, { forceRefresh: true });
+      const existing = selectPartnerNextSteps(existingRows, partnerId);
+      const deduped = dedupeNextSteps(existing, result.steps);
+      skipped = deduped.skipped;
+
+      const dateById = new Map(sources.map(s => [s.source_id, s.date]));
+      const now = nowISO();
+      records = deduped.fresh.map(step => ({
+        step_id: uuid('pns'),
+        partner_id: partnerId,
+        partner_name: partner.display_name || '',
+        next_step: step.next_step,
+        due_date: step.due_date,
+        source: 'analysis',
+        source_dates: [...new Set((step.source_ids || []).map(id => dateById.get(id)).filter(Boolean))].join('; '),
+        evidence: step.evidence,
+        analyzed_at: now,
+        created_at: now,
+        updated_at: now,
+      }));
+
+      if (records.length) {
+        await appendRows(CONFIG.SHEET_PARTNER_NEXT_STEPS, records.map(nextStepRowValues));
+      }
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    if (records.length) {
+      const bits = [plural(records.length, 'next step') + ' added'];
+      if (skipped.length) bits.push(`${skipped.length} already on the agenda`);
+      if (result.dropped.length) bits.push(`${plural(result.dropped.length, 'unverified proposal')} discarded`);
+      showToast(`Next steps: ${bits.join(', ')}`, 'success');
+      markPillSuccess(pill, plural(records.length, 'step') + ' added');
+    } else if (skipped.length) {
+      showToast('Analysis complete — every verified next step is already on the agenda.', 'info');
+      markPillSuccess(pill, 'Agenda already up to date');
+    } else if (result.dropped.length) {
+      showToast('Analysis found no verifiable next steps in the selected notes — nothing was saved. See the console for what was rejected.', 'info');
+      markPillSuccess(pill, 'Nothing verifiable found');
+    } else {
+      showToast('Analysis found no open next steps in the selected notes.', 'info');
+      markPillSuccess(pill, 'No next steps found');
+    }
+    if (result.partial) {
+      showToast('The analysis reply was cut off — the agenda may be incomplete. Re-analyze with fewer notes selected.', 'error');
+    }
+
+    collapsedNextStepsSections.delete(partnerId);
+  } catch (err) {
+    console.error('[Partner Next Steps]', err);
+    showToast(err.message || 'Next steps analysis failed', 'error');
+    markPillFailure(pill, 'Analysis failed');
+  } finally {
+    nextStepsRunInFlight = null;
+    // Re-render after the in-flight flag clears so the rebuilt button shows
+    // its idle state — but only if the user is still on THIS partner's page.
+    // The results are persisted regardless.
+    if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partnerId) {
+      reRender(partnerId);
+    }
+  }
+}
+
+// ── Manual add ───────────────────────────────────────────────────────
+function openAddNextStepModal(partner) {
+  const stepInput = el('textarea', {
+    class: 'form-input partner-next-steps__textarea',
+    id: 'next-step-text',
+    rows: '3',
+    placeholder: 'e.g. Send the business justification deck to the services team',
+  });
+  const dateInput = el('input', { class: 'form-input', type: 'date', id: 'next-step-date' });
+
+  const saveBtn = el('button', {
+    class: 'btn btn--primary',
+    onClick: async () => {
+      const text = stepInput.value.replace(/\s+/g, ' ').trim();
+      if (!text) { showToast('Please enter the next step', 'error'); return; }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      try {
+        await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_NEXT_STEPS, PARTNER_NEXT_STEP_HEADERS);
+        const now = nowISO();
+        await appendRow(CONFIG.SHEET_PARTNER_NEXT_STEPS, nextStepRowValues({
+          step_id: uuid('pns'),
+          partner_id: partner.partner_id,
+          partner_name: partner.display_name || '',
+          next_step: text,
+          due_date: dateInput.value || '',
+          source: 'manual',
+          source_dates: '',
+          evidence: '',
+          analyzed_at: '',
+          created_at: now,
+          updated_at: now,
+        }));
+        showToast('Next step added', 'success');
+        closeModal();
+        collapsedNextStepsSections.delete(partner.partner_id);
+        // The modal survives a hash navigation, so only repaint if the user
+        // is still on THIS partner's page — the row is saved regardless.
+        if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
+          reRender(partner.partner_id);
+        }
+      } catch (err) {
+        showToast(err.message || 'Failed to save the next step', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Add Step';
+      }
+    },
+  }, 'Add Step');
+
+  openModal({
+    title: 'Add Next Step',
+    content: el('div', {},
+      el('div', { class: 'form-group' },
+        el('label', { class: 'form-label' }, 'Partner'),
+        el('input', {
+          class: 'form-input', type: 'text', value: partner.display_name, readOnly: true,
+          style: { background: 'var(--color-bg)', cursor: 'default' },
+        })
+      ),
+      el('div', { class: 'form-group' },
+        el('label', { class: 'form-label', for: 'next-step-text' }, 'Next Step *'),
+        stepInput,
+      ),
+      el('div', { class: 'form-group' },
+        el('label', { class: 'form-label', for: 'next-step-date' }, 'Applicable Date (optional)'),
+        dateInput,
+      ),
+    ),
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
+      saveBtn,
+    ],
+  });
+}
+
+// ── Delete ───────────────────────────────────────────────────────────
+async function handleDeleteNextStep(step, partner) {
+  if (!step.step_id) {
+    showToast('This row has no record id — it can only be removed in the spreadsheet.', 'error');
+    return;
+  }
+  const label = step.next_step.length > 80 ? `${step.next_step.slice(0, 80)}…` : step.next_step;
+  const confirmed = await confirmDialog(
+    'Delete Next Step',
+    `Remove "${label}" from ${partner.display_name}'s agenda? This cannot be undone.`
+  );
+  if (!confirmed) return;
+
+  try {
+    await deleteRowById(CONFIG.SHEET_PARTNER_NEXT_STEPS, 'step_id', step.step_id);
+    showToast('Next step removed', 'success');
+    // The confirm dialog survives a hash navigation, so only repaint if the
+    // user is still on THIS partner's page — the row is gone regardless.
+    if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
+      reRender(partner.partner_id);
+    }
+  } catch (err) {
+    showToast(err.message || 'Failed to delete', 'error');
   }
 }
 

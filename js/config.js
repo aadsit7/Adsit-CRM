@@ -95,6 +95,12 @@ export const CONFIG = {
   // (see js/utils/partner-bio-schema.js for the row contract). Created on
   // first save, so older spreadsheets simply have no such tab yet.
   SHEET_PARTNER_BIOS: 'Partner_Bios',
+  // Next steps for a partner — the forward agenda the "Next Steps" section
+  // on the partner page holds: rows produced by analyzing the description
+  // notes the user selected, plus manually added steps (see
+  // js/utils/partner-next-steps-schema.js for the row contract). Created on
+  // first use, so older spreadsheets simply have no such tab yet.
+  SHEET_PARTNER_NEXT_STEPS: 'Partner_Next_Steps',
   // Saved partner-event playbook state, one row per event. Written by the
   // standalone Event Workspace (savePlaybook Apps Script action) and read by
   // the Event Analyzer as an optional evidence source. See apps-script/Code.gs
