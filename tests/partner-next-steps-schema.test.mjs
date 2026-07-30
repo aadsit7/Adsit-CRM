@@ -24,7 +24,7 @@ import {
   lastAnalyzedAt,
   sanitizeNoteTextForAnalysis,
 } from '../js/utils/partner-next-steps-schema.js';
-import { fieldFoundInText } from '../js/utils/partner-contacts.js';
+import { snippetFoundInText } from '../js/utils/partner-contacts.js';
 
 const SOURCES = [
   {
@@ -90,6 +90,44 @@ test('keeps verified steps with their plan fields, dates, evidence and source id
   assert.equal(review.status, 'In Progress');
   assert.equal(review.kind, 'gate');
   assert.deepEqual(review.source_ids, ['trn_2']);
+});
+
+// ── Glued block boundaries (the 2026-07-30 mass-rejection bug) ───────
+// HTML-stripped notes can glue a heading onto the first word of the next
+// block ("…Partnership ObjectiveWipro is evaluating…"). The model correctly
+// quotes the clause from its real start; the gate must not treat that
+// occurrence as word-internal and drop it. 15 of 16 verbatim proposals were
+// lost to exactly this before the matcher switched to snippetFoundInText.
+test('evidence starting or ending at a glued block boundary still verifies', () => {
+  const glued = [{
+    source_id: 'trn_g',
+    date: '2026-07-22',
+    label: 'Description',
+    text: 'Meeting Recap – July 22, 2026Partnership ObjectiveWipro is evaluating Recast for a strategic partnership rather than a single customer transaction.Next Steps AgreedRecast requested a side-by-side comparison of delivery models.',
+  }];
+  const reply = {
+    next_steps: [
+      {
+        next_step: 'Wipro evaluates Recast for a strategic partnership.',
+        kind: 'gate', owner: 'NA', status: 'In Progress', due_date: 'NA', timing: 'NA',
+        // Starts right after the glued "Objective", ends right before the
+        // glued "Next" — both neighbors are letters in the stripped text.
+        evidence: 'Wipro is evaluating Recast for a strategic partnership rather than a single customer transaction.',
+        source_ids: ['trn_g'],
+      },
+      {
+        next_step: 'Produce the side-by-side comparison of delivery models.',
+        kind: 'step', owner: 'Recast', status: 'Next', due_date: 'NA', timing: 'NA',
+        evidence: 'Recast requested a side-by-side comparison of delivery models.',
+        source_ids: ['trn_g'],
+      },
+    ],
+    note: '',
+  };
+  const result = parsePartnerNextStepsResponse(asReply(reply), { sources: glued });
+  assert.equal(result.dropped.length, 0);
+  assert.equal(result.steps.length, 2);
+  assert.deepEqual(result.steps[0].source_ids, ['trn_g']);
 });
 
 // ── The plan vocabulary gates ────────────────────────────────────────
@@ -246,8 +284,8 @@ test('a long verbatim quote verifies in full and is stored cut on a word boundar
   // exactly where a word ends, not mid-word.
   assert.ok(longClause.startsWith(stored), 'stored evidence is a verbatim prefix');
   assert.equal(longClause[stored.length], ' ', 'cut lands on a word boundary');
-  // The stored snippet is still a verbatim, findable phrase of the note.
-  assert.equal(fieldFoundInText(stored, sources[0].text), true);
+  // The stored snippet is still a verbatim phrase the gate's own matcher finds.
+  assert.equal(snippetFoundInText(stored, sources[0].text), true);
 });
 
 test('cited ids that were never supplied are ignored', () => {

@@ -11,7 +11,7 @@ import {
   PARTNER_CONTACT_HEADERS,
   CONTACT_SOURCE_LIMITS,
   CRM_OWNER_COMPANY,
-  nameFoundInText, emailFoundInText, phoneFoundInText, fieldFoundInText,
+  nameFoundInText, emailFoundInText, phoneFoundInText, fieldFoundInText, snippetFoundInText,
   nameFoundInTextFuzzy, namesLikelySamePerson, companyMatchesPartner,
   emailAlignsWithPartner,
   collectPartnerContactSources,
@@ -106,6 +106,20 @@ test('fieldFoundInText: verbatim phrase only — paraphrases fail', () => {
   assert.equal(fieldFoundInText('Director of IT', text), true);
   assert.equal(fieldFoundInText('IT Director', text), false);
   assert.equal(fieldFoundInText('Acme', 'Acmex Industries'), false);
+});
+
+test('snippetFoundInText: verbatim clause matches even at glued block boundaries', () => {
+  // HTML-stripped notes glue adjacent blocks ("…ObjectiveWipro is…"); a
+  // clause-length snippet quoted from the real start of the block must still
+  // verify — the boundary guard is the short-field matcher's job, not this one's.
+  const glued = 'Partnership ObjectiveWipro is evaluating Recast for a strategic partnership.Next steps follow.';
+  assert.equal(snippetFoundInText('Wipro is evaluating Recast for a strategic partnership.', glued), true);
+  // Same normalization as the field matcher: case, whitespace, curly quotes.
+  assert.equal(snippetFoundInText('wipro IS   evaluating Recast', glued), true);
+  assert.equal(snippetFoundInText('Recast’s strategic partnership', "evaluating Recast's strategic partnership rather"), true);
+  // Still verbatim-only — a paraphrase does not match.
+  assert.equal(snippetFoundInText('Wipro assesses Recast for a partnership', glued), false);
+  assert.equal(snippetFoundInText('', glued), false);
 });
 
 // ── Similar-name reasoning ───────────────────────────────────────────
