@@ -6952,9 +6952,18 @@
 
 .partner-detail-page__hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  /* Stacked by default. Two columns only when there is genuinely room for
+     both: at laptop widths the side-by-side layout squeezed the name/tier
+     block until it painted across the Deals/Pipeline cells. */
+  grid-template-columns: 1fr;
   gap: 14px;
   margin-bottom: 22px;
+}
+
+@media (min-width: 1281px) {
+  .partner-detail-page__hero {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
 }
 
 /* Condensed metadata strip — replaces the tall rounded white card */
@@ -7011,6 +7020,9 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  /* Nothing in this block may ever paint over the stat cells beside it —
+     if a squeeze exceeds what wrapping can absorb, clip at the boundary. */
+  overflow: hidden;
 }
 
 .partner-detail-page__hero-name-row {
@@ -7018,6 +7030,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .partner-detail-page__hero-name {
@@ -7030,9 +7043,9 @@
 }
 
 .partner-detail-page__hero-tier {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  /* inline-block (not inline-flex) so the badge can ellipsize instead of
+     forcing the row wider than its box when space runs out. */
+  display: inline-block;
   padding: 3px 8px;
   border-radius: 0;
   background: #FFFFFF;
@@ -7043,6 +7056,10 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .partner-detail-page__hero-meta {
@@ -7319,10 +7336,33 @@
   color: #2F6BFF;
 }
 
+/* Icon-only section CTA — repeat actions (Copy, Re-analyze) compress to a
+   square the same 30px height as their labeled neighbors, so header rows
+   stay aligned. The action name lives in title + aria-label, and mobile.css
+   re-attaches it as visible text on phones via data-label. */
+.partner-detail-page__section-cta--icon {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Glyph wrapper inside section CTAs — keeps the SVG vertically centered
+   whether or not a label follows it. */
+.cta-glyph {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Busy glyph — an icon-only CTA mid-run swaps its glyph for a spinning ring
+   (reuses the global `spin` keyframes from the loading overlay). */
+.icon-btn-spin {
+  display: inline-flex;
+  align-items: center;
+  animation: spin 0.9s linear infinite;
+}
+
 @media (max-width: 1024px) {
-  .partner-detail-page__hero {
-    grid-template-columns: 1fr;
-  }
   .partner-detail-page__hero-strip {
     flex-wrap: wrap;
   }
@@ -8021,4 +8061,77 @@
   .partner-lc__compare-row {
     grid-template-columns: 70px 1fr 1fr;
   }
+}
+
+/* ============================================
+   Row Icon Buttons — compact icon-only actions
+   ============================================
+   The shared replacement for the text Edit/Delete/Copy links in tables,
+   cards and transcript rows (js/components/icon-button.js). Flat square
+   chrome matching the kanban card action buttons and the sharp
+   partner-detail language. Every instance carries title + aria-label;
+   mobile.css restores the visible label on phones via data-label.
+   Distinct from .row-action-btn above, which is the GHOST (borderless
+   until hover) 26px variant used for inline rows inside the details
+   modals — that one keeps its subtler chrome on purpose. */
+
+.row-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  border-radius: 0;
+  color: #4A5468;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.row-icon-btn:hover {
+  color: #2F6BFF;
+  border-color: #2F6BFF;
+  background: #F0F4FB;
+}
+
+.row-icon-btn:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: 1px;
+}
+
+/* Destructive actions keep the red the old text links had at rest, so the
+   trash can is recognizable before hover. */
+.row-icon-btn--danger {
+  color: #EF4E5B;
+}
+
+.row-icon-btn--danger:hover {
+  color: #EF4E5B;
+  border-color: #EF4E5B;
+  background: #FDF3F4;
+}
+
+.row-icon-btn__glyph {
+  display: inline-flex;
+  align-items: center;
+}
+
+.row-icon-btn svg {
+  display: block;
+}
+
+/* Icon actions sit tighter than the old text links did. Scoped to the
+   table-cell actions container — the page-level toolbar that shares the
+   .events-page__actions class keeps its own spacing. */
+.partner-contacts__actions,
+.transcript-card__actions,
+.events-page__td--actions .events-page__actions {
+  gap: 8px;
 }

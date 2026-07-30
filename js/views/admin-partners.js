@@ -15,6 +15,7 @@ import { showToast } from '../components/toast.js';
 import { setTopbarTitle } from '../components/sidebar.js';
 import { filterPartners } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
+import { ICONS, iconButton } from '../components/icon-button.js';
 
 export const title = 'Partners';
 
@@ -320,9 +321,25 @@ function renderList(partners) {
             el('td', {}, el('span', { class: `badge badge--xs badge--${p.status?.toLowerCase() || 'active'}` }, p.status || 'active')),
             el('td', {},
               el('div', { class: 'table__actions' },
-                el('button', { class: 'btn btn--ghost btn--sm', onClick: (e) => { e.stopPropagation(); navigate(`/admin/partner-detail?id=${p.partner_id}`); } }, 'View'),
-                el('button', { class: 'btn btn--ghost btn--sm', onClick: (e) => { e.stopPropagation(); openPartnerModal(p); } }, 'Edit'),
-                el('button', { class: 'btn btn--ghost btn--sm', style: { color: 'var(--color-danger)' }, onClick: (e) => { e.stopPropagation(); handleDelete(p); } }, 'Delete')
+                iconButton({
+                  icon: ICONS.view,
+                  label: 'View',
+                  title: 'Open this partner',
+                  onClick: (e) => { e.stopPropagation(); navigate(`/admin/partner-detail?id=${p.partner_id}`); },
+                }),
+                iconButton({
+                  icon: ICONS.edit,
+                  label: 'Edit',
+                  title: 'Edit this partner',
+                  onClick: (e) => { e.stopPropagation(); openPartnerModal(p); },
+                }),
+                iconButton({
+                  icon: ICONS.trash,
+                  label: 'Delete',
+                  title: 'Delete this partner',
+                  danger: true,
+                  onClick: (e) => { e.stopPropagation(); handleDelete(p); },
+                })
               )
             )
           );

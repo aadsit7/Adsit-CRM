@@ -6,6 +6,7 @@ import { el } from '../utils/dom.js';
 import { tierSlug } from '../utils/tiers.js';
 import { formatCurrency } from '../utils/dom.js';
 import { formatDate } from '../utils/date.js';
+import { ICONS, iconButton } from './icon-button.js';
 
 /**
  * Create a deal/opportunity card.
@@ -43,7 +44,12 @@ export function dealCard(opp, { onEdit, onView } = {}) {
           formatDate(opp.expected_close)
         )
       ),
-      onEdit ? el('button', { class: 'btn btn--ghost btn--sm', onClick: (e) => { e.stopPropagation(); onEdit(opp); } }, 'Edit') : null
+      onEdit ? iconButton({
+        icon: ICONS.edit,
+        label: 'Edit',
+        title: 'Edit this deal',
+        onClick: (e) => { e.stopPropagation(); onEdit(opp); },
+      }) : null
     )
   );
 
