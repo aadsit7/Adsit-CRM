@@ -1,0 +1,173 @@
+/* ============================================
+   Partner Next Steps — the forward agenda
+   ============================================
+   The collapsible section on the partner page between the Partner Bio and
+   Upcoming Joint Events (js/views/admin-partner-detail.js), plus the
+   note-selection modal its Analyze button opens. The agenda table reuses the
+   events-page table classes the Contacts section already uses; this file
+   only adds what is new, following the flat, square-cornered partner-detail
+   language in components.css and partner-bio.css. */
+
+/* ── Section shell ────────────────────────────────────────────────── */
+.partner-next-steps__header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.partner-next-steps__chevron {
+  display: inline-flex;
+  align-items: center;
+  color: #2F6BFF;
+  transition: transform var(--transition-fast);
+  align-self: center;
+}
+
+.partner-next-steps__chevron--open {
+  transform: rotate(180deg);
+}
+
+.partner-next-steps__body--collapsed {
+  display: none;
+}
+
+.partner-next-steps__analyze-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The Analyze button repeated inside the empty state, centered under the
+   explanation — the requested default state of the section. */
+.partner-next-steps__empty-cta {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+
+/* ── Agenda table ─────────────────────────────────────────────────── */
+/* The step text is the point of the table — let it breathe and wrap. */
+.partner-next-steps__table .partner-next-steps__step-cell {
+  max-width: 480px;
+}
+
+.partner-next-steps__step-text {
+  white-space: normal;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.partner-next-steps__due {
+  font-weight: 600;
+  color: #171D2B;
+  white-space: nowrap;
+}
+
+.partner-next-steps__stamp {
+  color: #4A5468;
+  white-space: nowrap;
+}
+
+/* Provenance chip — same shape as the Contacts source chips. */
+.partner-next-steps__source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  color: #2F6BFF;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.partner-next-steps__source-chip--manual {
+  color: #4A5468;
+}
+
+.partner-next-steps__textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* ── Note-selection modal ─────────────────────────────────────────── */
+.partner-next-steps-select__intro {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #2B3242;
+  margin: 0 0 var(--space-4);
+}
+
+.partner-next-steps-select__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid #DCE1EC;
+}
+
+.partner-next-steps-select__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #EEF1F7;
+  transition: background var(--transition-fast);
+}
+
+.partner-next-steps-select__row:last-child {
+  border-bottom: none;
+}
+
+.partner-next-steps-select__row:hover {
+  background: #F5F7FC;
+}
+
+/* The "Select all" control sits above the list, styled as its header row. */
+.partner-next-steps-select__row--all {
+  border: 1px solid #DCE1EC;
+  border-bottom: none;
+  background: #F5F7FC;
+  font-weight: 600;
+}
+
+.partner-next-steps-select__checkbox {
+  flex-shrink: 0;
+  align-self: center;
+  width: 15px;
+  height: 15px;
+  accent-color: #2F6BFF;
+  cursor: pointer;
+}
+
+.partner-next-steps-select__date {
+  flex-shrink: 0;
+  min-width: 88px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #171D2B;
+  white-space: nowrap;
+}
+
+.partner-next-steps-select__preview {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4A5468;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Phones ───────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .partner-next-steps__table .partner-next-steps__step-cell {
+    max-width: none;
+  }
+
+  .partner-next-steps-select__date {
+    min-width: 72px;
+  }
+}
