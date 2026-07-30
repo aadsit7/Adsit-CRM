@@ -16,6 +16,7 @@ import { nowISO, formatDate, todayISO } from '../utils/date.js';
 import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 import { initQuillEditor, ensureHtml, stripHtml } from './quill-editor.js';
+import { ICONS, iconButton } from './icon-button.js';
 
 /**
  * Normalize a timestamp to YYYY-MM-DD (local date portion only).
@@ -236,17 +237,21 @@ function descriptionCard(desc, onListChanged, opts) {
     return el('div', { class: 'transcript-card__body transcript-card__body--open' },
       el('div', { class: 'transcript-card__text', html: ensureHtml(desc.description_text || '') }),
       el('div', { class: 'transcript-card__actions' },
-        el('button', {
-          class: 'btn btn--ghost btn--sm',
+        iconButton({
+          icon: ICONS.edit,
+          label: 'Edit',
+          title: 'Edit this description',
           onClick: (e) => {
             e.stopPropagation();
             isEditing = true;
             rebuild();
           },
-        }, 'Edit'),
-        el('button', {
-          class: 'btn btn--ghost btn--sm',
-          style: { color: 'var(--color-danger)' },
+        }),
+        iconButton({
+          icon: ICONS.trash,
+          label: 'Delete',
+          title: 'Delete this description version',
+          danger: true,
           onClick: async (e) => {
             e.stopPropagation();
             const confirmed = await confirmDialog(
@@ -257,7 +262,7 @@ function descriptionCard(desc, onListChanged, opts) {
             desc._deleted = true;
             onListChanged();
           },
-        }, 'Delete'),
+        }),
       )
     );
   }

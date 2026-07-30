@@ -31,6 +31,7 @@ import {
   listEntityDocuments,
 } from '../components/documents-panel.js';
 import { standardizeDescription, applyStandardizedDescription } from '../utils/ai.js';
+import { ICONS, iconButton } from '../components/icon-button.js';
 
 export const title = 'Opportunities';
 
@@ -699,8 +700,19 @@ function renderList(opportunities) {
             el('td', {}, opp.expected_close ? formatDate(opp.expected_close) : '—'),
             el('td', {},
               el('div', { class: 'table__actions' },
-                el('button', { class: 'btn btn--ghost btn--sm', onClick: (e) => { e.stopPropagation(); openOppModal(opp, document.getElementById('view-container')); } }, 'Edit'),
-                el('button', { class: 'btn btn--ghost btn--sm', style: { color: 'var(--color-danger)' }, onClick: (e) => { e.stopPropagation(); handleDelete(opp); } }, 'Delete')
+                iconButton({
+                  icon: ICONS.edit,
+                  label: 'Edit',
+                  title: 'Edit this deal',
+                  onClick: (e) => { e.stopPropagation(); openOppModal(opp, document.getElementById('view-container')); },
+                }),
+                iconButton({
+                  icon: ICONS.trash,
+                  label: 'Delete',
+                  title: 'Delete this deal',
+                  danger: true,
+                  onClick: (e) => { e.stopPropagation(); handleDelete(opp); },
+                })
               )
             )
           )
@@ -1853,10 +1865,13 @@ export async function openOppDetailsModal(opp, opts = {}) {
   );
   const descriptionsToolbarSlot = el('div', { class: 'details-modal__descriptions-toolbar-slot' });
   const descriptionsCopyBtn = el('button', {
-    class: 'btn btn--secondary btn--sm details-modal__copy-btn',
+    class: 'btn btn--secondary btn--sm btn--icon details-modal__copy-btn',
     type: 'button',
     hidden: true,
-  }, 'Copy');
+    title: 'Select descriptions to copy',
+    'aria-label': 'Copy descriptions',
+    html: ICONS.copy,
+  });
   const descriptionsGenerateBtn = el('button', {
     class: 'btn btn--sm details-modal__generate-map-btn',
     type: 'button',

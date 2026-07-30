@@ -70,6 +70,7 @@ import {
 } from '../utils/partner-next-steps-schema.js';
 import { requestPartnerNextSteps } from '../utils/partner-next-steps-client.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
+import { ICONS, iconButton } from '../components/icon-button.js';
 
 export const title = 'Partner Detail';
 
@@ -224,8 +225,11 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
                 ? el('span', { class: 'partner-detail-page__hero-tier' }, partner.tier)
                 : null,
               // Sits with the name because that is what it researches — the
-              // company, not the CRM relationship.
-              buildBioAnalyzeButton(partner, bioRecord),
+              // company, not the CRM relationship. Icon-only: a labeled pill
+              // here crowded the name row at laptop widths until it collided
+              // with the stat cells; the labeled twin lives in the Bio
+              // section header below.
+              buildBioAnalyzeButton(partner, bioRecord, { iconOnly: true }),
             ),
             metaParts.length > 1
               ? el('div', { class: 'partner-detail-page__hero-meta' },
@@ -455,10 +459,35 @@ let bioRunInFlight = null;
 const BIO_PILL_TIMEOUT_MS = 20 * 60 * 1000;
 
 function bioAnalyzeIconSvg() {
-  return '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">'
-    + '<path d="M5.6 1.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1 1-2.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
-    + '<path d="M10.6 7.9l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>'
-    + '</svg>';
+  return ICONS.sparkle;
+}
+
+/**
+ * Paint the Analyze button's visual state. One function serves both the
+ * build path and the async run's start/finally mutations, so the icon-only
+ * and labeled variants can never drift apart — the old direct
+ * `btn.textContent = …` writes would wipe the glyph out of an icon-only
+ * button. Purely presentational: which state to show is decided exactly
+ * where it was before.
+ */
+function paintBioAnalyzeButton(btn, { running, hasBio }) {
+  const iconOnly = btn.dataset.variant === 'icon';
+  const label = running ? 'Analyzing…' : (hasBio ? 'Re-analyze' : 'Analyze');
+  btn.disabled = !!running;
+  btn.classList.toggle('partner-bio__analyze--running', !!running);
+  btn.title = running
+    ? 'Analyzing… — the research is running'
+    : (hasBio
+        ? 'Research this company again and replace the saved bio'
+        : 'Research this company on the authoritative sources and build its bio');
+  btn.setAttribute('aria-label', label);
+  if (iconOnly) btn.dataset.label = label;
+  btn.innerHTML = '';
+  btn.appendChild(el('span', {
+    class: `partner-bio__analyze-icon${running ? ' icon-btn-spin' : ''}`,
+    html: running ? ICONS.spinner : bioAnalyzeIconSvg(),
+  }));
+  if (!iconOnly) btn.appendChild(document.createTextNode(label));
 }
 
 /**
@@ -466,24 +495,22 @@ function bioAnalyzeIconSvg() {
  * in the Bio section header, so whichever one the user reaches for does the
  * same thing. It reads the in-flight state at build time, so a re-render
  * during a run rebuilds it as "Analyzing…" rather than looking idle.
+ * `iconOnly` compresses it to a square glyph (tooltip + aria-label carry the
+ * name) for the spots where a labeled pill would crowd its row.
  */
-function buildBioAnalyzeButton(partner, bioRecord, { className = 'partner-bio__analyze' } = {}) {
+function buildBioAnalyzeButton(partner, bioRecord, { className = 'partner-bio__analyze', iconOnly = false } = {}) {
   const running = bioRunInFlight === partner.partner_id;
   const hasBio = !!(bioRecord && bioRecord.bio && !partnerBioIsEmpty(bioRecord.bio));
   const btn = el('button', {
-    class: `${className}${running ? ' partner-bio__analyze--running' : ''}`,
-    disabled: running || undefined,
-    title: hasBio
-      ? 'Research this company again and replace the saved bio'
-      : 'Research this company on the authoritative sources and build its bio',
+    type: 'button',
+    class: `${className}${iconOnly ? ` ${className}--icon` : ''}`,
+    dataset: iconOnly ? { variant: 'icon' } : {},
     onClick: (e) => {
       e.stopPropagation();
       runPartnerBioAnalysis(partner, btn);
     },
-  },
-    running ? null : el('span', { class: 'partner-bio__analyze-icon', html: bioAnalyzeIconSvg() }),
-    running ? 'Analyzing…' : (hasBio ? 'Re-analyze' : 'Analyze'),
-  );
+  });
+  paintBioAnalyzeButton(btn, { running, hasBio });
   return btn;
 }
 
@@ -685,11 +712,20 @@ function buildPartnerBioSection(partner, bioRecord) {
     el('div', { class: 'partner-detail-page__section-actions' },
       hasBio
         ? el('button', {
-            class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+            type: 'button',
+            class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary partner-detail-page__section-cta--icon',
+            title: 'Copy the bio as markdown',
+            'aria-label': 'Copy bio',
+            'data-label': 'Copy',
             onClick: (e) => { e.stopPropagation(); copyPartnerBio(bio); },
-          }, 'Copy')
+          }, el('span', { class: 'cta-glyph', html: ICONS.copy }))
         : null,
-      buildBioAnalyzeButton(partner, bioRecord, { className: 'partner-detail-page__section-cta' }),
+      // First run gets the labeled button ("Analyze" has to be discoverable);
+      // once a bio exists the repeat action compresses to the sparkle glyph.
+      buildBioAnalyzeButton(partner, bioRecord, {
+        className: 'partner-detail-page__section-cta',
+        iconOnly: hasBio,
+      }),
     ),
   );
 
@@ -726,7 +762,7 @@ async function runPartnerBioAnalysis(partner, btn) {
     return;
   }
   bioRunInFlight = partnerId;
-  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
+  if (btn) paintBioAnalyzeButton(btn, { running: true, hasBio: false });
 
   // Progress rides the global Randy pill so it stays visible after the user
   // leaves this partner page — the research keeps running either way.
@@ -790,8 +826,7 @@ async function runPartnerBioAnalysis(partner, btn) {
     // failed, or finished after the user navigated back, must not leave a
     // button stuck on "Analyzing…".
     if (btn && btn.isConnected) {
-      btn.disabled = false;
-      btn.textContent = researched ? 'Re-analyze' : 'Analyze';
+      paintBioAnalyzeButton(btn, { running: false, hasBio: researched });
     }
   }
 }
@@ -828,32 +863,39 @@ const NEXT_STEPS_CHARS_PER_NOTE = 6000;
 const NEXT_STEPS_PILL_TIMEOUT_MS = 10 * 60 * 1000;
 
 function nextStepsAnalyzeIconSvg() {
-  return '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">'
-    + '<path d="M5.6 1.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1 1-2.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'
-    + '<path d="M10.6 7.9l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>'
-    + '</svg>';
+  return ICONS.sparkle;
 }
 
 /**
  * The section's Analyze button. Reads the in-flight state at build time so a
  * re-render during a run rebuilds it as "Analyzing…" rather than idle.
  * `hasAnalysis` flips the label to "Re-analyze" once an analysis has landed.
+ * `iconOnly` compresses the repeat action to a square sparkle glyph —
+ * tooltip + aria-label carry the name, and the running state swaps the
+ * glyph for a spinner.
  */
-function buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis) {
+function buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis, { iconOnly = false } = {}) {
   const running = nextStepsRunInFlight === partner.partner_id;
+  const label = running ? 'Analyzing…' : (hasAnalysis ? 'Re-analyze' : 'Analyze');
   const btn = el('button', {
-    class: 'partner-detail-page__section-cta',
+    type: 'button',
+    class: `partner-detail-page__section-cta${iconOnly ? ' partner-detail-page__section-cta--icon' : ''}`,
     disabled: running || undefined,
     title: hasAnalysis
       ? 'Select description notes and analyze them again — verified new steps are added to the agenda'
       : 'Select description notes to analyze into a next-steps agenda',
+    'aria-label': label,
+    'data-label': label,
     onClick: (e) => {
       e.stopPropagation();
       openNextStepsSourceModal(partner, transcripts);
     },
   },
-    running ? null : el('span', { class: 'partner-next-steps__analyze-icon', html: nextStepsAnalyzeIconSvg() }),
-    running ? 'Analyzing…' : (hasAnalysis ? 'Re-analyze' : 'Analyze'),
+    el('span', {
+      class: `partner-next-steps__analyze-icon${running ? ' icon-btn-spin' : ''}`,
+      html: running ? ICONS.spinner : nextStepsAnalyzeIconSvg(),
+    }),
+    iconOnly ? null : label,
   );
   return btn;
 }
@@ -921,10 +963,13 @@ function buildNextStepsTable(partner, steps) {
                 : el('span', { class: 'partner-contacts__muted' }, '—'),
             ),
             el('td', { class: 'events-page__td--actions' },
-              el('button', {
-                class: 'events-page__action-link events-page__action-link--danger',
+              iconButton({
+                icon: ICONS.trash,
+                label: 'Delete',
+                title: 'Remove this step from the agenda',
+                danger: true,
                 onClick: () => handleDeleteNextStep(step, partner),
-              }, 'Delete'),
+              }),
             ),
           );
         })
@@ -990,7 +1035,9 @@ function buildNextStepsSection(partner, steps, transcripts) {
         el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
         'Add Step',
       ),
-      buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis),
+      // First run keeps the label; once an analysis is on the agenda the
+      // repeat action compresses to the sparkle glyph.
+      buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis, { iconOnly: hasAnalysis }),
     ),
   );
 
@@ -1486,14 +1533,19 @@ function buildContactsTable(partner, contacts, contactPdfIndex) {
           el('td', { class: 'events-page__td--actions' },
             el('div', { class: 'partner-contacts__actions' },
               buildLeadCheckButton(partner, c),
-              el('button', {
-                class: 'events-page__action-link',
+              iconButton({
+                icon: ICONS.edit,
+                label: 'Edit',
+                title: 'Edit this contact',
                 onClick: () => openContactModal(partner, c, () => reRender(partner.partner_id)),
-              }, 'Edit'),
-              el('button', {
-                class: 'events-page__action-link events-page__action-link--danger',
+              }),
+              iconButton({
+                icon: ICONS.trash,
+                label: 'Delete',
+                title: 'Delete this contact',
+                danger: true,
                 onClick: () => handleDeleteContact(c, partner),
-              }, 'Delete'),
+              }),
             )
           ),
         ))
@@ -2564,26 +2616,34 @@ function transcriptCard(transcript, partner) {
   const body = el('div', { class: 'transcript-card__body' },
     el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
     el('div', { class: 'transcript-card__actions' },
-      el('button', {
-        class: 'btn btn--ghost btn--sm',
+      iconButton({
+        icon: ICONS.copy,
+        label: 'Copy',
+        title: 'Copy this description as text',
         onClick: (e) => { e.stopPropagation(); copyTranscriptText(transcript); },
-      }, 'Copy Text'),
-      el('button', {
-        class: 'btn btn--ghost btn--sm',
+      }),
+      iconButton({
+        icon: ICONS.download,
+        label: 'PDF',
+        title: 'Download this description as a PDF',
         onClick: (e) => { e.stopPropagation(); downloadTranscriptPDF(transcript); },
-      }, 'Download PDF'),
-      el('button', {
-        class: 'btn btn--ghost btn--sm',
+      }),
+      iconButton({
+        icon: ICONS.edit,
+        label: 'Edit',
+        title: 'Edit this description',
         onClick: (e) => {
           e.stopPropagation();
           openTranscriptModal(partner, transcript, [], () => reRender(partner.partner_id));
         },
-      }, 'Edit'),
-      el('button', {
-        class: 'btn btn--ghost btn--sm',
-        style: { color: 'var(--color-danger)' },
+      }),
+      iconButton({
+        icon: ICONS.trash,
+        label: 'Delete',
+        title: 'Delete this description',
+        danger: true,
         onClick: (e) => { e.stopPropagation(); handleDeleteTranscript(transcript, partner); },
-      }, 'Delete'),
+      }),
     )
   );
 
@@ -2824,9 +2884,13 @@ function buildTranscriptsPanel(partner, transcripts) {
   const actions = el('div', { class: 'partner-detail-page__section-actions' },
     transcripts.length > 0
       ? el('button', {
-          class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+          type: 'button',
+          class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary partner-detail-page__section-cta--icon',
+          title: 'Copy all descriptions to the clipboard',
+          'aria-label': 'Copy all descriptions',
+          'data-label': 'Copy All',
           onClick: () => copyAllTranscripts(partner, transcripts),
-        }, 'Copy All')
+        }, el('span', { class: 'cta-glyph', html: ICONS.copy }))
       : null,
     el('button', {
       class: 'partner-detail-page__section-cta',
@@ -2943,9 +3007,14 @@ function buildUpcomingEventsSection(allEvents, partner, container) {
       ),
       el('div', { class: 'partner-detail-page__section-actions' },
         el('button', {
+          type: 'button',
           class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
+          title: 'Open the Events page',
           onClick: () => navigate('/admin/events'),
-        }, 'View All Events'),
+        },
+          el('span', { class: 'cta-glyph', html: ICONS.calendar }),
+          'All Events',
+        ),
         el('button', {
           class: 'partner-detail-page__section-cta',
           onClick: () => {

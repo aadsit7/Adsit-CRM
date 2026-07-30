@@ -28,6 +28,7 @@ import {
 } from '../components/documents-panel.js';
 import { openOppModal } from './admin-opportunities.js';
 import { openPlaybookPanel, destroyPlaybookPanel, PLAYBOOK_URL } from '../components/playbook-panel.js';
+import { ICONS, iconButton } from '../components/icon-button.js';
 
 export const title = 'Events';
 
@@ -860,14 +861,19 @@ function renderList(events) {
             el('td', { class: numCellClass(revenue) }, formatCurrency(revenue)),
             el('td', { class: 'events-page__td--actions' },
               el('div', { class: 'events-page__actions' },
-                el('button', {
-                  class: 'events-page__action-link',
+                iconButton({
+                  icon: ICONS.edit,
+                  label: 'Edit',
+                  title: 'Edit this event',
                   onClick: (e) => { e.stopPropagation(); openEventModal(evt, document.getElementById('view-container')); },
-                }, 'Edit'),
-                el('button', {
-                  class: 'events-page__action-link events-page__action-link--danger',
+                }),
+                iconButton({
+                  icon: ICONS.trash,
+                  label: 'Delete',
+                  title: 'Delete this event',
+                  danger: true,
                   onClick: (e) => { e.stopPropagation(); handleDelete(evt); },
-                }, 'Delete')
+                })
               )
             )
           );

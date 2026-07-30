@@ -43,6 +43,17 @@
   align-items: center;
 }
 
+/* Icon-only variant — the control beside the partner's name in the hero.
+   A square glyph instead of a labeled pill: it cannot crowd the name row
+   at narrow widths, and the same action keeps its full label in the Bio
+   section header right below. Tooltip + aria-label carry the name. */
+.partner-bio__analyze--icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  justify-content: center;
+}
+
 /* A run in flight reads as busy rather than broken. */
 .partner-bio__analyze--running {
   border-color: #DCE1EC;

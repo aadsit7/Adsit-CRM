@@ -501,6 +501,11 @@ html {
   .table tbody td[data-label="Actions"],
   .events-page__table tbody td[data-label="Actions"] {
     justify-content: flex-end;
+    /* The desktop table gives this cell width:1% + nowrap so the column
+       hugs its buttons; inside the card layout that left a ~3px flex box
+       whose right-aligned buttons hung off the card's left edge. */
+    width: auto;
+    white-space: normal;
   }
 
   .table__actions {
@@ -818,5 +823,46 @@ html {
     color: #EF4E5B;
     border-color: #F3C7CC;
     background: #FDF3F4;
+  }
+}
+
+/* ============================================
+   Icon-only actions on touch screens
+   ============================================
+   Icon buttons rely on hover tooltips for their names — phones have no
+   hover, so the visible label comes back, read from data-label (set by
+   js/components/icon-button.js and the icon-only section CTAs). The
+   buttons widen from fixed squares into ordinary thumb-sized chips. */
+@media (max-width: 768px) {
+  .row-icon-btn,
+  .partner-detail-page__section-cta--icon {
+    width: auto;
+    min-width: 0;
+    gap: 6px;
+    padding: 0 12px;
+  }
+
+  .row-icon-btn {
+    min-height: 36px;
+  }
+
+  .row-icon-btn::after,
+  .partner-detail-page__section-cta--icon::after {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Inside the contacts card footer the generic chip treatment already
+     applies via `.partner-contacts__actions > *`; the min-height there
+     (42px) wins because it is more specific. */
+
+  /* The hero analyze glyph stays icon-only (its labeled twin sits in the
+     Bio section header right below) but grows to a comfortable tap size. */
+  .partner-bio__analyze--icon {
+    width: 32px;
+    height: 32px;
   }
 }
