@@ -1,10 +1,13 @@
 // ============================================================
-// Partner Next Steps — sheet contract, strict parser, dedupe/sort helpers
+// Partner Next Steps — sheet contract, strict parser, dedupe/merge helpers
 // ============================================================
-// Powers the "Next Steps" section on the Partner Detail page: the forward
-// agenda distilled from the description notes the USER SELECTED, plus any
-// steps they typed in by hand. Analysis rows and manual rows live side by
-// side in one table, each carrying its own provenance.
+// Powers the "Next Steps" section on the Partner Detail page: a mutual
+// action plan distilled from the description notes the USER SELECTED, plus
+// any steps typed in by hand. Each row is a milestone of the plan — what
+// must happen, who owns it (Recast / the partner / both teams), its target
+// timing, and a one-word status — rendered top-to-bottom in plan order.
+// Analysis rows and manual rows live side by side, each carrying its own
+// provenance.
 //
 // ACCURACY CONTRACT (the reason this module exists):
 // The model only PROPOSES next steps; this module verifies every proposal
@@ -20,17 +23,23 @@
 //     never saved;
 //   • an applicable date survives only as a well-formed real calendar date
 //     (YYYY-MM-DD); anything else — "next week", "TBD", a malformed string
-//     — is stored as empty, never guessed;
+//     — is stored as empty, never guessed. Relative timing the notes state
+//     ("Post-ARB approval") is carried separately in `timing`, as text;
+//   • a status survives only as one of the fixed set (NEXT_STEP_STATUSES);
+//     anything else is stored as empty rather than displayed as a made-up
+//     state. Same for `kind` — 'gate' (major milestone) or 'step';
 //   • cited source ids that don't exist are discarded; the ids kept for a
 //     step are only those whose text actually contains its evidence, so
 //     the provenance shown in the table can always be checked by opening
 //     that very note.
 //
-// DUPLICATE RULE:
-// A re-analysis APPENDS to the table (that is the feature: the agenda grows
-// as new notes are analyzed), so the same step must not pile up. Proposals
-// are deduped within one reply and against the rows already saved, matching
-// on normalized step text.
+// LIVING-PLAN RULE (dedupe + merge):
+// A re-analysis APPENDS new steps (the plan grows as notes reveal new
+// gates) and MOVES existing rows forward: when the newest notes progress a
+// step's status or firm up its date, the saved row is updated in place —
+// completed rows are never removed, they are the visual record of momentum.
+// Proposals are deduped within one reply and against the rows already
+// saved, matching on normalized step text.
 //
 // No DOM, no network — fully testable under Node.
 // ============================================================
@@ -48,18 +57,62 @@ import { fieldFoundInText } from './partner-contacts.js';
 //                 semicolon-separated ('' for manual rows)
 //   evidence      the verbatim note snippet that grounds the step ('' manual)
 //   analyzed_at   ISO datetime of the Analyze run ('' for manual rows)
+//   owner         who is responsible — "Recast", "<Partner> (Name)", "Both teams"
+//   status        one word from NEXT_STEP_STATUSES, or ''
+//   timing        relative timing stated by the notes ("Post-ARB approval")
+//                 for steps with no calendar date
+//   kind          'gate' (major milestone / approval gate) or 'step'
+// The four plan columns are APPENDED after the original schema — that is
+// what lets ensureSheetWithHeaders extend an existing tab's header row in
+// place without moving any data column.
 export const PARTNER_NEXT_STEP_HEADERS = [
   'step_id', 'partner_id', 'partner_name',
   'next_step', 'due_date', 'source', 'source_dates', 'evidence',
   'analyzed_at', 'created_at', 'updated_at',
+  'owner', 'status', 'timing', 'kind',
 ];
 
 export const NEXT_STEP_SOURCES = new Set(['analysis', 'manual']);
+
+// ── The status set ──────────────────────────────────────────────────
+// The mutual-action-plan vocabulary, verbatim from the MAP standard. One
+// word per row, nothing outside this set — and deliberately no
+// "Risk"/"Blocked": the agenda is written to be screen-shared with the
+// partner, so waiting states read neutrally ("Pending", never "stalled").
+export const NEXT_STEP_STATUSES = ['Complete', 'In Progress', 'Next', 'Scheduled', 'Pending'];
+
+// Case/spacing-insensitive lookup ("in-progress", "COMPLETED" → canonical).
+const STATUS_BY_KEY = new Map([
+  ['complete', 'Complete'],
+  ['completed', 'Complete'],
+  ['inprogress', 'In Progress'],
+  ['next', 'Next'],
+  ['scheduled', 'Scheduled'],
+  ['pending', 'Pending'],
+]);
+
+/**
+ * Canonicalize a status to the fixed set, or ''. Forgiving on case,
+ * spacing and the "Completed" past-participle; anything else — "On track",
+ * "Blocked", prose — is empty rather than a made-up state on the plan.
+ */
+export function normalizeNextStepStatus(value) {
+  const key = String(value == null ? '' : value).toLowerCase().replace(/[\s_-]+/g, '');
+  return STATUS_BY_KEY.get(key) || '';
+}
+
+/** 'gate' (major milestone / approval gate — rendered bold) or 'step'. */
+export function normalizeNextStepKind(value) {
+  const key = String(value == null ? '' : value).toLowerCase().trim();
+  return (key === 'gate' || key === 'milestone' || key === 'major') ? 'gate' : 'step';
+}
 
 // Field bounds. Generous enough for a real action item, tight enough that a
 // row stays a few hundred bytes and the table stays readable.
 const MAX_STEP_LEN = 400;
 const MAX_EVIDENCE_LEN = 240;
+const MAX_OWNER_LEN = 80;
+const MAX_TIMING_LEN = 80;
 const MAX_STEPS = 40;
 // Evidence is verified UNTRUNCATED (up to this sanity cap) and only then cut
 // down for storage — a snippet clipped mid-word before verification would
@@ -76,13 +129,17 @@ const MIN_EVIDENCE_WORDS = 3;
 export const NEXT_STEPS_SCHEMA_EXAMPLE = `{
   "next_steps": [
     {
-      "next_step": "string — ONE concrete, forward-looking action in plain language, specific enough that anyone reading the agenda knows what to do",
+      "next_step": "string — ONE concrete plan milestone or action in plain, client-safe language, specific enough that anyone reading the plan knows what must happen",
+      "kind": "\\"gate\\" for a major milestone or approval gate, \\"step\\" for a supporting sub-step",
+      "owner": "who is responsible, exactly as far as the notes support it — \\"Recast\\", \\"<Partner name> (Person)\\" or \\"Both teams\\" — else \\"NA\\"",
+      "status": "exactly ONE of: Complete | In Progress | Next | Scheduled | Pending",
       "due_date": "YYYY-MM-DD — only when the notes state or unambiguously imply a calendar date for this action, else \\"NA\\"",
+      "timing": "the relative timing the notes state when there is no calendar date (e.g. \\"Post-ARB approval\\", \\"After the POC\\"), else \\"NA\\" — never an invented date",
       "evidence": "string — an EXACT verbatim snippet (a full clause of at least a few words, 20-200 characters) copied character-for-character from ONE of the supplied notes, proving this step comes from the notes",
       "source_ids": ["string — the supplied source id(s) this step draws on"]
     }
   ],
-  "note": "string — one short sentence on coverage or ambiguity, or \\"\\""
+  "note": "string — the INTERNAL handoff line for the account owner (never shown to the partner): anything you left out or reworded under the client-safe rules and why, plus any ambiguous product name, owner or date worth double-checking — or \\"\\""
 }`;
 
 // Placeholder values that mean "nothing" wherever a real value is expected.
@@ -244,6 +301,13 @@ export function parsePartnerNextStepsResponse(rawText, { sources = [], truncated
     steps.push({
       next_step: nextStep,
       due_date: isoDateOrEmpty(raw.due_date),
+      // The plan columns survive only in their canonical forms — an owner
+      // is bounded text, a status is one of the fixed set or nothing, a
+      // timing is the notes' stated relative timing, never a guessed date.
+      owner: typeof raw.owner === 'string' ? cleanText(raw.owner, MAX_OWNER_LEN) : '',
+      status: normalizeNextStepStatus(raw.status),
+      timing: typeof raw.timing === 'string' ? cleanText(raw.timing, MAX_TIMING_LEN) : '',
+      kind: normalizeNextStepKind(raw.kind),
       // Stored bounded, cut on a word boundary AFTER verification so the
       // kept snippet is still a verbatim, findable phrase from the note.
       evidence: truncateAtWordBoundary(evidence, MAX_EVIDENCE_LEN),
@@ -260,22 +324,84 @@ export function parsePartnerNextStepsResponse(rawText, { sources = [], truncated
 }
 
 /**
- * Split freshly verified proposals into ones to append and ones already in
- * the table — a re-analysis of the same notes must not duplicate rows.
- * Matches on normalized step text.
+ * Did this proposal move a saved step forward? Progression means the newest
+ * notes changed its state — a new status ("In Progress" → "Complete") or a
+ * date that firmed up or moved. A mere rewording of owner or timing text is
+ * NOT progression: it would churn the sheet on every re-analysis.
+ */
+export function nextStepProgressed(existing, proposed) {
+  const e = existing || {};
+  const p = proposed || {};
+  const pStatus = normalizeNextStepStatus(p.status);
+  const eStatus = normalizeNextStepStatus(e.status);
+  if (pStatus && pStatus !== eStatus) return true;
+  const pDue = isoDateOrEmpty(p.due_date);
+  if (pDue && pDue !== isoDateOrEmpty(e.due_date)) return true;
+  return false;
+}
+
+/**
+ * Split freshly verified proposals against the saved plan — the living-plan
+ * rule. Matches on normalized step text:
+ *   fresh    not on the plan yet → append (the plan grows);
+ *   updates  already on the plan AND the newest notes progressed it (see
+ *            nextStepProgressed) → move the saved row forward in place;
+ *   skipped  already on the plan, unchanged → nothing to do.
+ * Rows are never removed here — completed steps stay as the record of
+ * momentum.
  */
 export function dedupeNextSteps(existingSteps, proposedSteps) {
-  const known = new Set((existingSteps || []).map(s => normalizeStepKey(s && s.next_step)));
+  const byKey = new Map();
+  for (const s of existingSteps || []) {
+    const key = normalizeStepKey(s && s.next_step);
+    if (key && !byKey.has(key)) byKey.set(key, s);
+  }
+  const known = new Set(byKey.keys());
   const fresh = [];
+  const updates = [];
   const skipped = [];
   for (const p of proposedSteps || []) {
     const key = normalizeStepKey(p && p.next_step);
     if (!key) continue;
-    if (known.has(key)) { skipped.push(p); continue; }
+    if (known.has(key)) {
+      const existing = byKey.get(key);
+      if (existing && nextStepProgressed(existing, p)) updates.push({ existing, proposed: p });
+      else skipped.push(p);
+      continue;
+    }
     known.add(key);
     fresh.push(p);
   }
-  return { fresh, skipped };
+  return { fresh, updates, skipped };
+}
+
+/**
+ * Merge a progressed proposal into the SAVED record (pure — the caller
+ * writes the result). Conservative by design:
+ *   • the step's identity — text, ids, created_at — is untouched;
+ *   • a non-empty proposed value replaces the stored one; an empty proposal
+ *     never blanks a field the plan already knows;
+ *   • 'gate' is sticky: once a row is a major milestone it stays one;
+ *   • evidence and source_dates refresh to the newest analysis (the
+ *     consolidation rule: cite the most recent note), and the analysis
+ *     stamp records that this run touched the row.
+ */
+export function mergeNextStepUpdate(record, proposed, { analyzedAt = '', sourceDates = '' } = {}) {
+  const r = record || {};
+  const p = proposed || {};
+  const pStatus = normalizeNextStepStatus(p.status);
+  return {
+    ...r,
+    status: pStatus || normalizeNextStepStatus(r.status),
+    due_date: isoDateOrEmpty(p.due_date) || isoDateOrEmpty(r.due_date),
+    timing: (typeof p.timing === 'string' && p.timing.trim()) ? p.timing.trim() : (r.timing || ''),
+    owner: (typeof p.owner === 'string' && p.owner.trim()) ? p.owner.trim() : (r.owner || ''),
+    kind: (normalizeNextStepKind(p.kind) === 'gate' || normalizeNextStepKind(r.kind) === 'gate') ? 'gate' : 'step',
+    evidence: p.evidence || r.evidence || '',
+    source_dates: sourceDates || r.source_dates || '',
+    analyzed_at: analyzedAt || r.analyzed_at || '',
+    updated_at: analyzedAt || r.updated_at || '',
+  };
 }
 
 // ── Storage mapping ─────────────────────────────────────────────────
@@ -295,6 +421,10 @@ export function nextStepRowValues(record) {
     analyzed_at: r.analyzed_at || '',
     created_at: r.created_at || '',
     updated_at: r.updated_at || '',
+    owner: r.owner || '',
+    status: normalizeNextStepStatus(r.status),
+    timing: r.timing || '',
+    kind: normalizeNextStepKind(r.kind),
   };
   return PARTNER_NEXT_STEP_HEADERS.map(h => String(cells[h] == null ? '' : cells[h]));
 }
@@ -318,30 +448,32 @@ export function nextStepFromRow(row) {
     analyzed_at: analyzedAt,
     created_at: cell('created_at'),
     updated_at: cell('updated_at'),
+    owner: cell('owner'),
+    // A hand-edited "Blocked" or "On hold" in the sheet reads back as '' —
+    // the plan only ever shows the fixed vocabulary.
+    status: normalizeNextStepStatus(cell('status')),
+    timing: cell('timing'),
+    kind: normalizeNextStepKind(cell('kind')),
   };
 }
 
 /**
- * This partner's saved steps, as an agenda: dated steps first in date order,
- * undated steps after in the order they were added. Strictly matched on
- * partner_id; rows without a step text are ignored.
+ * This partner's saved steps, in PLAN ORDER — the stored row order, kept
+ * exactly. The analysis emits steps in the plan's sequence (each approval
+ * gate in the order the notes describe it, budget before POC, the standard
+ * tail), appends preserve that sequence, and later-discovered milestones
+ * append as the plan grows. A date re-sort would scramble it: "Contract
+ * signature — post-POC" has no calendar date yet belongs after the POC
+ * rows, not floated above or below them. Strictly matched on partner_id;
+ * rows without a step text are ignored.
  */
 export function selectPartnerNextSteps(rows, partnerId) {
   const id = String(partnerId || '').trim();
   if (!id) return [];
-  const steps = (rows || [])
+  return (rows || [])
     .filter(r => String(r && r.partner_id || '').trim() === id)
     .map(nextStepFromRow)
     .filter(s => s.next_step);
-  steps.sort((a, b) => {
-    if (a.due_date && b.due_date && a.due_date !== b.due_date) {
-      return a.due_date < b.due_date ? -1 : 1;
-    }
-    if (a.due_date && !b.due_date) return -1;
-    if (!a.due_date && b.due_date) return 1;
-    return (Date.parse(a.created_at || '') || 0) - (Date.parse(b.created_at || '') || 0);
-  });
-  return steps;
 }
 
 /** The most recent Analyze run recorded in these steps, or ''. */

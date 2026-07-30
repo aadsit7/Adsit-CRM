@@ -43,10 +43,15 @@
   margin-top: var(--space-4);
 }
 
-/* ── Agenda table ─────────────────────────────────────────────────── */
-/* The step text is the point of the table — let it breathe and wrap. */
+/* ── Plan table ───────────────────────────────────────────────────── */
+/* The mutual-action-plan palette, carried over from the MAP standard:
+   green for complete, amber for the active states, dark for pending —
+   deliberately NO red anywhere in this section. The plan is written to be
+   screen-shared with the partner, and red reads as alarm. */
+
+/* The milestone text is the point of the table — let it breathe and wrap. */
 .partner-next-steps__table .partner-next-steps__step-cell {
-  max-width: 480px;
+  max-width: 420px;
 }
 
 .partner-next-steps__step-text {
@@ -55,18 +60,110 @@
   overflow-wrap: anywhere;
 }
 
+/* Major gates (approval gates, plan milestones) carry visual weight;
+   supporting sub-steps stay regular. */
+.partner-next-steps__step-text--gate {
+  font-weight: 700;
+}
+
+/* Check-off box: gray outline while open, solid green once complete.
+   A button, not decoration — clicking it checks the row off live. */
+.partner-next-steps__table .partner-next-steps__check-col {
+  width: 34px;
+}
+
+.partner-next-steps__check-cell {
+  text-align: center;
+}
+
+.partner-next-steps__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: #4A4A5A;
+  cursor: pointer;
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.partner-next-steps__check:hover {
+  color: #0F7A3F;
+  transform: scale(1.08);
+}
+
+.partner-next-steps__check--done {
+  color: #0F7A3F;
+}
+
+/* Completed rows stay on the plan, tinted — the visual record of momentum. */
+.partner-next-steps__row--complete td {
+  background: #F0FFF0;
+}
+
+.partner-next-steps__owner {
+  color: #171D2B;
+  white-space: nowrap;
+}
+
 .partner-next-steps__due {
   font-weight: 600;
   color: #171D2B;
   white-space: nowrap;
 }
 
-.partner-next-steps__stamp {
-  color: #4A5468;
+/* Relative timing the notes stated ("Post-ARB approval") — a real target,
+   just not a calendar date yet. */
+.partner-next-steps__timing {
+  color: #171D2B;
   white-space: nowrap;
 }
 
-/* Provenance chip — same shape as the Contacts source chips. */
+/* No date and no stated timing: say so plainly, never invent one. */
+.partner-next-steps__tbs {
+  color: #8A93A6;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* One-word status pill, same chip shape as the provenance chips. */
+.partner-next-steps__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.partner-next-steps__status--complete {
+  color: #0F7A3F;
+  border-color: #0F7A3F;
+  background: #F0FFF0;
+}
+
+/* In Progress / Next / Scheduled — the actively-moving states. */
+.partner-next-steps__status--active {
+  color: #CC8800;
+  border-color: #E3C98E;
+  background: #FFFBF0;
+}
+
+/* Waiting on a prior milestone or someone off the call — neutral, not red. */
+.partner-next-steps__status--pending {
+  color: #1A1A2E;
+  border-color: #DCE1EC;
+  background: #F5F7FC;
+}
+
+/* Provenance chip — same shape as the Contacts source chips. The
+   analyzed/added stamp lives in the chip's tooltip now, keeping the table
+   at the plan's own columns. */
 .partner-next-steps__source-chip {
   display: inline-flex;
   align-items: center;
