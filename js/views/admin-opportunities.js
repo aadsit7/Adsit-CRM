@@ -32,6 +32,7 @@ import {
 } from '../components/documents-panel.js';
 import { standardizeDescription, applyStandardizedDescription } from '../utils/ai.js';
 import { ICONS, iconButton } from '../components/icon-button.js';
+import { sectionIcon } from '../components/section-icon.js';
 
 export const title = 'Opportunities';
 
@@ -462,7 +463,7 @@ function renderView(container, opportunities, filterBar) {
     filterBar,
     el('div', { class: 'section-header' },
       el('div', {},
-        el('h2', { class: 'section-header__title' }, 'Opportunities'),
+        el('h2', { class: 'section-header__title' }, sectionIcon('briefcase', 'blue'), 'Opportunities'),
         el('p', { class: 'section-header__subtitle' }, `${opportunities.length} total · ${formatCurrency(totalValue)} pipeline`)
       ),
       el('button', {
@@ -500,9 +501,9 @@ function renderView(container, opportunities, filterBar) {
         el('div', { class: 'filter-bar__search' },
           searchInput
         ),
-        partnerSelect,
-        stageMultiSelect,
-        statusSelect,
+        el('div', { class: 'select-with-icon' }, sectionIcon('people', 'purple', { size: 'sm' }), partnerSelect),
+        el('div', { class: 'select-with-icon' }, sectionIcon('chart', 'orange', { size: 'sm' }), stageMultiSelect),
+        el('div', { class: 'select-with-icon' }, sectionIcon('flag', 'indigo', { size: 'sm' }), statusSelect),
         dateInputs,
         el('div', { class: 'view-toggle', style: { marginBottom: '0' } }, boardBtn, listBtn),
       ),
@@ -846,6 +847,7 @@ function editableField(opp, spec, onChange) {
     'aria-label': `Edit ${spec.label}`,
   },
     el('div', { class: 'field-card__label' },
+      spec.icon ? sectionIcon(spec.icon.glyph, spec.icon.color, { size: 'sm' }) : null,
       el('span', {}, spec.label),
       pencil,
     ),
@@ -1793,19 +1795,19 @@ export async function openOppDetailsModal(opp, opts = {}) {
 
   const fieldSpecs = [
     {
-      key: 'deal_name', label: 'Deal Name', type: 'text',
+      key: 'deal_name', label: 'Deal Name', type: 'text', icon: { glyph: 'briefcase', color: 'blue' },
       getValue: () => opp.deal_name,
       setValue: (v) => { const s = String(v).trim(); if (!s) throw new Error('Deal Name is required'); opp.deal_name = s; },
       renderValue: (v) => v || '—',
     },
     {
-      key: 'customer_name', label: 'Customer Name', type: 'text',
+      key: 'customer_name', label: 'Customer Name', type: 'text', icon: { glyph: 'building', color: 'teal' },
       getValue: () => opp.customer_name,
       setValue: (v) => { const s = String(v).trim(); if (!s) throw new Error('Customer Name is required'); opp.customer_name = s; },
       renderValue: (v) => v || '—',
     },
     {
-      key: 'partner_id', label: 'Partner', type: 'select',
+      key: 'partner_id', label: 'Partner', type: 'select', icon: { glyph: 'people', color: 'purple' },
       getValue: () => opp.partner_id,
       setValue: (v) => { if (!v) throw new Error('Partner is required'); opp.partner_id = v;
         // Reset lead_source if it no longer applies to the new partner.
@@ -1816,33 +1818,33 @@ export async function openOppDetailsModal(opp, opts = {}) {
       renderValue: () => getPartnerName(opp.partner_id) || '—',
     },
     {
-      key: 'deal_value', label: 'Deal Value', type: 'number',
+      key: 'deal_value', label: 'Deal Value', type: 'number', icon: { glyph: 'dollar', color: 'green' },
       getValue: () => opp.deal_value,
       setValue: (v) => { const n = parseFloat(v); if (!isFinite(n) || n < 0) throw new Error('Deal Value must be a positive number'); opp.deal_value = n; },
       renderValue: (v) => formatCurrency(parseFloat(v) || 0),
     },
     {
-      key: 'expected_close', label: 'Expected Close', type: 'date',
+      key: 'expected_close', label: 'Expected Close', type: 'date', icon: { glyph: 'calendar', color: 'red' },
       getValue: () => opp.expected_close,
       setValue: (v) => { if (!v) throw new Error('Expected Close is required'); opp.expected_close = v; },
       renderValue: (v) => v ? formatDate(v) : '—',
     },
     {
-      key: 'stage', label: 'Stage', type: 'select',
+      key: 'stage', label: 'Stage', type: 'select', icon: { glyph: 'chart', color: 'orange' },
       getValue: () => opp.stage,
       setValue: (v) => { opp.stage = v; },
       getOptions: stageOptions,
       renderValue: (v) => stageBadge(v),
     },
     {
-      key: 'status', label: 'Status', type: 'select',
+      key: 'status', label: 'Status', type: 'select', icon: { glyph: 'flag', color: 'indigo' },
       getValue: () => opp.status,
       setValue: (v) => { opp.status = v; },
       getOptions: statusOptions,
       renderValue: (v) => statusBadge(v),
     },
     {
-      key: 'lead_source', label: 'Lead Source', type: 'select',
+      key: 'lead_source', label: 'Lead Source', type: 'select', icon: { glyph: 'megaphone', color: 'pink' },
       getValue: () => opp.lead_source || 'salesperson',
       setValue: (v) => { opp.lead_source = v || 'salesperson'; },
       getOptions: leadSourceOptionsFor,
@@ -1889,14 +1891,14 @@ export async function openOppDetailsModal(opp, opts = {}) {
     heroHandle.element,
     el('div', { class: 'details-modal__section details-modal__section--fields' },
       el('div', { class: 'details-modal__section-header' },
-        el('h3', { class: 'details-modal__section-title' }, 'Details'),
+        el('h3', { class: 'details-modal__section-title' }, sectionIcon('info', 'blue', { size: 'sm' }), 'Details'),
         el('span', { class: 'details-modal__section-hint' }, 'Click any field to edit'),
       ),
       grid,
     ),
     el('div', { class: 'details-modal__section' },
       el('div', { class: 'details-modal__section-header' },
-        el('h3', { class: 'details-modal__section-title' }, 'Descriptions'),
+        el('h3', { class: 'details-modal__section-title' }, sectionIcon('note', 'teal', { size: 'sm' }), 'Descriptions'),
         el('div', { class: 'details-modal__section-actions' },
           descriptionsGenerateBtn,
           descriptionsCopyBtn,
@@ -1906,7 +1908,7 @@ export async function openOppDetailsModal(opp, opts = {}) {
       descriptionsSlot,
     ),
     el('div', { class: 'details-modal__section details-modal__section--documents' },
-      el('h3', { class: 'details-modal__section-title' }, 'Documents'),
+      el('h3', { class: 'details-modal__section-title' }, sectionIcon('folder', 'indigo', { size: 'sm' }), 'Documents'),
       mapPdfCardSlot,
       documentsSlot,
     ),
@@ -2147,6 +2149,7 @@ export async function openOppModal(opp, container, onSaved) {
     { name: 'customer_name', label: 'Customer Name', required: true, placeholder: 'e.g., Acme Corp' },
     {
       name: 'partner_id', label: 'Partner', type: 'select', required: true,
+      icon: { glyph: 'people', color: 'purple' },
       placeholder: 'Select partner...',
       options: partnerOptions,
     },
@@ -2157,17 +2160,20 @@ export async function openOppModal(opp, container, onSaved) {
     { type: 'row-start' },
     {
       name: 'stage', label: 'Stage', type: 'select', required: true,
+      icon: { glyph: 'chart', color: 'orange' },
       placeholder: 'Select stage...',
       options: OPP_STAGES,
     },
     {
       name: 'status', label: 'Status', type: 'select',
+      icon: { glyph: 'flag', color: 'indigo' },
       default: 'Registered',
       options: OPP_STATUSES,
     },
     { type: 'row-end' },
     {
       name: 'lead_source', label: 'Lead Source', type: 'select',
+      icon: { glyph: 'megaphone', color: 'pink' },
       options: leadSourceOptions,
     },
   ];

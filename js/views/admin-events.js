@@ -29,6 +29,7 @@ import {
 import { openOppModal } from './admin-opportunities.js';
 import { openPlaybookPanel, destroyPlaybookPanel, PLAYBOOK_URL } from '../components/playbook-panel.js';
 import { ICONS, iconButton } from '../components/icon-button.js';
+import { sectionIcon } from '../components/section-icon.js';
 
 export const title = 'Events';
 
@@ -453,8 +454,8 @@ function renderView(container, events, opportunities, filterBar) {
     // Single filter row above the table — sharp inputs + 3-segment toggle on the right
     el('div', { class: 'events-page__filter-row' },
       searchInput,
-      typeSelect,
-      statusSelect,
+      el('div', { class: 'select-with-icon' }, sectionIcon('tag', 'orange', { size: 'sm' }), typeSelect),
+      el('div', { class: 'select-with-icon' }, sectionIcon('flag', 'indigo', { size: 'sm' }), statusSelect),
       el('div', { class: 'events-page__view-toggle' }, boardBtn, calendarBtn, listBtn),
     ),
 
@@ -1001,17 +1002,20 @@ export async function openEventModal(event, container, onSaved) {
     { type: 'row-start' },
     {
       name: 'event_type', label: 'Type', type: 'select', required: true,
+      icon: { glyph: 'tag', color: 'orange' },
       placeholder: 'Select type...',
       options: EVENT_TYPES,
     },
     {
       name: 'status', label: 'Status', type: 'select',
+      icon: { glyph: 'flag', color: 'indigo' },
       default: 'Upcoming',
       options: EVENT_STATUSES,
     },
     { type: 'row-end' },
     {
       name: 'partner_id', label: 'Assigned partner', type: 'select',
+      icon: { glyph: 'people', color: 'purple' },
       options: partnerOptions,
     },
     { name: 'location', label: 'Location', placeholder: 'e.g., Virtual (Zoom), San Francisco, CA' },
@@ -1376,7 +1380,7 @@ function buildSourcedOppsSection(linkedOpps, totalPipeline, leadCount = 0) {
   }
 
   return el('div', { class: 'event-opps-section' },
-    el('h3', { class: 'event-opps-section__title' }, 'Sourced opportunities'),
+    el('h3', { class: 'event-opps-section__title' }, sectionIcon('briefcase', 'blue', { size: 'sm' }), 'Sourced opportunities'),
     stats,
     listEl,
   );

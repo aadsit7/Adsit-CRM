@@ -3,6 +3,7 @@
 // ============================================
 
 import { el } from '../utils/dom.js';
+import { sectionIcon } from './section-icon.js';
 
 /**
  * Normalize any date string to YYYY-MM-DD format for HTML date inputs.
@@ -110,6 +111,10 @@ function createFormGroup(field, initialValue) {
   if (field.label) {
     group.appendChild(
       el('label', { class: 'form-label', for: `field-${field.name}` },
+        // Opt-in iOS-style icon tile: { icon: { glyph, color } } in a field
+        // spec prepends the tile to the label. Fields without it render
+        // exactly as before.
+        field.icon ? sectionIcon(field.icon.glyph, field.icon.color, { size: 'sm' }) : null,
         field.label,
         field.required ? el('span', { style: { color: 'var(--color-danger)', marginLeft: '2px' } }, '*') : null
       )

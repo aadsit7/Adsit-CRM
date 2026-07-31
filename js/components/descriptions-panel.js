@@ -17,6 +17,7 @@ import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 import { initQuillEditor, ensureHtml, stripHtml } from './quill-editor.js';
 import { ICONS, iconButton } from './icon-button.js';
+import { sectionIcon } from './section-icon.js';
 
 /**
  * Normalize a timestamp to YYYY-MM-DD (local date portion only).
@@ -379,7 +380,7 @@ export function buildDescriptionsPanel(workingDescriptions, options = {}) {
   const panel = el('div', { class: 'descriptions-panel' },
     el('div', { class: 'descriptions-panel__header' },
       el('div', { class: 'descriptions-panel__title-group' },
-        el('h3', { class: 'descriptions-panel__title' }, 'Descriptions'),
+        el('h3', { class: 'descriptions-panel__title' }, sectionIcon('note', 'teal', { size: 'sm' }), 'Descriptions'),
         countBadge,
       ),
       el('div', { class: 'descriptions-panel__actions' }, addBtn),
