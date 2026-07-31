@@ -1,12 +1,14 @@
 /* ============================================
-   Partner Next Steps — the forward agenda
+   Partner Next Steps — the analysis log
    ============================================
    The collapsible section on the partner page between the Partner Bio and
-   Upcoming Joint Events (js/views/admin-partner-detail.js), plus the
-   note-selection modal its Analyze button opens. The agenda table reuses the
-   events-page table classes the Contacts section already uses; this file
-   only adds what is new, following the flat, square-cornered partner-detail
-   language in components.css and partner-bio.css. */
+   Upcoming Joint Events (js/views/admin-partner-detail.js): a log of
+   analysis runs, each its own dropdown entry over its plan table, plus the
+   note-selection modal its Analyze button opens and the read-only note
+   viewer the provenance chips open. The plan table reuses the events-page
+   table classes the Contacts section already uses; this file only adds
+   what is new, following the flat, square-cornered partner-detail language
+   in components.css and partner-bio.css. */
 
 /* ── Section shell ────────────────────────────────────────────────── */
 .partner-next-steps__header {
@@ -41,6 +43,93 @@
   display: flex;
   justify-content: center;
   margin-top: var(--space-4);
+}
+
+/* ── Analysis log ─────────────────────────────────────────────────── */
+/* The section body is a log of entries — one per Analyze run (newest
+   first) plus one for hand-added steps — each a dropdown: a flat header
+   row naming the run, over that run's own plan table. Header styling
+   follows the select-all row of the note-selection modal below: light
+   background, square corners, #DCE1EC border. */
+.partner-next-steps__log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.partner-next-steps__entry {
+  border: 1px solid #DCE1EC;
+  background: #FFFFFF;
+}
+
+.partner-next-steps__entry-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #F5F7FC;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.partner-next-steps__entry-header:hover {
+  background: #EEF1F7;
+}
+
+.partner-next-steps__entry-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #171D2B;
+  white-space: nowrap;
+}
+
+/* Which notes fed the run — secondary, truncating before it can push the
+   counts off the row. */
+.partner-next-steps__entry-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #4A5468;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.partner-next-steps__entry-count {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background: #FFFFFF;
+  border: 1px solid #DCE1EC;
+  color: #4A5468;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.partner-next-steps__entry-done {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background: #F0FFF0;
+  border: 1px solid #0F7A3F;
+  color: #0F7A3F;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.partner-next-steps__entry-body--collapsed {
+  display: none;
+}
+
+/* The entry already draws the frame — the table wrapper inside it must
+   not add a second border. */
+.partner-next-steps__entry .partner-next-steps__table-wrapper {
+  border: none;
 }
 
 /* ── Plan table ───────────────────────────────────────────────────── */
@@ -182,6 +271,38 @@
   color: #4A5468;
 }
 
+/* A chip per source note, wrapping when a step cites several. */
+.partner-next-steps__from-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The chip is a real <button> when its note can be opened — same shape as
+   the plain chip, plus the affordances of a link. */
+.partner-next-steps__source-chip--link {
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.partner-next-steps__source-chip--link:hover {
+  background: #F0F5FF;
+  border-color: #2F6BFF;
+  text-decoration: underline;
+}
+
+.partner-next-steps__source-chip--link:focus-visible {
+  outline: 2px solid #2F6BFF;
+  outline-offset: 1px;
+}
+
+/* The read-only note viewer the chips open. */
+.partner-next-steps__note-view {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 .partner-next-steps__textarea {
   resize: vertical;
   min-height: 72px;
@@ -266,5 +387,17 @@
 
   .partner-next-steps-select__date {
     min-width: 72px;
+  }
+
+  /* Entry headers keep the run's date and counts; the note-date meta is
+     the first thing to give way on a narrow screen. */
+  .partner-next-steps__entry-header {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .partner-next-steps__entry-meta {
+    flex-basis: 100%;
+    order: 4;
   }
 }

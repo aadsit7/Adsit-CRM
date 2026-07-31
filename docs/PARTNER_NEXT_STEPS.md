@@ -1,12 +1,15 @@
 # Partner Next Steps
 
 The **Next Steps** section on the Partner Detail page — between the Partner
-Bio and Upcoming Joint Events — holds the partnership's **mutual action
-plan**: one row per milestone, with a check-off box, the milestone itself
-(major gates bold), its owner, its target timing and a one-word status,
-ordered top-to-bottom as the plan runs. It is a living checklist rendered as
-visual text in the section — designed to be read (or screen-shared) in a
-working session, not exported.
+Bio and Upcoming Joint Events — is the partnership's **analysis log**: one
+collapsible entry per Analyze run (newest first, the latest expanded),
+each expanding to the **mutual action plan** that run produced — one row
+per milestone, with a check-off box, the milestone itself (major gates
+bold), its owner, its target timing and a one-word status, ordered
+top-to-bottom as the plan runs. Re-analyzing never erases or rewrites an
+earlier entry; it adds a new one. Each entry is rendered as visual text in
+the section — designed to be read (or screen-shared) in a working session,
+not exported.
 
 ## How it works
 
@@ -21,16 +24,19 @@ working session, not exported.
    sequence — is genuine multi-document reasoning. The model gets no tools
    and no outside knowledge; the notes are the entire universe.
 3. The reply is strictly validated (`js/utils/partner-next-steps-schema.js`)
-   and applied as a **living plan**: verified new steps are appended in plan
-   order, and steps already on the plan whose state the newest notes moved
-   forward (status progressed, a date firmed up) are **updated in place**.
-   Nothing is ever deleted by an analysis — completed rows stay permanently
-   as the visual record of momentum.
+   and saved as a **new log entry**: every verified step becomes a new row,
+   all stamped with the run's single `analyzed_at` — the entry's identity.
+   Rows saved by earlier runs are never touched, so each entry stays
+   exactly the snapshot its run produced, and the log is the visual record
+   of how the plan read at every point in time. The new entry renders
+   expanded; older entries collapse until clicked.
 4. **Add Step** appends a manual row (step text + optional owner, status and
-   target date); the **check-off box** on every row marks it Complete (or
-   reopens it) live, without a re-analysis; **Delete** removes a row after
-   confirmation. Analysis rows and manual rows live side by side, each
-   labeled with its provenance.
+   target date); manual rows live in their own **"Added by hand"** entry,
+   pinned above the runs. The **check-off box** on every row marks it
+   Complete (or reopens it) live, without a re-analysis; **Delete** removes
+   a row after confirmation. Every row is labeled with its provenance — and
+   an analysis row's **From chips are links that open the very note(s)** the
+   step was verified against, in a read-only viewer.
 
 ## What the analysis extracts (the MAP protocols)
 
@@ -111,30 +117,34 @@ anything is saved:
   than becoming a made-up state. Same for `kind` (`gate`/`step`). These
   gates also apply when re-reading rows hand-edited in the spreadsheet.
 - **Checkable provenance** — each analysis row records which note(s) it came
-  from (their dates), the verbatim snippet (shown as the row's tooltip), and
-  when the analysis ran (in the provenance chip's tooltip).
+  from — their `transcript_id`s (`source_ids`) and dates — the verbatim
+  snippet (shown as the row's tooltip), and when the analysis ran (in the
+  provenance chip's tooltip). The From chips resolve those ids against the
+  partner's notes and **open the note itself** on click; rows saved before
+  `source_ids` existed fall back to date matching, and a chip whose note is
+  ambiguous or deleted degrades to the plain label rather than guessing.
 
-## The living-plan rule (dedupe + merge)
+## The analysis-log rule (repeatable runs)
 
-A re-analysis matches proposals against the saved plan by normalized step
-text (`dedupeNextSteps`), splitting them three ways:
+Every Analyze run is **appended whole** as its own snapshot entry: all of
+the run's verified steps are saved as new rows sharing one `analyzed_at`
+stamp, and rows saved by earlier runs are never modified or removed — so
+re-analyzing (same notes or different ones) can never erase what a
+previous run recorded. `groupNextStepsIntoRuns` rebuilds the log from the
+flat sheet: one group per stamp, newest run first, plus one pinned group
+for the hand-added rows (which also catches any hand-typed sheet row with
+no usable run stamp, so a row can never silently vanish from the section).
+Proposals are still deduped *within* one reply (`normalizeStepKey`), so a
+single entry never lists the same step twice.
 
-- **fresh** — not on the plan yet → appended at the end, in plan order (the
-  plan grows as notes reveal new gates);
-- **updates** — already on the plan and *progressed* (`nextStepProgressed`:
-  a different non-empty status, or a non-empty date that differs) → the
-  saved row is updated in place via `mergeNextStepUpdate`, which is
-  deliberately conservative: identity fields are untouched, an empty
-  proposal never blanks a stored value, `gate` is sticky, and evidence /
-  source dates / the analysis stamp refresh to the newest run. A mere
-  rewording of owner or timing text is *not* progression — it would churn
-  the sheet on every re-analysis;
-- **skipped** — already on the plan and unchanged → nothing to do.
+Within an entry, ordering (`selectPartnerNextSteps`) preserves the stored
+row order — the plan's sequence — with no date re-sort: "Contract
+signature — post-POC" has no calendar date yet belongs after the POC rows.
 
-Rows are never removed by an analysis. Ordering
-(`selectPartnerNextSteps`) preserves the stored row order — the plan's
-sequence — with no date re-sort: "Contract signature — post-POC" has no
-calendar date yet belongs after the POC rows.
+The section's dropdown state is per entry: the newest run renders expanded,
+older runs collapsed, and the "Added by hand" entry expanded only while it
+is the only entry (or right after a step is added). User toggles are
+remembered in-memory across the page's re-renders.
 
 ## Storage
 
@@ -150,33 +160,37 @@ older spreadsheets simply don't have it until then):
 | `source` | `analysis` or `manual` |
 | `source_dates` | dates of the notes the step came from, `; `-separated |
 | `evidence` | the verbatim note snippet the step was verified against |
-| `analyzed_at` | ISO datetime of the Analyze run that created/last touched it |
+| `analyzed_at` | ISO datetime of the Analyze run — one stamp shared by every row of a run; the log groups entries by it ('' for manual rows) |
 | `created_at`, `updated_at` | row timestamps |
 | `owner` | `Recast`, `<Partner> (Name)`, `Both teams`, or empty |
 | `status` | one of the five fixed words, or empty |
 | `timing` | stated relative timing ("Post-ARB approval"), or empty |
 | `kind` | `gate` or `step` |
+| `source_ids` | `transcript_id`s of the note(s) the step was verified against, `; `-separated — what the From chips open |
 
-The four plan columns are **appended after** the original schema so
-`ensureSheetWithHeaders` can extend an existing tab's header row in place —
-data columns keep their positions, and older rows read back with empty plan
-fields. The tab is registered in `SHEET_HEADERS`, `initializeSheet` and
-`syncHeaders` (js/sheets.js), so Setup → Initialize Sheet creates it and
-keeps its header row in sync.
+The plan columns and `source_ids` are **appended after** the original
+schema so `ensureSheetWithHeaders` can extend an existing tab's header row
+in place — data columns keep their positions, and older rows read back
+with the new fields empty. The tab is registered in `SHEET_HEADERS`,
+`initializeSheet` and `syncHeaders` (js/sheets.js), so Setup → Initialize
+Sheet creates it and keeps its header row in sync.
 
 ## Files
 
 - `js/utils/partner-next-steps-schema.js` — sheet contract, strict parser
-  (evidence gate, date/status/kind validation), living-plan dedupe + merge,
-  plan ordering. Pure; tested in `tests/partner-next-steps-schema.test.mjs`.
+  (evidence gate, date/status/kind validation), analysis-log grouping
+  (`groupNextStepsIntoRuns`), plan ordering. Pure; tested in
+  `tests/partner-next-steps-schema.test.mjs`.
 - `js/utils/partner-next-steps-prompts.js` — the analysis prompt (grounding,
   verbatim evidence, plan sequencing, owner attribution, status vocabulary,
   date/timing discipline, client-safe wording, consolidation). Tested in
   `tests/partner-next-steps-prompts.test.mjs`.
 - `js/utils/partner-next-steps-client.js` — the Anthropic Messages API hop
   (extended thinking, no tools), same conventions as the sibling clients.
-- `js/views/admin-partner-detail.js` — the section, selection modal, run
-  orchestration (global Randy pill progress), live check-off, Add Step and
-  Delete.
-- `css/partner-next-steps.css` — the plan table (status pills, completed
-  tint, check-off box — and deliberately no red), section and modal styling.
+- `js/views/admin-partner-detail.js` — the section, its log entries
+  (per-run dropdowns with remembered open state), selection modal, run
+  orchestration (global Randy pill progress), the note-opening From chips
+  and read-only note viewer, live check-off, Add Step and Delete.
+- `css/partner-next-steps.css` — the log entries, the plan table (status
+  pills, completed tint, check-off box — and deliberately no red), the
+  note-link chips, section and modal styling.

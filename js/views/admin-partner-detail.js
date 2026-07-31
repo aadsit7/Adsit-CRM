@@ -66,8 +66,8 @@ import {
   nextStepRowValues,
   nextStepFromRow,
   selectPartnerNextSteps,
-  dedupeNextSteps,
-  mergeNextStepUpdate,
+  groupNextStepsIntoRuns,
+  MANUAL_STEPS_GROUP_KEY,
   lastAnalyzedAt,
   sanitizeNoteTextForAnalysis,
 } from '../utils/partner-next-steps-schema.js';
@@ -166,8 +166,9 @@ export async function render(container, params) {
     // still sees the profile they just paid for instead of an empty panel.
     const bioRecord = selectPartnerBioRow(bioRows, partnerId) || partnerBioSessionCache.get(partnerId) || null;
 
-    // The saved action plan: analysis rows and manual rows together, in
-    // plan order (the stored row order — see selectPartnerNextSteps).
+    // The saved next-steps rows: every analysis run's snapshot plus the
+    // manual rows, in stored order (see selectPartnerNextSteps) — the
+    // section groups them into the analysis log's entries.
     const partnerNextSteps = selectPartnerNextSteps(nextStepRows, partnerId);
 
     renderDetail(container, partner, partnerOpps, partnerEvents, partnerTranscripts, partnerContacts, contactPdfIndex, bioRecord, partnerNextSteps);
@@ -841,31 +842,55 @@ async function runPartnerBioAnalysis(partner, btn) {
 }
 
 // ============================================
-// Next Steps — the mutual action plan from the description notes
+// Next Steps — the analysis log of mutual action plans
 // ============================================
 // The section between the Partner Bio and Upcoming Joint Events. "Analyze"
 // asks the user to SELECT description notes (one or many), reasons over
 // exactly those notes — extended thinking, no tools, no outside knowledge —
-// and renders the verified plan as a living checklist: one row per
-// milestone, with a check-off box, the milestone (major gates bold), its
-// owner (Recast / partner / both teams), its target (date, stated relative
-// timing, or "To be scheduled") and a one-word status from the fixed MAP
-// set — Complete green, In Progress / Next / Scheduled amber, Pending dark,
-// never red. Rows sit in plan order; completed rows stay, tinted, as the
-// visual record of momentum. A re-analysis appends newly revealed steps and
-// moves existing rows forward (status/date progression) — it never deletes.
+// and appends the verified plan to the section as a NEW LOG ENTRY: its own
+// dropdown, headed by when it ran and which notes fed it, expanding to the
+// plan table — one row per milestone, with a check-off box, the milestone
+// (major gates bold), its owner (Recast / partner / both teams), its target
+// (date, stated relative timing, or "To be scheduled") and a one-word
+// status from the fixed MAP set — Complete green, In Progress / Next /
+// Scheduled amber, Pending dark, never red. Rows sit in plan order.
+// A re-analysis never erases or rewrites an earlier entry: every run is a
+// snapshot, saved whole, and the log keeps them all — newest first, the
+// latest expanded and older ones collapsed until clicked.
 // Every saved analysis row passed the verbatim evidence gate in
 // js/utils/partner-next-steps-schema.js: its supporting snippet is literally
 // present in a selected note, its applicable date is a real calendar date
 // the notes stated, and its provenance (which notes, analyzed when) is on
-// the row. Manual "Add Step" rows sit in the same table, labeled as manual,
-// and the checkbox lets the user check any row off live in a working
-// session without waiting for a re-analysis.
+// the row — the "From" chips link straight to those notes and open them.
+// Manual "Add Step" rows live in their own "Added by hand" entry, pinned
+// above the runs, and the checkbox lets the user check any row off live in
+// a working session without waiting for a re-analysis.
 
 // Which partners' Next Steps panels the user has collapsed, surviving the
 // full-page re-renders every mutation in this view performs. Absence means
 // open — the default for every partner.
 const collapsedNextStepsSections = new Set();
+
+// Per-partner open/collapsed overrides for the log's entries, keyed by the
+// entry key (a run's analyzed_at stamp, or MANUAL_STEPS_GROUP_KEY).
+// Absence means the default: the newest run open, older runs collapsed,
+// the hand-added entry open only while it is the only entry. In-memory
+// only — like the section set above, it survives re-renders, not reloads.
+const nextStepsEntryToggles = new Map();
+
+function nextStepsEntryOverride(partnerId, entryKey) {
+  const perPartner = nextStepsEntryToggles.get(partnerId);
+  return perPartner && perPartner.has(entryKey) ? perPartner.get(entryKey) : undefined;
+}
+
+function setNextStepsEntryToggle(partnerId, entryKey, open) {
+  let perPartner = nextStepsEntryToggles.get(partnerId);
+  if (!perPartner) {
+    perPartner = new Map();
+    nextStepsEntryToggles.set(partnerId, perPartner);
+  }
+  perPartner.set(entryKey, open);
+}
 
 // The partner_id whose next-steps analysis is running, or null. A partner id
 // rather than a bare boolean so a re-rendered button shows the correct
@@ -900,7 +925,7 @@ function buildNextStepsAnalyzeButton(partner, transcripts, hasAnalysis, { iconOn
     class: `partner-detail-page__section-cta${iconOnly ? ' partner-detail-page__section-cta--icon' : ''}`,
     disabled: running || undefined,
     title: hasAnalysis
-      ? 'Select description notes and analyze them again — new steps are added and existing ones move forward'
+      ? 'Select description notes and run a new analysis — it joins the log as its own entry; earlier analyses are never erased'
       : 'Select description notes to analyze into a mutual action plan',
     'aria-label': label,
     'data-label': label,
@@ -929,6 +954,116 @@ function nextStepSourceDatesLabel(step) {
   return dates.join(' · ');
 }
 
+/** A note's display date: its conversation date, else when it was added. */
+function noteDateLabel(transcript) {
+  const conv = formatDate(transcript.conversation_date);
+  return conv !== '—' ? conv : formatDate(transcript.created_at);
+}
+
+/** A note's YYYY-MM-DD, derived exactly as the analysis run stores it. */
+function noteDateISO(transcript) {
+  return String(transcript.conversation_date || transcript.created_at || '').trim().slice(0, 10);
+}
+
+/** "2:14 PM" from an ISO datetime, in the viewer's timezone, or ''. */
+function formatTimeOfDay(iso) {
+  const ms = Date.parse(String(iso || ''));
+  if (!ms) return '';
+  const d = new Date(ms);
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const half = d.getHours() >= 12 ? 'PM' : 'AM';
+  return `${d.getHours() % 12 || 12}:${minutes} ${half}`;
+}
+
+// ── The "From" chips: provenance that opens the note ─────────────────
+// One chip per source note. A chip whose note is on this page is a button
+// that opens that very note (read-only) in a modal; a chip whose note can
+// no longer be pinned down — deleted, or a pre-source_ids row whose stored
+// date matches several notes — stays a plain label of the stored dates.
+
+/** The read-only note viewer the provenance chips open. */
+function openNextStepNoteModal(transcript) {
+  openModal({
+    title: `Description Note · ${noteDateLabel(transcript)}`,
+    className: 'modal--wide',
+    content: el('div', { class: 'partner-next-steps__note-view' },
+      el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
+    ),
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
+    ],
+  });
+}
+
+/**
+ * Build the From-cell chips for one analysis row. Notes are resolved by
+ * their stored transcript_id first — exact provenance, immune to date
+ * edits. Rows saved before source_ids existed fall back to matching their
+ * stored note dates against this partner's notes; a date carried by
+ * exactly one note still links, an ambiguous or vanished one degrades to
+ * the plain chip this cell has always shown.
+ */
+function buildNextStepNoteChips(step, transcripts, stamp) {
+  const byId = new Map();
+  for (const t of transcripts || []) {
+    const id = String(t.transcript_id || '').trim();
+    if (id && !byId.has(id)) byId.set(id, t);
+  }
+
+  const ids = Array.isArray(step.source_ids) ? step.source_ids : [];
+  const resolved = ids.map(id => byId.get(id)).filter(Boolean);
+
+  // Stored dates not accounted for by an id-resolved note: for legacy rows
+  // that is every stored date; for new rows only the notes that vanished.
+  const resolvedDates = new Set(resolved.map(noteDateISO));
+  const leftoverDates = ids.length && resolved.length === ids.length
+    ? []
+    : String(step.source_dates || '')
+        .split(';')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter(d => !resolvedDates.has(d));
+
+  const linkChip = (transcript) => el('button', {
+    type: 'button',
+    class: 'partner-next-steps__source-chip partner-next-steps__source-chip--link',
+    title: [`Open the description note of ${noteDateLabel(transcript)}`, stamp].filter(Boolean).join(' · '),
+    onClick: (e) => {
+      e.stopPropagation();
+      openNextStepNoteModal(transcript);
+    },
+  }, `Notes · ${noteDateLabel(transcript)}`);
+
+  const plainChip = (label, title) => el('span', {
+    class: 'partner-next-steps__source-chip',
+    title: [title, stamp].filter(Boolean).join(' · '),
+  }, label);
+
+  const chips = resolved.map(linkChip);
+  for (const date of leftoverDates) {
+    const matches = (transcripts || []).filter(t => noteDateISO(t) === date && String(t.transcript_id || '').trim());
+    const dateStr = formatDate(date);
+    if (matches.length === 1 && !resolved.includes(matches[0])) {
+      chips.push(linkChip(matches[0]));
+    } else {
+      chips.push(plainChip(
+        dateStr !== '—' ? `Notes · ${dateStr}` : 'Notes',
+        dateStr !== '—'
+          ? `Analyzed from a description note of ${dateStr} — that exact note could not be pinned down to open (${matches.length > 1 ? 'several notes share this date' : 'it may have been edited or deleted'}); see the Descriptions section`
+          : 'Analyzed from the selected description notes',
+      ));
+    }
+  }
+  if (!chips.length) {
+    const noteDates = nextStepSourceDatesLabel(step);
+    chips.push(plainChip(
+      noteDates ? `Notes · ${noteDates}` : 'Notes',
+      noteDates ? `Analyzed from the description note(s) of ${noteDates}` : 'Analyzed from the selected description notes',
+    ));
+  }
+  return el('div', { class: 'partner-next-steps__from-chips' }, ...chips);
+}
+
 // The check-off glyphs — filled green square when complete, gray outline
 // when open. Colors ride on `currentColor` so the CSS states own them.
 const NEXT_STEP_CHECKED_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="14" height="14" fill="currentColor"/><path d="M4.5 8.2l2.4 2.4 4.6-5" stroke="#FFFFFF" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -942,7 +1077,7 @@ function nextStepStatusClass(status) {
   return 'partner-next-steps__status--active'; // In Progress / Next / Scheduled
 }
 
-function buildNextStepsTable(partner, steps) {
+function buildNextStepsTable(partner, steps, transcripts) {
   return el('div', { class: 'events-page__table-wrapper partner-next-steps__table-wrapper' },
     el('table', { class: 'events-page__table events-page__table--compact partner-next-steps__table' },
       el('thead', {},
@@ -960,7 +1095,6 @@ function buildNextStepsTable(partner, steps) {
         ...steps.map(step => {
           const isAnalysis = step.source === 'analysis';
           const complete = step.status === 'Complete';
-          const noteDates = isAnalysis ? nextStepSourceDatesLabel(step) : '';
           const stampISO = isAnalysis ? step.analyzed_at : step.created_at;
           const stampDate = formatDate(String(stampISO || '').slice(0, 10));
           const stamp = stampDate && stampDate !== '—' ? `${isAnalysis ? 'Analyzed' : 'Added'} ${stampDate}` : '';
@@ -1014,13 +1148,7 @@ function buildNextStepsTable(partner, steps) {
             ),
             el('td', {},
               isAnalysis
-                ? el('span', {
-                    class: 'partner-next-steps__source-chip',
-                    title: [
-                      noteDates ? `Analyzed from the description note(s) of ${noteDates}` : 'Analyzed from the selected description notes',
-                      stamp,
-                    ].filter(Boolean).join(' · '),
-                  }, noteDates ? `Notes · ${noteDates}` : 'Notes')
+                ? buildNextStepNoteChips(step, transcripts, stamp)
                 : el('span', {
                     class: 'partner-next-steps__source-chip partner-next-steps__source-chip--manual',
                     title: stamp ? `Added by hand · ${stamp}` : 'Added by hand',
@@ -1042,10 +1170,91 @@ function buildNextStepsTable(partner, steps) {
   );
 }
 
+// ── The log entries: one dropdown per analysis run ───────────────────
+
+/** "Jun 12, 2026 · Jul 17, 2026" — every note date a run's steps cite. */
+function runNoteDatesLabel(group) {
+  const seen = new Set();
+  const dates = [];
+  for (const step of group.steps) {
+    for (const raw of String(step.source_dates || '').split(';')) {
+      const date = raw.trim();
+      if (date && !seen.has(date)) {
+        seen.add(date);
+        dates.push(date);
+      }
+    }
+  }
+  return dates.map(d => formatDate(d)).filter(d => d && d !== '—').join(' · ');
+}
+
+/**
+ * One entry of the analysis log: a collapsible header — when the run
+ * happened (date and time, so two runs on one day stay tellable apart),
+ * which notes fed it, how many steps and how many are complete — over the
+ * run's own plan table, exactly as that run produced it. The hand-added
+ * rows form the same shape of entry, labeled "Added by hand".
+ */
+function buildNextStepsRunEntry(partner, group, transcripts, defaultOpen) {
+  const override = nextStepsEntryOverride(partner.partner_id, group.key);
+  const isOpen = override === undefined ? defaultOpen : override;
+
+  const chevron = el('span', {
+    class: `partner-next-steps__chevron${isOpen ? ' partner-next-steps__chevron--open' : ''}`,
+    html: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  });
+
+  const body = el('div', {
+    class: `partner-next-steps__entry-body${isOpen ? '' : ' partner-next-steps__entry-body--collapsed'}`,
+  }, buildNextStepsTable(partner, group.steps, transcripts));
+
+  const completeCount = group.steps.filter(s => s.status === 'Complete').length;
+  const runDate = formatDate(String(group.analyzed_at || '').slice(0, 10));
+  const runTime = formatTimeOfDay(group.analyzed_at);
+  const title = group.manual
+    ? 'Added by hand'
+    : `Analyzed ${runDate !== '—' ? runDate : 'earlier'}${runTime ? ` · ${runTime}` : ''}`;
+  const noteDates = group.manual ? '' : runNoteDatesLabel(group);
+
+  const header = el('div', {
+    class: 'partner-next-steps__entry-header',
+    role: 'button',
+    'aria-expanded': isOpen ? 'true' : 'false',
+    title: group.manual
+      ? 'Steps added by hand — click to expand or collapse'
+      : 'One analysis run — click to expand or collapse its plan',
+    onClick: () => {
+      const nowOpen = body.classList.toggle('partner-next-steps__entry-body--collapsed') === false;
+      chevron.classList.toggle('partner-next-steps__chevron--open', nowOpen);
+      header.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+      setNextStepsEntryToggle(partner.partner_id, group.key, nowOpen);
+    },
+  },
+    chevron,
+    el('span', { class: 'partner-next-steps__entry-title' }, title),
+    noteDates
+      ? el('span', {
+          class: 'partner-next-steps__entry-meta',
+          title: `Built from the description note${noteDates.includes('·') ? 's' : ''} of ${noteDates}`,
+        }, `from notes of ${noteDates}`)
+      : el('span', { class: 'partner-next-steps__entry-meta' }),
+    el('span', { class: 'partner-next-steps__entry-count' },
+      `${group.steps.length} step${group.steps.length === 1 ? '' : 's'}`),
+    completeCount
+      ? el('span', { class: 'partner-next-steps__entry-done' }, `${completeCount} complete`)
+      : null,
+  );
+
+  return el('div', { class: 'partner-next-steps__entry' }, header, body);
+}
+
 function buildNextStepsSection(partner, steps, transcripts) {
   const isOpen = !collapsedNextStepsSections.has(partner.partner_id);
-  const hasAnalysis = steps.some(s => s.source === 'analysis');
+  const groups = groupNextStepsIntoRuns(steps);
+  const runs = groups.filter(g => !g.manual);
+  const hasAnalysis = runs.length > 0;
   const analyzed = lastAnalyzedAt(steps);
+  const newestRunKey = hasAnalysis ? runs[0].key : '';
 
   const chevron = el('span', {
     class: `partner-next-steps__chevron${isOpen ? ' partner-next-steps__chevron--open' : ''}`,
@@ -1055,24 +1264,29 @@ function buildNextStepsSection(partner, steps, transcripts) {
   const body = el('div', {
     class: `partner-next-steps__body${isOpen ? '' : ' partner-next-steps__body--collapsed'}`,
   },
-    steps.length > 0
-      ? buildNextStepsTable(partner, steps)
+    groups.length > 0
+      ? el('div', { class: 'partner-next-steps__log' },
+          // The hand-added entry is pinned first, open only while it is the
+          // only entry; the newest run opens by default, older runs wait
+          // collapsed. A user toggle (nextStepsEntryToggles) always wins.
+          ...groups.map(group => buildNextStepsRunEntry(partner, group, transcripts,
+            group.manual ? !hasAnalysis : group.key === newestRunKey)))
       : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
           el('div', { class: 'empty-state__title' }, 'No next steps yet'),
           el('div', { class: 'empty-state__description' },
-            'Click "Analyze" to pick the description notes to read — the AI builds the mutual '
+            'Click "Analyze" to pick the description notes to read — the AI builds a mutual '
             + 'action plan from exactly the notes you select: each milestone with its owner, '
-            + 'status and target, in plan order. You can also add steps by hand.'),
+            + 'status and target, in plan order. Every run is kept as its own entry here, so '
+            + 'you can re-analyze any time without losing earlier plans. You can also add '
+            + 'steps by hand.'),
           el('div', { class: 'partner-next-steps__empty-cta' },
             buildNextStepsAnalyzeButton(partner, transcripts, false)),
         )
   );
 
-  const subtitle = steps.length
-    ? (analyzed
-        ? `analyzed ${formatDate(String(analyzed).slice(0, 10)) || String(analyzed).slice(0, 10)}`
-        : 'added by hand')
-    : 'from your description notes';
+  const subtitle = hasAnalysis
+    ? `${runs.length} ${runs.length === 1 ? 'analysis' : 'analyses'} · latest ${formatDate(String(analyzed).slice(0, 10)) || String(analyzed).slice(0, 10)}`
+    : (steps.length ? 'added by hand' : 'from your description notes');
 
   const header = el('div', {
     class: 'partner-detail-page__section-header partner-next-steps__header',
@@ -1199,9 +1413,9 @@ function openNextStepsSourceModal(partner, transcripts) {
     content: el('div', { class: 'partner-next-steps-select' },
       el('p', { class: 'partner-next-steps-select__intro' },
         'Select the description notes to analyze. The AI reads ONLY the notes you select, works out '
-        + 'what has completed, what is in motion and what gate comes next, and keeps the plan a living '
-        + 'checklist — new steps are added, existing ones move forward, and every step is checked '
-        + 'word-for-word against the notes before it is saved.'),
+        + 'what has completed, what is in motion and what gate comes next, and saves the plan as a '
+        + 'new entry in the Next Steps log — earlier analyses stay exactly as they were, and every '
+        + 'step is checked word-for-word against the notes before it is saved.'),
       el('label', { class: 'partner-next-steps-select__row partner-next-steps-select__row--all' },
         selectAllInput,
         el('span', { class: 'partner-next-steps-select__date' }, 'Select all'),
@@ -1270,49 +1484,23 @@ async function runNextStepsAnalysis(partner, chosenTranscripts) {
     updatePillStage(pill, 'Saving…');
 
     let records = [];
-    let skipped = [];
-    let updated = 0;
     if (result.steps.length) {
-      // The tab must exist BEFORE the dedupe read: with it guaranteed, a
-      // failed read below is a genuine transient error and aborts the save
-      // (via the outer catch) rather than silently deduping against an
-      // empty list and re-appending every step the previous run saved.
-      // ensureSheetWithHeaders also extends an older tab's header row in
-      // place when the plan columns (owner/status/timing/kind) are missing.
+      // ensureSheetWithHeaders creates the tab on first use and extends an
+      // older tab's header row in place when appended columns (the plan
+      // columns, source_ids) are missing.
       await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_NEXT_STEPS, PARTNER_NEXT_STEP_HEADERS);
-      // Fresh read so the dedupe sees steps added since this page rendered —
-      // a re-analysis appends, and the same step must not pile up.
-      const existingRows = await readSheetAsObjects(CONFIG.SHEET_PARTNER_NEXT_STEPS, { forceRefresh: true });
-      const existing = selectPartnerNextSteps(existingRows, partnerId);
-      const deduped = dedupeNextSteps(existing, result.steps);
-      skipped = deduped.skipped;
 
       const dateById = new Map(sources.map(s => [s.source_id, s.date]));
       const sourceDatesFor = (step) =>
         [...new Set((step.source_ids || []).map(id => dateById.get(id)).filter(Boolean))].join('; ');
+      // ONE stamp for every row of the run — it is the log entry's identity
+      // (groupNextStepsIntoRuns groups the section's dropdowns by it).
       const now = nowISO();
 
-      // The living-plan half of the save: rows the newest notes moved
-      // forward (status progressed, date firmed up) update IN PLACE — the
-      // merge runs against the freshly-read row, so only the progressed
-      // fields change and completed history is never rewritten wholesale.
-      // Rows without a step_id (hand-typed directly into the sheet) can't
-      // be addressed; they count as skipped rather than failing the run.
-      const addressable = deduped.updates.filter(u => u.existing.step_id);
-      skipped = skipped.concat(deduped.updates.filter(u => !u.existing.step_id).map(u => u.proposed));
-      if (addressable.length) {
-        await updateRowsById(CONFIG.SHEET_PARTNER_NEXT_STEPS, 'step_id', addressable.map(({ existing: ex, proposed }) => ({
-          id: ex.step_id,
-          expect: { partner_id: partnerId },
-          values: (freshRow) => nextStepRowValues(mergeNextStepUpdate(nextStepFromRow(freshRow), proposed, {
-            analyzedAt: now,
-            sourceDates: sourceDatesFor(proposed),
-          })),
-        })));
-        updated = addressable.length;
-      }
-
-      records = deduped.fresh.map(step => ({
+      // The analysis-log save: this run is appended WHOLE, as its own
+      // snapshot entry — rows saved by earlier runs are never touched, so
+      // re-analyzing can never erase or rewrite what a previous run found.
+      records = result.steps.map(step => ({
         step_id: uuid('pns'),
         partner_id: partnerId,
         partner_name: partner.display_name || '',
@@ -1328,25 +1516,20 @@ async function runNextStepsAnalysis(partner, chosenTranscripts) {
         status: step.status,
         timing: step.timing,
         kind: step.kind,
+        source_ids: step.source_ids,
       }));
 
-      if (records.length) {
-        await appendRows(CONFIG.SHEET_PARTNER_NEXT_STEPS, records.map(nextStepRowValues));
-      }
+      await appendRows(CONFIG.SHEET_PARTNER_NEXT_STEPS, records.map(nextStepRowValues));
     }
 
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    if (records.length || updated) {
-      const bits = [];
-      if (records.length) bits.push(plural(records.length, 'step') + ' added');
-      if (updated) bits.push(plural(updated, 'step') + ' moved forward');
-      if (skipped.length) bits.push(`${skipped.length} already current`);
+    if (records.length) {
+      const completeCount = records.filter(r => r.status === 'Complete').length;
+      const bits = [plural(records.length, 'step')];
+      if (completeCount) bits.push(`${completeCount} complete`);
       if (result.dropped.length) bits.push(`${plural(result.dropped.length, 'unverified proposal')} discarded`);
-      showToast(`Action plan: ${bits.join(', ')}`, 'success');
-      markPillSuccess(pill, bits.slice(0, 2).join(', '));
-    } else if (skipped.length) {
-      showToast('Analysis complete — the plan already reflects everything in the selected notes.', 'info');
-      markPillSuccess(pill, 'Plan already up to date');
+      showToast(`New analysis added to the log: ${bits.join(', ')} — earlier entries are untouched.`, 'success');
+      markPillSuccess(pill, `${plural(records.length, 'step')} logged`);
     } else if (result.dropped.length) {
       showToast('Analysis found no verifiable next steps in the selected notes — nothing was saved. See the console for what was rejected.', 'info');
       markPillSuccess(pill, 'Nothing verifiable found');
@@ -1427,10 +1610,14 @@ function openAddNextStepModal(partner) {
           status: statusSelect.value,
           timing: '',
           kind: 'step',
+          source_ids: [],
         }));
         showToast('Next step added', 'success');
         closeModal();
         collapsedNextStepsSections.delete(partner.partner_id);
+        // Surface the row: the "Added by hand" log entry expands so the new
+        // step is visible the moment the section repaints.
+        setNextStepsEntryToggle(partner.partner_id, MANUAL_STEPS_GROUP_KEY, true);
         // The modal survives a hash navigation, so only repaint if the user
         // is still on THIS partner's page — the row is saved regardless.
         if (getCurrentPath() === '/admin/partner-detail' && getQueryParams().id === partner.partner_id) {
