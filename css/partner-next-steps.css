@@ -37,14 +37,6 @@
   align-items: center;
 }
 
-/* The Analyze button repeated inside the empty state, centered under the
-   explanation — the requested default state of the section. */
-.partner-next-steps__empty-cta {
-  display: flex;
-  justify-content: center;
-  margin-top: var(--space-4);
-}
-
 /* ── Analysis log ─────────────────────────────────────────────────── */
 /* The section body is a log of entries — one per Analyze run (newest
    first) plus one for hand-added steps — each a dropdown: a flat header

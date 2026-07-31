@@ -1422,16 +1422,10 @@ function buildNextStepsSection(partner, steps, transcripts) {
           // collapsed. A user toggle (nextStepsEntryToggles) always wins.
           ...groups.map(group => buildNextStepsRunEntry(partner, group, transcripts,
             group.manual ? !hasAnalysis : group.key === newestRunKey)))
+      // The empty state stays deliberately quiet — the header's own Analyze
+      // and Add Step buttons are the calls to action.
       : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-4)' } },
           el('div', { class: 'empty-state__title' }, 'No next steps yet'),
-          el('div', { class: 'empty-state__description' },
-            'Click "Analyze" to pick the description notes to read — the AI builds a mutual '
-            + 'action plan from exactly the notes you select: each milestone with its owner, '
-            + 'status and target, in plan order. Every run is kept as its own entry here, so '
-            + 'you can re-analyze any time without losing earlier plans. You can also add '
-            + 'steps by hand.'),
-          el('div', { class: 'partner-next-steps__empty-cta' },
-            buildNextStepsAnalyzeButton(partner, transcripts, false)),
         )
   );
 
