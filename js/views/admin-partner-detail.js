@@ -439,10 +439,11 @@ function buildPartnerStatCell(label, value) {
 // This is the complement to the Partner Analyzer: that scores OUR relationship
 // from OUR notes, this describes THEIR company from the public record.
 
-// Which partners' bio panels the user has collapsed, surviving the full-page
-// re-renders every mutation in this view performs. Absence means open — the
-// default for every partner.
-const collapsedBioSections = new Set();
+// Which partners' bio panels the user has expanded, surviving the full-page
+// re-renders every mutation in this view performs. Absence means collapsed —
+// the default for every partner, so the page opens on the relationship data
+// and the bio is a click away.
+const expandedBioSections = new Set();
 
 // partner_id → the record produced in this session. Read ONLY as a fallback
 // when the sheet has no row for the partner: in demo mode, or when the save
@@ -673,7 +674,7 @@ function buildPartnerBioContent(partner, bioRecord) {
 function buildPartnerBioSection(partner, bioRecord) {
   const bio = bioRecord && bioRecord.bio ? bioRecord.bio : null;
   const hasBio = !!(bio && !partnerBioIsEmpty(bio));
-  const isOpen = !collapsedBioSections.has(partner.partner_id);
+  const isOpen = expandedBioSections.has(partner.partner_id);
 
   const chevron = el('span', {
     class: `partner-bio__chevron${isOpen ? ' partner-bio__chevron--open' : ''}`,
@@ -703,8 +704,8 @@ function buildPartnerBioSection(partner, bioRecord) {
     onClick: () => {
       const nowOpen = body.classList.toggle('partner-bio__body--collapsed') === false;
       chevron.classList.toggle('partner-bio__chevron--open', nowOpen);
-      if (nowOpen) collapsedBioSections.delete(partner.partner_id);
-      else collapsedBioSections.add(partner.partner_id);
+      if (nowOpen) expandedBioSections.add(partner.partner_id);
+      else expandedBioSections.delete(partner.partner_id);
     },
   },
     el('div', { class: 'partner-detail-page__section-title' },
@@ -810,7 +811,9 @@ async function runPartnerBioAnalysis(partner, btn) {
       console.warn('[Partner Bio] not saved:', err);
     }
 
-    collapsedBioSections.delete(partnerId);
+    // A freshly researched bio must be visible, so expand the panel for the
+    // re-render below even though panels default to collapsed.
+    expandedBioSections.add(partnerId);
     markPillSuccess(pill, saveError ? 'Researched (not saved)' : 'Bio ready');
     showToast(saveError ? `Bio ready, but not saved: ${saveError}` : 'Partner bio ready',
       saveError ? 'error' : 'success');
@@ -1123,12 +1126,12 @@ function openNextStepsSourceModal(partner, transcripts) {
   const missingId = withText.length - notes.length;
   if (!notes.length) {
     showToast(missingId
-      ? `${missingId} description note${missingId === 1 ? ' is' : 's are'} missing a transcript_id in the Transcripts sheet and can't be analyzed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Transcript".`
+      ? `${missingId} description note${missingId === 1 ? ' is' : 's are'} missing a transcript_id in the Transcripts sheet and can't be analyzed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Description".`
       : 'This partner has no description notes to analyze yet — add one under Descriptions first.', 'info');
     return;
   }
   if (missingId) {
-    showToast(`${missingId} note${missingId === 1 ? '' : 's'} without a transcript_id ${missingId === 1 ? 'is' : 'are'} not listed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Transcript" to make ${missingId === 1 ? 'it' : 'them'} analyzable.`, 'info');
+    showToast(`${missingId} note${missingId === 1 ? '' : 's'} without a transcript_id ${missingId === 1 ? 'is' : 'are'} not listed — re-add ${missingId === 1 ? 'it' : 'them'} via "Add Description" to make ${missingId === 1 ? 'it' : 'them'} analyzable.`, 'info');
   }
 
   const selected = new Set();
@@ -3052,7 +3055,7 @@ function buildTranscriptsPanel(partner, transcripts) {
       onClick: () => openTranscriptModal(partner, null, transcripts, () => reRender(partner.partner_id)),
     },
       el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
-      'Add Transcript',
+      'Add Description',
     ),
   );
 
@@ -3061,8 +3064,8 @@ function buildTranscriptsPanel(partner, transcripts) {
         ...transcripts.map(t => transcriptCard(t, partner))
       )
     : el('div', { class: 'empty-state', style: { padding: 'var(--space-6) var(--space-2)' } },
-        el('div', { class: 'empty-state__title' }, 'No transcripts yet'),
-        el('div', { class: 'empty-state__description' }, 'Click "Add Transcript" to log a call with this partner.')
+        el('div', { class: 'empty-state__title' }, 'No descriptions yet'),
+        el('div', { class: 'empty-state__description' }, 'Click "Add Description" to log a call with this partner.')
       );
 
   return el('div', {},
