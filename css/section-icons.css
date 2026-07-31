@@ -1,0 +1,189 @@
+/* ============================================================
+   Section Icons — iOS Settings-style icon tiles
+   ------------------------------------------------------------
+   The small colored rounded-square that leads a section header
+   or dropdown label on the opportunity, partner, and events
+   screens — the same visual grammar as the leading icons in the
+   iPhone Settings app: solid accent tile, white glyph, 24%
+   corner radius (--radius-tile in tokens.css), subtle top sheen.
+
+   Markup comes from js/components/section-icon.js. Tiles are
+   decorative (aria-hidden) and never carry their own click
+   behavior, so nothing here changes hit targets or handlers.
+
+   Colors are the Apple accent set from tokens.css, restated
+   here as literals because tokens.css scopes its custom
+   properties to .apple-scope and these tiles also appear
+   outside that scope.
+   ============================================================ */
+
+.section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  align-self: center;      /* headers that baseline-align stay tidy */
+  vertical-align: middle;  /* inline contexts (labels) */
+  border-radius: 24%;
+  color: #FFFFFF;
+  background-color: #007AFF;
+  /* Gentle top-light sheen, like iOS tiles */
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 58%);
+  box-shadow: 0 1px 2px rgba(23, 29, 43, 0.14);
+}
+
+.section-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* Small tile — for the compact uppercase eyebrow headers and
+   dropdown/field labels */
+.section-icon--sm {
+  width: 20px;
+  height: 20px;
+}
+
+.section-icon--sm svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Large tile — modal hero headers */
+.section-icon--lg {
+  width: 32px;
+  height: 32px;
+}
+
+.section-icon--lg svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* iOS system accents (see tokens.css .apple-scope) */
+.section-icon--blue   { background-color: #007AFF; }
+.section-icon--green  { background-color: #34C759; }
+.section-icon--orange { background-color: #FF9500; }
+.section-icon--purple { background-color: #AF52DE; }
+.section-icon--indigo { background-color: #5856D6; }
+.section-icon--teal   { background-color: #30B0C7; }
+.section-icon--pink   { background-color: #FF2D55; }
+.section-icon--red    { background-color: #FF3B30; }
+.section-icon--yellow { background-color: #FFCC00; }
+.section-icon--gray   { background-color: #8E8E93; }
+
+/* ------------------------------------------------------------
+   Mount-point adjustments — how tiles sit inside the headers
+   and labels that already exist. Scoped with :has() so headers
+   WITHOUT a tile keep their exact current layout.
+   ------------------------------------------------------------ */
+
+/* Opportunity details modal — "Details / Descriptions / Documents"
+   eyebrow titles. flex (not inline-flex) so the Documents h3 keeps
+   its full-width band background. */
+.details-modal__section-title:has(> .section-icon) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Opportunities list — "Opportunities" page heading */
+.section-header__title:has(> .section-icon) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Partner page — "Revenue by Event" chart card title */
+.partner-detail-page__chart-title:has(> .section-icon) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Field cards in the details grid — label row is space-between
+   (label … pencil); with a leading tile, group tile + text left
+   and keep the pencil pushed to the right edge. */
+.field-card__label:has(> .section-icon) {
+  justify-content: flex-start;
+}
+
+.field-card__label:has(> .section-icon) > .field-card__pencil {
+  margin-left: auto;
+}
+
+/* Form labels (edit modals) — lay the label out as a row so the
+   tile and text center-align without changing label typography. */
+.form-label:has(> .section-icon) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Filter bars (list views) — a native <select> can't contain
+   markup (and the Stages trigger rewrites its own textContent), so
+   the tile overlays the control's left edge inside a relative
+   wrapper and the control's text shifts right to make room. */
+.select-with-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.select-with-icon > .section-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.select-with-icon > select {
+  padding-left: 38px;
+}
+
+/* Events filter selects — restate at matching specificity so this
+   file's later load order beats the components.css padding. */
+.select-with-icon > .events-page__select {
+  padding-left: 36px;
+}
+
+/* Stages multi-select — the tile overlays the trigger button, which
+   lives one level down inside the wrapped .multi-select div. */
+.select-with-icon .multi-select__button {
+  padding-left: 38px;
+}
+
+/* When the filter bar stacks into a column on tablets/phones
+   (responsive.css makes .filter-bar__select full-width), the wrapper
+   is the flex child that stretches — let its control fill it. */
+.select-with-icon > .filter-bar__select {
+  flex: 1 1 auto;
+}
+
+/* Shared Descriptions/Documents panel headers (event + edit
+   modals) — h3 titles become centered rows when they lead with
+   a tile. */
+.descriptions-panel__title:has(> .section-icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Events modal (Apple-scoped) — "Sourced opportunities" card title */
+.event-opps-section__title:has(> .section-icon) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Partner page section titles baseline-align their children;
+   the tile itself already opts out via align-self: center. No
+   further rules needed — gap comes from the existing 10px gap. */
+
+/* Phones: tiles stay the same size — they are the tap-target
+   wayfinding. Nothing to override. */

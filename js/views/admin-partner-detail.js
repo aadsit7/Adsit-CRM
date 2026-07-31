@@ -74,6 +74,7 @@ import {
 import { requestPartnerNextSteps } from '../utils/partner-next-steps-client.js';
 import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 import { ICONS, iconButton } from '../components/icon-button.js';
+import { sectionIcon } from '../components/section-icon.js';
 
 export const title = 'Partner Detail';
 
@@ -284,6 +285,7 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
     el('div', { class: 'partner-detail-page__section' },
       el('div', { class: 'partner-detail-page__section-header' },
         el('div', { class: 'partner-detail-page__section-title' },
+          sectionIcon('briefcase', 'blue', { size: 'sm' }),
           'Opportunities',
           el('span', { class: 'partner-detail-page__section-count' }, String(opportunities.length)),
         ),
@@ -709,6 +711,7 @@ function buildPartnerBioSection(partner, bioRecord) {
     },
   },
     el('div', { class: 'partner-detail-page__section-title' },
+      sectionIcon('person', 'blue', { size: 'sm' }),
       'Partner Bio',
       el('span', { class: 'partner-detail-page__section-subtitle' }, subtitle),
       chevron,
@@ -1081,6 +1084,7 @@ function buildNextStepsSection(partner, steps, transcripts) {
     },
   },
     el('div', { class: 'partner-detail-page__section-title' },
+      sectionIcon('checklist', 'green', { size: 'sm' }),
       'Next Steps',
       steps.length ? el('span', { class: 'partner-detail-page__section-count' }, String(steps.length)) : null,
       el('span', { class: 'partner-detail-page__section-subtitle' }, subtitle),
@@ -1459,7 +1463,7 @@ function openAddNextStepModal(partner) {
         ownerInput,
       ),
       el('div', { class: 'form-group' },
-        el('label', { class: 'form-label', for: 'next-step-status' }, 'Status (optional)'),
+        el('label', { class: 'form-label', for: 'next-step-status' }, sectionIcon('flag', 'indigo', { size: 'sm' }), 'Status (optional)'),
         statusSelect,
       ),
       el('div', { class: 'form-group' },
@@ -1759,6 +1763,7 @@ function buildPartnerContactsSection(partner, contacts, contactPdfIndex) {
     },
   },
     el('div', { class: 'partner-detail-page__section-title' },
+      sectionIcon('people', 'purple', { size: 'sm' }),
       'Contacts',
       el('span', { class: 'partner-detail-page__section-count' }, String(contacts.length)),
       el('span', { class: 'partner-detail-page__section-subtitle' }, 'from descriptions & attachments'),
@@ -3071,6 +3076,7 @@ function buildTranscriptsPanel(partner, transcripts) {
   return el('div', {},
     el('div', { class: 'partner-detail-page__section-header' },
       el('div', { class: 'partner-detail-page__section-title' },
+        sectionIcon('note', 'teal', { size: 'sm' }),
         'Descriptions',
         el('span', { class: 'partner-detail-page__section-count' }, String(transcripts.length)),
       ),
@@ -3118,7 +3124,7 @@ function buildPartnerRevenueByEvent(partnerEvents, opportunities) {
 
   if (data.length === 0) {
     return el('div', { class: 'partner-detail-page__chart-card' },
-      el('div', { class: 'partner-detail-page__chart-title' }, 'Revenue by Event'),
+      el('div', { class: 'partner-detail-page__chart-title' }, sectionIcon('chart', 'orange', { size: 'sm' }), 'Revenue by Event'),
       el('div', { class: 'partner-detail-page__chart-empty' }, 'No event-sourced revenue yet'),
     );
   }
@@ -3142,7 +3148,7 @@ function buildPartnerRevenueByEvent(partnerEvents, opportunities) {
   });
 
   return el('div', { class: 'partner-detail-page__chart-card' },
-    el('div', { class: 'partner-detail-page__chart-title' }, 'Revenue by Event'),
+    el('div', { class: 'partner-detail-page__chart-title' }, sectionIcon('chart', 'orange', { size: 'sm' }), 'Revenue by Event'),
     el('div', { class: 'partner-detail-page__chart-subtitle' }, 'Pipeline from demand gen events'),
     el('div', { class: 'partner-detail-page__bar-list' }, ...rows),
   );
@@ -3158,6 +3164,7 @@ function buildUpcomingEventsSection(allEvents, partner, container) {
   return el('div', { class: 'partner-detail-page__section' },
     el('div', { class: 'partner-detail-page__section-header' },
       el('div', { class: 'partner-detail-page__section-title' },
+        sectionIcon('calendar', 'red', { size: 'sm' }),
         'Upcoming Joint Events',
         el('span', { class: 'partner-detail-page__section-subtitle' },
           `${upcomingEvents.length} upcoming \u00B7 ${completedCount} completed \u00B7 ${allEvents.length} total`,

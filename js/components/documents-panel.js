@@ -25,6 +25,7 @@ import { showToast } from './toast.js';
 import { fileApiRequest } from '../utils/file-api.js';
 import { createPill, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
 import { legacyRowBelongsTo } from '../utils/file-store-keys.js';
+import { sectionIcon } from './section-icon.js';
 
 const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.csv', '.pptx', '.png', '.jpg', '.jpeg'];
 
@@ -337,7 +338,7 @@ export function buildDocumentsPanel({
   const panel = el('div', { class: 'descriptions-panel documents-panel' },
     el('div', { class: 'descriptions-panel__header' },
       el('div', { class: 'descriptions-panel__title-group' },
-        el('h3', { class: 'descriptions-panel__title' }, 'Documents'),
+        el('h3', { class: 'descriptions-panel__title' }, sectionIcon('folder', 'indigo', { size: 'sm' }), 'Documents'),
         countBadge,
       ),
     ),
