@@ -1,12 +1,13 @@
 // ============================================================
-// Partner Next Steps — sheet contract, strict parser, dedupe/merge helpers
+// Partner Next Steps — sheet contract, strict parser, run-log grouping
 // ============================================================
-// Powers the "Next Steps" section on the Partner Detail page: a mutual
-// action plan distilled from the description notes the USER SELECTED, plus
-// any steps typed in by hand. Each row is a milestone of the plan — what
-// must happen, who owns it (Recast / the partner / both teams), its target
-// timing, and a one-word status — rendered top-to-bottom in plan order.
-// Analysis rows and manual rows live side by side, each carrying its own
+// Powers the "Next Steps" section on the Partner Detail page: a log of
+// mutual-action-plan analyses, each distilled from the description notes
+// the USER SELECTED, plus any steps typed in by hand. Each row is a
+// milestone of a plan — what must happen, who owns it (Recast / the
+// partner / both teams), its target timing, and a one-word status —
+// rendered top-to-bottom in plan order inside its run's entry. Analysis
+// rows and manual rows live in sibling log entries, each carrying its own
 // provenance.
 //
 // ACCURACY CONTRACT (the reason this module exists):
@@ -34,13 +35,15 @@
 //     the provenance shown in the table can always be checked by opening
 //     that very note.
 //
-// LIVING-PLAN RULE (dedupe + merge):
-// A re-analysis APPENDS new steps (the plan grows as notes reveal new
-// gates) and MOVES existing rows forward: when the newest notes progress a
-// step's status or firm up its date, the saved row is updated in place —
-// completed rows are never removed, they are the visual record of momentum.
-// Proposals are deduped within one reply and against the rows already
-// saved, matching on normalized step text.
+// ANALYSIS-LOG RULE (repeatable runs):
+// Every Analyze run is APPENDED to the log as its own complete snapshot:
+// all of the run's verified steps are saved as new rows sharing one
+// analyzed_at stamp — the run's identity — and rows saved by earlier runs
+// are never touched, so each log entry stays exactly as it was produced.
+// groupNextStepsIntoRuns rebuilds the entries from the flat sheet: one
+// group per analyzed_at stamp (newest run first) plus one group for the
+// hand-added rows. Proposals are still deduped WITHIN one reply, matching
+// on normalized step text.
 //
 // No DOM, no network — fully testable under Node.
 // ============================================================
@@ -61,20 +64,27 @@ import { snippetFoundInText } from './partner-contacts.js';
 //   source_dates  the dates of the description notes the step came from,
 //                 semicolon-separated ('' for manual rows)
 //   evidence      the verbatim note snippet that grounds the step ('' manual)
-//   analyzed_at   ISO datetime of the Analyze run ('' for manual rows)
+//   analyzed_at   ISO datetime of the Analyze run ('' for manual rows) —
+//                 shared by every row of one run, it is the run's identity
+//                 in the analysis log
 //   owner         who is responsible — "Recast", "<Partner> (Name)", "Both teams"
 //   status        one word from NEXT_STEP_STATUSES, or ''
 //   timing        relative timing stated by the notes ("Post-ARB approval")
 //                 for steps with no calendar date
 //   kind          'gate' (major milestone / approval gate) or 'step'
-// The four plan columns are APPENDED after the original schema — that is
-// what lets ensureSheetWithHeaders extend an existing tab's header row in
-// place without moving any data column.
+//   source_ids    transcript_id(s) of the note(s) the step was verified
+//                 against, semicolon-separated ('' for manual rows) — what
+//                 lets the table's provenance chips open the very note
+// The plan columns and source_ids are APPENDED after the original schema —
+// that is what lets ensureSheetWithHeaders extend an existing tab's header
+// row in place without moving any data column; older rows read back with
+// the new cells empty.
 export const PARTNER_NEXT_STEP_HEADERS = [
   'step_id', 'partner_id', 'partner_name',
   'next_step', 'due_date', 'source', 'source_dates', 'evidence',
   'analyzed_at', 'created_at', 'updated_at',
   'owner', 'status', 'timing', 'kind',
+  'source_ids',
 ];
 
 export const NEXT_STEP_SOURCES = new Set(['analysis', 'manual']);
@@ -328,85 +338,52 @@ export function parsePartnerNextStepsResponse(rawText, { sources = [], truncated
   };
 }
 
-/**
- * Did this proposal move a saved step forward? Progression means the newest
- * notes changed its state — a new status ("In Progress" → "Complete") or a
- * date that firmed up or moved. A mere rewording of owner or timing text is
- * NOT progression: it would churn the sheet on every re-analysis.
- */
-export function nextStepProgressed(existing, proposed) {
-  const e = existing || {};
-  const p = proposed || {};
-  const pStatus = normalizeNextStepStatus(p.status);
-  const eStatus = normalizeNextStepStatus(e.status);
-  if (pStatus && pStatus !== eStatus) return true;
-  const pDue = isoDateOrEmpty(p.due_date);
-  if (pDue && pDue !== isoDateOrEmpty(e.due_date)) return true;
-  return false;
-}
+// ── The analysis log ────────────────────────────────────────────────
 
 /**
- * Split freshly verified proposals against the saved plan — the living-plan
- * rule. Matches on normalized step text:
- *   fresh    not on the plan yet → append (the plan grows);
- *   updates  already on the plan AND the newest notes progressed it (see
- *            nextStepProgressed) → move the saved row forward in place;
- *   skipped  already on the plan, unchanged → nothing to do.
- * Rows are never removed here — completed steps stay as the record of
- * momentum.
+ * The grouping key of the hand-added entry in the analysis log. Distinct
+ * from every run key by construction: run keys are ISO datetimes.
  */
-export function dedupeNextSteps(existingSteps, proposedSteps) {
-  const byKey = new Map();
-  for (const s of existingSteps || []) {
-    const key = normalizeStepKey(s && s.next_step);
-    if (key && !byKey.has(key)) byKey.set(key, s);
-  }
-  const known = new Set(byKey.keys());
-  const fresh = [];
-  const updates = [];
-  const skipped = [];
-  for (const p of proposedSteps || []) {
-    const key = normalizeStepKey(p && p.next_step);
-    if (!key) continue;
-    if (known.has(key)) {
-      const existing = byKey.get(key);
-      if (existing && nextStepProgressed(existing, p)) updates.push({ existing, proposed: p });
-      else skipped.push(p);
-      continue;
+export const MANUAL_STEPS_GROUP_KEY = 'manual';
+
+/**
+ * Rebuild the analysis log from a partner's flat saved steps: one group per
+ * Analyze run — every row stamped with that run's analyzed_at, in stored
+ * (plan) order — newest run first, plus one group holding the hand-added
+ * rows, pinned before the runs. A run is never mutated after it is saved,
+ * so the groups reproduce each run's table exactly as it was produced.
+ *
+ * Rows without a usable run stamp (source not 'analysis', or an empty
+ * analyzed_at on a hand-typed sheet row) belong to the manual group — a
+ * row can never be silently dropped for having odd provenance cells.
+ *
+ * @returns {Array<{ key: string, analyzed_at: string, manual: boolean, steps: Array }>}
+ */
+export function groupNextStepsIntoRuns(steps) {
+  const manual = [];
+  const runsByStamp = new Map();
+  for (const s of steps || []) {
+    if (!s) continue;
+    const stamp = String(s.analyzed_at || '').trim();
+    if (s.source === 'analysis' && stamp) {
+      if (!runsByStamp.has(stamp)) runsByStamp.set(stamp, []);
+      runsByStamp.get(stamp).push(s);
+    } else {
+      manual.push(s);
     }
-    known.add(key);
-    fresh.push(p);
   }
-  return { fresh, updates, skipped };
-}
-
-/**
- * Merge a progressed proposal into the SAVED record (pure — the caller
- * writes the result). Conservative by design:
- *   • the step's identity — text, ids, created_at — is untouched;
- *   • a non-empty proposed value replaces the stored one; an empty proposal
- *     never blanks a field the plan already knows;
- *   • 'gate' is sticky: once a row is a major milestone it stays one;
- *   • evidence and source_dates refresh to the newest analysis (the
- *     consolidation rule: cite the most recent note), and the analysis
- *     stamp records that this run touched the row.
- */
-export function mergeNextStepUpdate(record, proposed, { analyzedAt = '', sourceDates = '' } = {}) {
-  const r = record || {};
-  const p = proposed || {};
-  const pStatus = normalizeNextStepStatus(p.status);
-  return {
-    ...r,
-    status: pStatus || normalizeNextStepStatus(r.status),
-    due_date: isoDateOrEmpty(p.due_date) || isoDateOrEmpty(r.due_date),
-    timing: (typeof p.timing === 'string' && p.timing.trim()) ? p.timing.trim() : (r.timing || ''),
-    owner: (typeof p.owner === 'string' && p.owner.trim()) ? p.owner.trim() : (r.owner || ''),
-    kind: (normalizeNextStepKind(p.kind) === 'gate' || normalizeNextStepKind(r.kind) === 'gate') ? 'gate' : 'step',
-    evidence: p.evidence || r.evidence || '',
-    source_dates: sourceDates || r.source_dates || '',
-    analyzed_at: analyzedAt || r.analyzed_at || '',
-    updated_at: analyzedAt || r.updated_at || '',
-  };
+  const runs = [...runsByStamp.entries()]
+    .map(([stamp, group]) => ({ key: stamp, analyzed_at: stamp, manual: false, steps: group }))
+    // Newest run first; the lexicographic fallback keeps distinct stamps
+    // that parse identically (or not at all) in a deterministic order.
+    .sort((a, b) =>
+      ((Date.parse(b.analyzed_at) || 0) - (Date.parse(a.analyzed_at) || 0))
+      || (a.analyzed_at < b.analyzed_at ? 1 : a.analyzed_at > b.analyzed_at ? -1 : 0));
+  const groups = [];
+  if (manual.length) {
+    groups.push({ key: MANUAL_STEPS_GROUP_KEY, analyzed_at: '', manual: true, steps: manual });
+  }
+  return groups.concat(runs);
 }
 
 // ── Storage mapping ─────────────────────────────────────────────────
@@ -430,6 +407,9 @@ export function nextStepRowValues(record) {
     status: normalizeNextStepStatus(r.status),
     timing: r.timing || '',
     kind: normalizeNextStepKind(r.kind),
+    // In memory an array (as the parser emits it); on the sheet a
+    // '; '-joined cell, mirroring source_dates.
+    source_ids: Array.isArray(r.source_ids) ? r.source_ids.join('; ') : (r.source_ids || ''),
   };
   return PARTNER_NEXT_STEP_HEADERS.map(h => String(cells[h] == null ? '' : cells[h]));
 }
@@ -459,18 +439,21 @@ export function nextStepFromRow(row) {
     status: normalizeNextStepStatus(cell('status')),
     timing: cell('timing'),
     kind: normalizeNextStepKind(cell('kind')),
+    // Rows saved before the column existed read back as [] — the chips
+    // then fall back to date-matching for their note links.
+    source_ids: cell('source_ids').split(';').map(s => s.trim()).filter(Boolean),
   };
 }
 
 /**
- * This partner's saved steps, in PLAN ORDER — the stored row order, kept
- * exactly. The analysis emits steps in the plan's sequence (each approval
+ * This partner's saved steps, in stored row order — kept exactly. Each
+ * analysis run appends its steps in the plan's sequence (each approval
  * gate in the order the notes describe it, budget before POC, the standard
- * tail), appends preserve that sequence, and later-discovered milestones
- * append as the plan grows. A date re-sort would scramble it: "Contract
- * signature — post-POC" has no calendar date yet belongs after the POC
- * rows, not floated above or below them. Strictly matched on partner_id;
- * rows without a step text are ignored.
+ * tail), so within every log entry the stored order IS the plan order. A
+ * date re-sort would scramble it: "Contract signature — post-POC" has no
+ * calendar date yet belongs after the POC rows, not floated above or below
+ * them. Strictly matched on partner_id; rows without a step text are
+ * ignored. groupNextStepsIntoRuns splits the result into the log's entries.
  */
 export function selectPartnerNextSteps(rows, partnerId) {
   const id = String(partnerId || '').trim();

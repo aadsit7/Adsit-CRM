@@ -741,8 +741,8 @@ export const SHEET_HEADERS = {
   // Analyze button on the partner page. Header lives with the parser/storage
   // contract so the two can never drift apart.
   [CONFIG.SHEET_PARTNER_BIOS]: PARTNER_BIO_HEADERS,
-  // Partner_Next_Steps: the forward agenda on the partner page — analyzed
-  // from selected description notes or added by hand. Header lives with the
+  // Partner_Next_Steps: the analysis log on the partner page — every
+  // Analyze run's snapshot plus hand-added steps. Header lives with the
   // parser/storage contract so the two can never drift apart.
   [CONFIG.SHEET_PARTNER_NEXT_STEPS]: PARTNER_NEXT_STEP_HEADERS,
   [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at', 'provider'],
@@ -1161,7 +1161,7 @@ let demoNextSteps = [
 // ============================================
 
 const DEMO_STORAGE_KEY = 'pp_demo_data';
-const DEMO_SCHEMA_VERSION = 20; // Bump when demo data structure changes
+const DEMO_SCHEMA_VERSION = 21; // Bump when demo data structure changes
 
 function persistDemoData() {
   try {

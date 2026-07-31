@@ -1,7 +1,8 @@
-// Tests for the Partner Next Steps parser, dedupe and storage contract
-// (js/utils/partner-next-steps-schema.js). The parser — not the model — is
-// what guarantees the agenda never shows a step the selected notes don't
-// support word-for-word, a guessed date, or a duplicate row after Re-analyze.
+// Tests for the Partner Next Steps parser, run-log grouping and storage
+// contract (js/utils/partner-next-steps-schema.js). The parser — not the
+// model — is what guarantees an analysis entry never shows a step the
+// selected notes don't support word-for-word or a guessed date, and the
+// grouping is what turns the flat sheet back into the analysis log.
 import './_setup.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,14 +11,13 @@ import {
   PARTNER_NEXT_STEP_HEADERS,
   NEXT_STEP_STATUSES,
   NEXT_STEPS_SCHEMA_EXAMPLE,
+  MANUAL_STEPS_GROUP_KEY,
   isoDateOrEmpty,
   normalizeStepKey,
   normalizeNextStepStatus,
   normalizeNextStepKind,
   parsePartnerNextStepsResponse,
-  dedupeNextSteps,
-  nextStepProgressed,
-  mergeNextStepUpdate,
+  groupNextStepsIntoRuns,
   nextStepRowValues,
   nextStepFromRow,
   selectPartnerNextSteps,
@@ -368,95 +368,59 @@ test('duplicate steps within one reply collapse to one', () => {
   assert.equal(result.steps.length, 1);
 });
 
-// ── The living-plan rule (dedupe + merge) ────────────────────────────
-test('dedupeNextSteps splits proposals into fresh, updates and skipped', () => {
-  const existing = [
-    { step_id: 'pns_1', next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team.', status: 'In Progress', due_date: '' },
-    { step_id: 'pns_2', next_step: 'Complete the security questionnaire.', status: 'Scheduled', due_date: '2026-08-01' },
+// ── The analysis log (run grouping) ──────────────────────────────────
+test('groupNextStepsIntoRuns rebuilds the log: one group per run, newest first', () => {
+  const steps = [
+    // First run — two rows sharing one stamp, in plan order.
+    { step_id: 's1', next_step: 'Budget approval', source: 'analysis', analyzed_at: '2026-07-01T10:00:00.000Z' },
+    { step_id: 's2', next_step: 'POC kickoff', source: 'analysis', analyzed_at: '2026-07-01T10:00:00.000Z' },
+    // Second run, later the same month.
+    { step_id: 's3', next_step: 'Budget approval', source: 'analysis', analyzed_at: '2026-07-20T09:30:00.000Z' },
+    { step_id: 's4', next_step: 'POC validation', source: 'analysis', analyzed_at: '2026-07-20T09:30:00.000Z' },
+    // A hand-added row between the runs.
+    { step_id: 's5', next_step: 'Send the recap deck', source: 'manual', analyzed_at: '' },
   ];
-  const proposed = [
-    // Same step, trailing period differs, and the newest notes say it is DONE.
-    { next_step: 'Schedule the professional services demo of Application Workspace for the Insight services team', status: 'Complete', due_date: '' },
-    // Same step, same state — nothing to do.
-    { next_step: 'Complete the security questionnaire.', status: 'Scheduled', due_date: '2026-08-01' },
-    { next_step: 'A genuinely new step.', status: 'Pending', due_date: '' },
-  ];
-  const { fresh, updates, skipped } = dedupeNextSteps(existing, proposed);
-  assert.equal(fresh.length, 1);
-  assert.equal(fresh[0].next_step, 'A genuinely new step.');
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].existing.step_id, 'pns_1');
-  assert.equal(updates[0].proposed.status, 'Complete');
-  assert.equal(skipped.length, 1);
+  const groups = groupNextStepsIntoRuns(steps);
+  assert.equal(groups.length, 3);
+
+  // The hand-added entry is pinned first…
+  assert.equal(groups[0].key, MANUAL_STEPS_GROUP_KEY);
+  assert.equal(groups[0].manual, true);
+  assert.deepEqual(groups[0].steps.map(s => s.step_id), ['s5']);
+
+  // …then the runs, newest first, each keeping its rows' stored order.
+  assert.equal(groups[1].analyzed_at, '2026-07-20T09:30:00.000Z');
+  assert.deepEqual(groups[1].steps.map(s => s.step_id), ['s3', 's4']);
+  assert.equal(groups[2].analyzed_at, '2026-07-01T10:00:00.000Z');
+  assert.deepEqual(groups[2].steps.map(s => s.step_id), ['s1', 's2']);
+
+  // A step both runs proposed lives in BOTH entries — a re-analysis is a
+  // snapshot, never an eraser of what an earlier run recorded.
+  assert.equal(groups[1].steps[0].next_step, 'Budget approval');
+  assert.equal(groups[2].steps[0].next_step, 'Budget approval');
 });
 
-test('nextStepProgressed fires on status moves and date changes, not on rewording', () => {
-  // Status moved forward.
-  assert.equal(nextStepProgressed({ status: 'In Progress' }, { status: 'Complete' }), true);
-  // Date firmed up on a row that had none.
-  assert.equal(nextStepProgressed({ status: 'Scheduled', due_date: '' }, { status: 'Scheduled', due_date: '2026-09-01' }), true);
-  // Date moved.
-  assert.equal(nextStepProgressed({ due_date: '2026-08-01' }, { due_date: '2026-09-01' }), true);
-  // Same state — no churn.
-  assert.equal(nextStepProgressed({ status: 'Pending', due_date: '' }, { status: 'Pending', due_date: '' }), false);
-  // An empty proposal never counts as progression (it would blank the plan).
-  assert.equal(nextStepProgressed({ status: 'Complete' }, { status: '' }), false);
-  // Owner/timing rewording alone is not progression.
-  assert.equal(nextStepProgressed({ status: 'Pending', owner: 'Recast' }, { status: 'Pending', owner: 'Recast (Aaron)' }), false);
+test('rows without a usable run stamp land in the hand-added group, never vanish', () => {
+  const groups = groupNextStepsIntoRuns([
+    // Hand-typed into the sheet as analysis but with no stamp.
+    { step_id: 'x1', next_step: 'Odd row', source: 'analysis', analyzed_at: '' },
+    { step_id: 'x2', next_step: 'Manual row', source: 'manual', analyzed_at: '' },
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].key, MANUAL_STEPS_GROUP_KEY);
+  assert.deepEqual(groups[0].steps.map(s => s.step_id), ['x1', 'x2']);
 });
 
-test('mergeNextStepUpdate moves the row forward without rewriting its identity', () => {
-  const record = {
-    step_id: 'pns_1',
-    partner_id: 'p_1',
-    next_step: 'Schedule the demo.',
-    status: 'In Progress',
-    due_date: '',
-    owner: '',
-    timing: 'After the security review',
-    kind: 'step',
-    evidence: 'old snippet from the June note',
-    source_dates: '2026-06-12',
-    analyzed_at: '2026-06-12T10:00:00.000Z',
-    created_at: '2026-06-12T10:00:00.000Z',
-    updated_at: '2026-06-12T10:00:00.000Z',
-  };
-  const proposed = {
-    next_step: 'Schedule the demo',
-    status: 'Complete',
-    due_date: '2026-07-20',
-    owner: 'Recast',
-    timing: '',
-    kind: 'gate',
-    evidence: 'the demo ran on July 20 with the full services team',
-  };
-  const merged = mergeNextStepUpdate(record, proposed, { analyzedAt: '2026-07-30T09:00:00.000Z', sourceDates: '2026-07-17' });
-  // Identity untouched.
-  assert.equal(merged.step_id, 'pns_1');
-  assert.equal(merged.next_step, 'Schedule the demo.');
-  assert.equal(merged.created_at, '2026-06-12T10:00:00.000Z');
-  // Progressed fields move; empty proposals never blank stored values.
-  assert.equal(merged.status, 'Complete');
-  assert.equal(merged.due_date, '2026-07-20');
-  assert.equal(merged.owner, 'Recast');
-  assert.equal(merged.timing, 'After the security review');
-  // Gate is sticky in the promoting direction.
-  assert.equal(merged.kind, 'gate');
-  // Provenance refreshes to the newest analysis.
-  assert.equal(merged.evidence, 'the demo ran on July 20 with the full services team');
-  assert.equal(merged.source_dates, '2026-07-17');
-  assert.equal(merged.analyzed_at, '2026-07-30T09:00:00.000Z');
-  assert.equal(merged.updated_at, '2026-07-30T09:00:00.000Z');
-});
-
-test('mergeNextStepUpdate never downgrades a gate to a step', () => {
-  const merged = mergeNextStepUpdate(
-    { next_step: 'Budget approval.', kind: 'gate', status: 'Pending' },
-    { next_step: 'Budget approval.', kind: 'step', status: 'Complete' },
-    { analyzedAt: '2026-07-30T09:00:00.000Z' },
-  );
-  assert.equal(merged.kind, 'gate');
-  assert.equal(merged.status, 'Complete');
+test('groupNextStepsIntoRuns with no manual rows starts at the newest run', () => {
+  const groups = groupNextStepsIntoRuns([
+    { step_id: 'a', next_step: 'One', source: 'analysis', analyzed_at: '2026-06-01T08:00:00.000Z' },
+    { step_id: 'b', next_step: 'Two', source: 'analysis', analyzed_at: '2026-07-01T08:00:00.000Z' },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].manual, false);
+  assert.equal(groups[0].analyzed_at, '2026-07-01T08:00:00.000Z');
+  assert.equal(groups[1].analyzed_at, '2026-06-01T08:00:00.000Z');
+  assert.equal(groupNextStepsIntoRuns([]).length, 0);
 });
 
 test('normalizeStepKey treats case, whitespace and trailing periods as one identity', () => {
@@ -482,9 +446,12 @@ test('row values follow the header order and round-trip through nextStepFromRow'
     status: 'Scheduled',
     timing: 'Post-ARB approval',
     kind: 'gate',
+    source_ids: ['trn_1', 'trn_2'],
   };
   const values = nextStepRowValues(record);
   assert.equal(values.length, PARTNER_NEXT_STEP_HEADERS.length);
+  // The in-memory array is stored as a '; '-joined cell, like source_dates.
+  assert.equal(values[PARTNER_NEXT_STEP_HEADERS.indexOf('source_ids')], 'trn_1; trn_2');
 
   const row = Object.fromEntries(PARTNER_NEXT_STEP_HEADERS.map((h, i) => [h, values[i]]));
   const back = nextStepFromRow(row);
@@ -498,6 +465,7 @@ test('row values follow the header order and round-trip through nextStepFromRow'
   assert.equal(back.status, 'Scheduled');
   assert.equal(back.timing, 'Post-ARB approval');
   assert.equal(back.kind, 'gate');
+  assert.deepEqual(back.source_ids, ['trn_1', 'trn_2']);
 });
 
 test('a row with no source column infers analysis vs manual from analyzed_at', () => {
@@ -512,12 +480,15 @@ test('hand-edited garbage cells in the sheet read back as empty/canonical, never
   assert.equal(nextStepFromRow({ next_step: 'x', status: 'Blocked!!' }).status, '');
   assert.equal(nextStepFromRow({ next_step: 'x', status: 'completed' }).status, 'Complete');
   assert.equal(nextStepFromRow({ next_step: 'x', kind: 'huge' }).kind, 'step');
-  // Pre-MAP rows (no plan columns at all) degrade cleanly.
+  // Pre-MAP rows (no plan columns at all) degrade cleanly — including a
+  // missing source_ids column, which reads back as an empty list so the
+  // provenance chips fall back to date matching.
   const legacy = nextStepFromRow({ next_step: 'x' });
   assert.equal(legacy.owner, '');
   assert.equal(legacy.status, '');
   assert.equal(legacy.timing, '');
   assert.equal(legacy.kind, 'step');
+  assert.deepEqual(legacy.source_ids, []);
 });
 
 // ── Plan selection & ordering ────────────────────────────────────────
