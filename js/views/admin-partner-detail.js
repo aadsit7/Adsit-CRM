@@ -1248,6 +1248,157 @@ function buildNextStepsRunEntry(partner, group, transcripts, defaultOpen) {
   return el('div', { class: 'partner-next-steps__entry' }, header, body);
 }
 
+// ── Copy for email ───────────────────────────────────────────────────
+// The header's little copy button puts the plan as it currently stands —
+// the hand-added steps plus the latest analysis run, in the order the
+// section shows them — on the clipboard in BOTH flavors: an inline-styled
+// HTML table that pastes nicely into Gmail/Outlook, and a tab-separated
+// plain-text fallback for plain-text composers (and spreadsheets). The
+// email table carries only the client-safe plan columns — Milestone,
+// Owner, Target, Status; the check-off box, provenance chips and row
+// actions are internal UI and deliberately stay out of it.
+
+/** The steps the copy button copies: hand-added first (as pinned in the
+ *  section), then the newest analysis run — the current plan. Older runs
+ *  are historical snapshots and stay out of the email. */
+function nextStepsEmailSteps(groups) {
+  const manual = groups.find(g => g.manual);
+  const newestRun = groups.find(g => !g.manual);
+  return [...(manual ? manual.steps : []), ...(newestRun ? newestRun.steps : [])];
+}
+
+/** The Target column's text, exactly as the on-screen table words it. */
+function nextStepEmailTargetLabel(step) {
+  if (step.due_date) return formatDate(step.due_date);
+  if (step.timing) return step.timing;
+  return 'To be scheduled';
+}
+
+/**
+ * The HTML clipboard flavor: a title line and a bordered table. Every
+ * style is inline (email clients strip classes and stylesheets on paste)
+ * and the palette mirrors the section's MAP colors — complete green,
+ * active amber, pending dark, no red anywhere.
+ */
+function buildNextStepsEmailHtml(partner, steps) {
+  const cell = 'border:1px solid #DCE1EC;padding:6px 10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#171D2B;vertical-align:top;text-align:left;';
+  const head = `${cell}background-color:#F5F7FC;font-weight:700;font-size:12px;`;
+  const muted = '<span style="color:#8A93A6;">&mdash;</span>';
+  const statusColor = (status) => {
+    if (status === 'Complete') return '#0F7A3F';
+    if (status === 'Pending') return '#1A1A2E';
+    return '#CC8800'; // In Progress / Next / Scheduled
+  };
+
+  const rows = steps.map(step => {
+    const rowCell = step.status === 'Complete' ? `${cell}background-color:#F0FFF0;` : cell;
+    const milestone = step.kind === 'gate'
+      ? `<strong>${escapeHtml(step.next_step)}</strong>`
+      : escapeHtml(step.next_step);
+    const target = step.due_date
+      ? `<span style="font-weight:600;">${escapeHtml(formatDate(step.due_date))}</span>`
+      : (step.timing
+          ? escapeHtml(step.timing)
+          : '<span style="color:#8A93A6;font-style:italic;">To be scheduled</span>');
+    const status = step.status
+      ? `<strong style="color:${statusColor(step.status)};">${escapeHtml(step.status)}</strong>`
+      : muted;
+    return '<tr>'
+      + `<td style="${rowCell}">${milestone}</td>`
+      + `<td style="${rowCell}">${step.owner ? escapeHtml(step.owner) : muted}</td>`
+      + `<td style="${rowCell}">${target}</td>`
+      + `<td style="${rowCell}">${status}</td>`
+      + '</tr>';
+  }).join('');
+
+  return `<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#171D2B;"><strong>Next Steps &mdash; ${escapeHtml(partner.display_name || 'Partner')}</strong></p>`
+    + '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+    + '<thead><tr>'
+    + `<th style="${head}">Milestone</th>`
+    + `<th style="${head}">Owner</th>`
+    + `<th style="${head}">Target</th>`
+    + `<th style="${head}">Status</th>`
+    + '</tr></thead>'
+    + `<tbody>${rows}</tbody>`
+    + '</table>';
+}
+
+/** The plain-text clipboard flavor: the title, then a tab-separated table
+ *  (which plain-text composers keep readable and spreadsheets split into
+ *  columns). Fields are flattened to single lines so a wrapped milestone
+ *  cannot break a row. */
+function buildNextStepsEmailText(partner, steps) {
+  const clean = v => String(v || '').replace(/\s+/g, ' ').trim();
+  return [
+    `Next Steps — ${clean(partner.display_name) || 'Partner'}`,
+    '',
+    ['Milestone', 'Owner', 'Target', 'Status'].join('\t'),
+    ...steps.map(step => [
+      clean(step.next_step),
+      clean(step.owner) || '—',
+      clean(nextStepEmailTargetLabel(step)),
+      clean(step.status) || '—',
+    ].join('\t')),
+  ].join('\n');
+}
+
+async function copyNextStepsForEmail(partner, groups) {
+  const steps = nextStepsEmailSteps(groups);
+  if (!steps.length) {
+    showToast('No next steps to copy yet', 'info');
+    return;
+  }
+  const html = buildNextStepsEmailHtml(partner, steps);
+  const text = buildNextStepsEmailText(partner, steps);
+  const copied = () => showToast('Next steps copied — paste the table into your email', 'success');
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+        }),
+      ]);
+      copied();
+      return;
+    }
+    throw new Error('rich clipboard unavailable');
+  } catch {
+    // The async Clipboard API needs a secure context; selecting a hidden
+    // node that holds the same table lets execCommand('copy') capture the
+    // HTML flavor over plain http and in older browsers.
+    try {
+      const host = document.createElement('div');
+      host.setAttribute('contenteditable', 'true');
+      host.style.position = 'fixed';
+      host.style.top = '0';
+      host.style.left = '-9999px';
+      host.style.opacity = '0';
+      host.innerHTML = html;
+      document.body.appendChild(host);
+      const range = document.createRange();
+      range.selectNodeContents(host);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const ok = document.execCommand('copy');
+      selection.removeAllRanges();
+      document.body.removeChild(host);
+      if (!ok) throw new Error('copy command refused');
+      copied();
+    } catch {
+      // Last resort: at least the plain-text table.
+      try {
+        await navigator.clipboard.writeText(text);
+        copied();
+      } catch {
+        showToast('Could not copy the next steps', 'error');
+      }
+    }
+  }
+}
+
 function buildNextStepsSection(partner, steps, transcripts) {
   const isOpen = !collapsedNextStepsSections.has(partner.partner_id);
   const groups = groupNextStepsIntoRuns(steps);
@@ -1305,6 +1456,21 @@ function buildNextStepsSection(partner, steps, transcripts) {
       chevron,
     ),
     el('div', { class: 'partner-detail-page__section-actions' },
+      // The little copy button: the current plan (hand-added steps plus the
+      // latest analysis) as a table that pastes nicely into an email.
+      groups.length > 0
+        ? el('button', {
+            type: 'button',
+            class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary partner-detail-page__section-cta--icon',
+            title: 'Copy all next steps as a table that pastes nicely into an email',
+            'aria-label': 'Copy next steps for email',
+            'data-label': 'Copy',
+            onClick: (e) => {
+              e.stopPropagation();
+              copyNextStepsForEmail(partner, groups);
+            },
+          }, el('span', { class: 'cta-glyph', html: ICONS.copy }))
+        : null,
       el('button', {
         class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
         onClick: (e) => {
