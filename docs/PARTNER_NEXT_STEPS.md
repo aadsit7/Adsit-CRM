@@ -8,8 +8,13 @@ per milestone, with a check-off box, the milestone itself (major gates
 bold), its owner, its target timing and a one-word status, ordered
 top-to-bottom as the plan runs. Re-analyzing never erases or rewrites an
 earlier entry; it adds a new one. Each entry is rendered as visual text in
-the section — designed to be read (or screen-shared) in a working session,
-not exported.
+the section — designed to be read (or screen-shared) in a working session.
+The one export is the section header's little copy button: it puts the
+plan as it currently stands — the hand-added steps plus the latest
+analysis run — on the clipboard as an inline-styled HTML table (Milestone,
+Owner, Target, Status; gates bold, the MAP status colors) that pastes
+nicely into an email, with a tab-separated plain-text fallback for
+plain-text composers and spreadsheets.
 
 ## How it works
 
@@ -190,7 +195,8 @@ Sheet creates it and keeps its header row in sync.
 - `js/views/admin-partner-detail.js` — the section, its log entries
   (per-run dropdowns with remembered open state), selection modal, run
   orchestration (global Randy pill progress), the note-opening From chips
-  and read-only note viewer, live check-off, Add Step and Delete.
+  and read-only note viewer, live check-off, Add Step, Delete and the
+  copy-for-email button (HTML + plain-text clipboard flavors).
 - `css/partner-next-steps.css` — the log entries, the plan table (status
   pills, completed tint, check-off box — and deliberately no red), the
   note-link chips, section and modal styling.
