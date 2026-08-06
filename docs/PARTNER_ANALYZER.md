@@ -60,7 +60,8 @@ tests are all keyed on them.
 ### Tier / status are NOT maturity
 
 The Partners sheet's `tier` (Registered · Value/Preferred · Premier/Strategic)
-and `status` (engaged · active · inactive) are **CRM classifications**, not the
+and `status` (targeting · engaged · active · inactive) are **CRM
+classifications**, not the
 maturity stage. Nothing derives a maturity criterion from tier, status, account
 age, or the mere existence of later‑stage activity. The summary surfaces a
 deterministic discrepancy note when a high tier is not yet backed by evidence,
