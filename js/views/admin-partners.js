@@ -16,6 +16,11 @@ import { setTopbarTitle } from '../components/sidebar.js';
 import { filterPartners } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { ICONS, iconButton } from '../components/icon-button.js';
+import { sectionIcon } from '../components/section-icon.js';
+import {
+  PARTNER_STATUSES, DEFAULT_PARTNER_STATUS, statusSlug, statusLabel,
+  partnerStatus, partnerStatusOptions, matchesStatus,
+} from '../utils/partner-status.js';
 
 export const title = 'Partners';
 
@@ -147,66 +152,78 @@ function partnerInitials(name) {
 // Main View
 // ============================================
 
-const VIEW_STORAGE_KEY = 'admin-partners-view';
+// The status dropdown persists the same way the type filter above it does, so
+// a chosen status survives a reload and the re-render that follows every
+// add/edit/delete. The dropdown always shows which status is active (and its
+// count), so a persisted filter can't quietly hide partners.
+const STATUS_FILTER_KEY = 'admin-partners-status-filter';
 
-function loadActiveView() {
+function loadStatusFilter() {
   try {
-    const saved = localStorage.getItem(VIEW_STORAGE_KEY);
-    return saved === 'card' ? 'card' : 'list';
+    return statusSlug(localStorage.getItem(STATUS_FILTER_KEY) || '');
   } catch {
-    return 'list';
+    return '';
   }
 }
 
-function saveActiveView(view) {
-  try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch {}
+function saveStatusFilter(status) {
+  try { localStorage.setItem(STATUS_FILTER_KEY, status || ''); } catch {}
 }
+
+// Search + status filtering, split out of the render closure so the page's
+// filter behavior can be exercised without a DOM — see __partnerViewInternals.
+function applyPartnerFilters(partners, { search = '', status = '' } = {}) {
+  const q = search.trim().toLowerCase();
+  return partners.filter(p => {
+    if (!matchesStatus(p, status)) return false;
+    if (!q) return true;
+    return [p.display_name, p.username, p.partner_type, p.region, p.hq_location]
+      .some(v => v?.toLowerCase().includes(q));
+  });
+}
+
+export const __partnerViewInternals = { applyPartnerFilters };
 
 function renderView(container, partners, filterBar) {
   let searchQuery = '';
-  let activeView = loadActiveView();
+  let statusFilter = loadStatusFilter();
 
   function applyFilters() {
-    let result = [...partners];
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(p =>
-        p.display_name?.toLowerCase().includes(q) ||
-        p.username?.toLowerCase().includes(q) ||
-        p.partner_type?.toLowerCase().includes(q) ||
-        p.region?.toLowerCase().includes(q) ||
-        p.hq_location?.toLowerCase().includes(q)
-      );
-    }
-    return result;
+    return applyPartnerFilters(partners, { search: searchQuery, status: statusFilter });
   }
 
-  const listBtn = el('button', { class: 'btn btn--sm', onClick: () => switchView('list') }, 'List');
-  const cardBtn = el('button', { class: 'btn btn--sm', onClick: () => switchView('card') }, 'Cards');
+  // Counted from the type-filtered list this view was handed, so each option
+  // states exactly how many rows it will leave on screen.
+  const statusSelect = el('select', {
+    class: 'form-select filter-bar__select',
+    'aria-label': 'Filter partners by status',
+    onChange: (e) => {
+      statusFilter = statusSlug(e.target.value);
+      saveStatusFilter(statusFilter);
+      renderContent(applyFilters());
+    },
+  },
+    el('option', { value: '' }, `All Statuses (${partners.length})`),
+    ...partnerStatusOptions(partners, statusFilter)
+      .map(o => el('option', { value: o.value }, `${o.label} (${o.count})`))
+  );
+  // Set after the options exist — el() assigns attributes before children.
+  statusSelect.value = statusFilter;
 
-  function applyToggleClasses() {
-    listBtn.className = activeView === 'list' ? 'btn btn--primary btn--sm' : 'btn btn--secondary btn--sm';
-    cardBtn.className = activeView === 'card' ? 'btn btn--primary btn--sm' : 'btn btn--secondary btn--sm';
-  }
-  applyToggleClasses();
-
-  function switchView(view) {
-    if (view === activeView) return;
-    activeView = view;
-    saveActiveView(view);
-    applyToggleClasses();
-    renderContent(applyFilters());
-  }
+  const subtitle = el('p', { class: 'section-header__subtitle' }, `${partners.length} registered partners`);
 
   const content = el('div', {},
     filterBar,
     el('div', { class: 'section-header' },
       el('div', {},
         el('h2', { class: 'section-header__title' }, 'Partners'),
-        el('p', { class: 'section-header__subtitle' }, `${partners.length} registered partners`)
+        subtitle
       ),
       el('div', { style: { display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' } },
-        el('div', { class: 'view-toggle', style: { marginBottom: '0' } }, listBtn, cardBtn),
+        el('div', { class: 'select-with-icon' },
+          sectionIcon('flag', 'indigo', { size: 'sm' }),
+          statusSelect
+        ),
         el('div', { class: 'search-bar' },
           el('span', { class: 'search-bar__icon', html: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M12.5 12.5L16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' }),
           el('input', {
@@ -236,28 +253,27 @@ function renderView(container, partners, filterBar) {
   renderContent(applyFilters());
 
   function renderContent(filtered) {
+    subtitle.textContent = filtered.length === partners.length
+      ? `${partners.length} registered partners`
+      : `${filtered.length} of ${partners.length} partners`;
+
     const host = $('#partners-view');
     if (!host) return;
     host.innerHTML = '';
-    host.className = '';
 
     if (filtered.length === 0) {
       host.appendChild(
         el('div', { class: 'empty-state' },
           el('div', { class: 'empty-state__title' }, 'No partners found'),
-          el('div', { class: 'empty-state__description' }, 'Try adjusting your search or add a new partner.')
+          el('div', { class: 'empty-state__description' }, statusFilter
+            ? `No ${statusLabel(statusFilter)} partners here. Try another status or clear the search.`
+            : 'Try adjusting your search or add a new partner.')
         )
       );
       return;
     }
 
-    const sorted = sortPartnersByPipeline(filtered);
-    if (activeView === 'list') {
-      host.appendChild(renderList(sorted));
-    } else {
-      host.className = 'partner-card-grid stagger';
-      sorted.forEach(p => host.appendChild(buildPartnerCard(p)));
-    }
+    host.appendChild(renderList(sortPartnersByPipeline(filtered)));
   }
 }
 
@@ -318,7 +334,7 @@ function renderList(partners) {
             el('td', { style: { fontWeight: 'var(--font-semibold)' } }, formatCurrency(pipeline)),
             el('td', {}, wonValue > 0 ? formatCurrency(wonValue) : '—'),
             el('td', {}, String(oppCount)),
-            el('td', {}, el('span', { class: `badge badge--xs badge--${p.status?.toLowerCase() || 'active'}` }, p.status || 'active')),
+            el('td', {}, el('span', { class: `badge badge--xs badge--${partnerStatus(p)}` }, statusLabel(partnerStatus(p)))),
             el('td', {},
               el('div', { class: 'table__actions' },
                 iconButton({
@@ -346,59 +362,6 @@ function renderList(partners) {
         })
       )
     )
-  );
-}
-
-function buildPartnerCard(p) {
-  const tierClass = tierSlug(p.tier);
-  const initials = partnerInitials(p.display_name);
-  const rev = partnerRevenue[p.partner_id];
-  const pipeline = rev ? rev.totalPipeline : 0;
-  const wonValue = rev ? rev.wonValue : 0;
-  const oppCount = rev ? rev.oppCount : 0;
-
-  return el('div', { class: 'partner-mgmt-card' },
-    el('div', { class: 'partner-mgmt-card__header' },
-      el('div', { class: `partner-avatar partner-avatar--${tierClass}` }, initials),
-      el('div', { class: 'partner-mgmt-card__info' },
-        el('div', { class: 'partner-mgmt-card__name' }, p.display_name),
-        el('div', { class: 'partner-mgmt-card__username' }, p.username),
-      ),
-      el('span', { class: `badge badge--${tierClass}` }, p.tier || 'Registered')
-    ),
-    el('div', { class: 'partner-mgmt-card__details' },
-      detailRow('Pipeline', formatCurrency(pipeline)),
-      wonValue > 0 ? detailRow('Won', formatCurrency(wonValue)) : null,
-      detailRow('Opportunities', String(oppCount)),
-      detailRow('Type', p.partner_type || '—'),
-      detailRow('Status', null, el('span', { class: `badge badge--xs badge--${p.status?.toLowerCase() || 'active'}` }, p.status || 'active')),
-    ),
-    el('div', { class: 'partner-mgmt-card__actions' },
-      el('button', {
-        class: 'btn btn--primary btn--sm',
-        style: { flex: '1' },
-        onClick: () => navigate(`/admin/partner-detail?id=${p.partner_id}`),
-      }, 'View'),
-      el('button', {
-        class: 'btn btn--secondary btn--sm',
-        style: { flex: '1' },
-        onClick: () => openPartnerModal(p),
-      }, 'Edit'),
-      el('button', {
-        class: 'btn btn--ghost btn--sm btn--icon',
-        style: { color: 'var(--color-danger)' },
-        title: 'Delete partner',
-        onClick: () => handleDelete(p),
-        html: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M12.67 4v9.33a1.33 1.33 0 01-1.34 1.34H4.67a1.33 1.33 0 01-1.34-1.34V4h9.34z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-      }),
-    )
-  );
-}
-
-function detailRow(label, textValue, element) {
-  return el('div', { class: 'partner-mgmt-card__row' },
-    el('span', { class: 'partner-mgmt-card__label' }, label),
-    element || el('span', { class: 'partner-mgmt-card__value' }, textValue || '—'),
   );
 }
 
@@ -439,9 +402,11 @@ function openPartnerModal(partner) {
     { type: 'row-start' },
     { name: 'region', label: 'Region', required: true, placeholder: 'e.g., North America' },
     {
+      // "Targeting" is the pre-relationship state — an account worth adding
+      // and planning against before anyone has connected with them.
       name: 'status', label: 'Status', type: 'select',
-      default: 'engaged',
-      options: ['engaged', 'active', 'inactive'],
+      default: DEFAULT_PARTNER_STATUS,
+      options: PARTNER_STATUSES.map(s => ({ value: s, label: statusLabel(s) })),
     },
     { type: 'row-end' },
     { name: 'hq_location', label: 'HQ Location', placeholder: 'e.g., Chicago, Illinois, USA' },
@@ -453,7 +418,7 @@ function openPartnerModal(partner) {
     partner_type: partner.partner_type,
     tier: partner.tier,
     region: partner.region,
-    status: partner.status,
+    status: partnerStatus(partner),
     hq_location: partner.hq_location,
   } : {};
 
@@ -474,7 +439,7 @@ function openPartnerModal(partner) {
           nowISO(),
           'FALSE',
           passwordHash,
-          data.status || 'engaged',
+          data.status || DEFAULT_PARTNER_STATUS,
           data.hq_location || '',
         ];
 

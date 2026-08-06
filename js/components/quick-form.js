@@ -15,6 +15,7 @@ import { nowISO, todayISO } from '../utils/date.js';
 import { getCurrentUser } from '../auth.js';
 import { sha256 } from '../utils/hash.js';
 import { TIER_OPTIONS } from '../utils/tiers.js';
+import { PARTNER_STATUSES, DEFAULT_PARTNER_STATUS, statusLabel } from '../utils/partner-status.js';
 import { initQuillEditor } from './quill-editor.js';
 
 const OPP_STAGES    = ['Prospect', 'Qualified', 'Develop', 'Proposal', 'Negotiation', 'Closed'];
@@ -458,7 +459,7 @@ function renderPartnerModeBody(container, isNew) {
     const r2 = row();
     r2.appendChild(field('region', 'Region', 'text', true, 'e.g., North America'));
     r2.appendChild(selectField('status', 'Status', false,
-      [{ value: 'engaged', label: 'Engaged' }, { value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }], 'engaged'
+      PARTNER_STATUSES.map(s => ({ value: s, label: statusLabel(s) })), DEFAULT_PARTNER_STATUS
     ));
     container.appendChild(r2);
 
@@ -767,7 +768,7 @@ async function submitPartner(data) {
   const values = [
     uuid('p'), data.username, data.display_name, data.partner_type,
     data.tier, data.region, nowISO(), 'FALSE', passwordHash,
-    data.status || 'engaged', data.hq_location || '',
+    data.status || DEFAULT_PARTNER_STATUS, data.hq_location || '',
   ];
 
   if (isConfigured()) {
