@@ -7692,6 +7692,159 @@
   white-space: nowrap;
 }
 
+/* ── Copy Emails picker ───────────────────────────────────────────────
+   The modal behind the Contacts header's copy button. Same geometry as the
+   Next Steps note-selection modal — a bordered list with a header row that
+   selects all — plus a preview of the exact string that lands on the
+   clipboard, so "emails only" is visible before the paste. */
+.partner-contacts-copy__intro {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #2B3242;
+  margin: 0 0 var(--space-4);
+}
+
+.partner-contacts-copy__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid #DCE1EC;
+}
+
+.partner-contacts-copy__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #EEF1F7;
+  transition: background var(--transition-fast);
+}
+
+.partner-contacts-copy__row:last-child {
+  border-bottom: none;
+}
+
+.partner-contacts-copy__row:hover {
+  background: #F5F7FC;
+}
+
+/* The "Select all" control sits above the list, styled as its header row. */
+.partner-contacts-copy__row--all {
+  border: 1px solid #DCE1EC;
+  border-bottom: none;
+  background: #F5F7FC;
+  font-weight: 600;
+}
+
+/* A contact with no email can't be copied — the row stays listed (so the
+   person is visibly accounted for) but reads as unavailable. */
+.partner-contacts-copy__row--disabled {
+  cursor: default;
+  background: #FBFCFE;
+}
+
+.partner-contacts-copy__row--disabled:hover {
+  background: #FBFCFE;
+}
+
+.partner-contacts-copy__checkbox {
+  flex-shrink: 0;
+  align-self: center;
+  width: 15px;
+  height: 15px;
+  accent-color: #2F6BFF;
+  cursor: pointer;
+}
+
+.partner-contacts-copy__checkbox:disabled {
+  cursor: default;
+}
+
+.partner-contacts-copy__who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.partner-contacts-copy__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #171D2B;
+  line-height: 1.3;
+}
+
+.partner-contacts-copy__meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6B7488;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partner-contacts-copy__email {
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: #2F6BFF;
+  text-align: right;
+  word-break: break-all;
+}
+
+.partner-contacts-copy__email--none {
+  color: #B0B0BC;
+  font-style: italic;
+  word-break: normal;
+}
+
+.partner-contacts-copy__preview-label {
+  margin-top: var(--space-4);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6B7488;
+}
+
+.partner-contacts-copy__preview {
+  margin-top: 6px;
+  padding: 9px 12px;
+  max-height: 84px;
+  overflow-y: auto;
+  border: 1px solid #DCE1EC;
+  background: #F5F7FC;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #171D2B;
+  word-break: break-all;
+}
+
+.partner-contacts-copy__preview--empty {
+  color: #8A93A6;
+  font-style: italic;
+  word-break: normal;
+}
+
+@media (max-width: 768px) {
+  /* Stack the address under the name rather than letting it squeeze the
+     name column on a phone. */
+  .partner-contacts-copy__row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .partner-contacts-copy__email {
+    flex: 1 1 100%;
+    padding-left: 25px;
+    text-align: left;
+  }
+}
+
 /* ============================================
    LeadCheck — row-level contact analysis (Partner Contacts)
    ============================================
