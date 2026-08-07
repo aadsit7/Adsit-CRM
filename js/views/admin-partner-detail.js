@@ -35,6 +35,7 @@ import {
   findContactAnalyzerPdf,
 } from '../utils/analyzer-export-files.js';
 import { fileStoreKey, legacyFileStoreKey } from '../utils/file-store-keys.js';
+import { initMobileSections } from '../utils/mobile-sections.js';
 import {
   LEADCHECK_FRESH_DAYS,
   NO_DIRECT_REPORTS_NOTE,
@@ -344,6 +345,11 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
   );
 
   mount(container, content);
+
+  // Phones: fold each section down to its header so the page opens as a short,
+  // scannable index instead of a ~3,000px scroll. Keyed on the partner so one
+  // partner's expanded sections don't carry over to the next. No-op on desktop.
+  initMobileSections(content, { scope: partner.partner_id });
 
   // Load the partner's attached documents in the background so the page paints
   // immediately, then the list fills in — mirrors the opp/event modals, which

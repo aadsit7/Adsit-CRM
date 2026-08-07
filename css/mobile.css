@@ -827,6 +827,401 @@ html {
 }
 
 /* ============================================
+   14. Partner detail → a tappable index, not a 3,000px scroll
+   ============================================
+   Two separate problems made this the worst page on an iPhone.
+
+   (a) Density. The hero's Deals/Pipeline/Won cells and the Opportunities
+       stat strip both collapse to ONE column below 560px (components.css),
+       so seven numbers ate ~950px — more than a full screen of chrome
+       before any actual content. They go back to a 3-up / 2×2 grid here:
+       the same numbers, a fifth of the height.
+
+   (b) Length. Eight stacked sections meant scrolling blind past the ones
+       you didn't want, empty ones included. js/utils/mobile-sections.js
+       folds each to its header; these rules are what "folded" looks like.
+   ============================================ */
+@media (max-width: 768px) {
+
+  /* ---------- (a) Hero: three stats across, not three stacked cards ---- */
+  .partner-detail-page__hero-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    flex-direction: row;
+  }
+
+  .partner-detail-page__hero-cell {
+    min-width: 0;
+    padding: 9px 12px;
+    gap: 1px;
+    border-top: 1px solid #DDDDEE;
+    border-left: 1px solid #DDDDEE;
+  }
+
+  .partner-detail-page__hero-cell:first-child {
+    border-left: 0;
+  }
+
+  .partner-detail-page__hero-label {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  .partner-detail-page__hero-value {
+    font-size: 17px;
+    /* $1,215,000 in a third-width cell: ellipsize rather than overflow. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The Opportunities strip: 2×2, dividers on the inner edges only. */
+  .partner-detail-page__stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .partner-detail-page__stat-cell {
+    padding: 9px 14px;
+    min-width: 0;
+    border-right: 1px solid #F0F0F6;
+    border-bottom: 1px solid #F0F0F6;
+  }
+
+  .partner-detail-page__stat-cell:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .partner-detail-page__stat-cell:nth-last-child(-n+2) {
+    border-bottom: 0;
+  }
+
+  .partner-detail-page__stat-label {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  .partner-detail-page__stat-value {
+    font-size: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Revenue-by-Event rows: name and money share a line, bar underneath —
+     one row per event instead of the three-row stack the 560px rule made. */
+  .partner-detail-page__bar-row {
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding: 5px 0;
+  }
+
+  .partner-detail-page__bar-row__label {
+    grid-row: 1;
+    grid-column: 1;
+    text-align: left;
+  }
+
+  .partner-detail-page__bar-row__value {
+    grid-row: 1;
+    grid-column: 2;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .partner-detail-page__bar-row__bar {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    height: 8px;
+  }
+
+  /* ---------- (b) Folded sections ---------- */
+  .pd-collapse__header {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    /* Comfortably past the 44px HIG target, across the full row width. */
+    min-height: 48px;
+  }
+
+  .pd-collapse__header:active {
+    background: var(--color-surface-hover);
+  }
+
+  .pd-collapse__chevron {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    color: var(--color-primary);
+    transition: transform var(--transition-fast);
+  }
+
+  .pd-collapse__chevron--open {
+    transform: rotate(180deg);
+  }
+
+  /* The fold itself: everything the header is a sibling of. Scoped to
+     .pd-collapse — the header's own parent — so a section whose header is
+     nested (inside a bare div, or inside .descriptions-panel) hides its own
+     body rather than the wrapper around it. Two selectors because that
+     parent is sometimes the section element itself, which a descendant
+     combinator alone would never match. */
+  .pd-section--collapsed.pd-collapse > *:not(.pd-collapse__header),
+  .pd-section--collapsed .pd-collapse > *:not(.pd-collapse__header) {
+    display: none;
+  }
+
+  /* A folded row is a list item, not a section: no trailing margin, and the
+     CTAs ("New Opportunity", "Scan Sources") wait until it is open — they
+     are what forced these headers onto two and three lines. */
+  .pd-section--collapsed {
+    margin-bottom: 0;
+  }
+
+  .pd-section--collapsed .pd-collapse__header {
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .pd-section--collapsed .pd-collapse__header .partner-detail-page__section-actions,
+  .pd-section--collapsed .pd-collapse__header .descriptions-panel__actions {
+    display: none;
+  }
+
+  /* Partner Bio and Next Steps run their own collapse (they predate this
+     module and stay in charge of their own state), so match their folded
+     look here: a folded body means folded CTAs, and the whole page reads as
+     one list instead of five one-line rows between two 80px blocks.
+     Nothing becomes unreachable — Analyze also sits beside the partner's
+     name as a glyph, and a running analysis reports through the global
+     Randy progress pill, which outlives this page entirely. */
+  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-detail-page__section-actions,
+  .partner-detail-page__section:has(> .partner-next-steps__body--collapsed) .partner-detail-page__section-actions {
+    display: none;
+  }
+
+  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-bio__header,
+  .partner-detail-page__section:has(> .partner-next-steps__body--collapsed) .partner-next-steps__header {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    min-height: 48px;
+  }
+
+  /* Open sections keep breathing room, just less of it than the desktop 28. */
+  .partner-detail-page__section {
+    margin-bottom: 18px;
+  }
+
+  /* Empty states are the worst offenders per pixel: a full-size headline and
+     two lines of prose to say "nothing here". Several set their padding
+     inline from the view, which no ordinary rule can outrank — hence the
+     !important, the one case the file's no-!important rule allows for. */
+  .partner-detail-page__section .empty-state {
+    padding: 18px 12px !important;
+  }
+
+  .partner-detail-page__section .empty-state__title {
+    font-size: 15px;
+  }
+
+  .partner-detail-page__section .empty-state__description {
+    font-size: 13px;
+    max-width: none;
+  }
+}
+
+/* ============================================
+   15. Dashboard → a compact, thumb-first command center
+   ============================================
+   Same root cause as the partner page: the desktop grids collapse to one
+   column below 560px, so the four KPI cells alone were ~540px — 65% of an
+   iPhone screen to show four numbers — and the six-partner chart another
+   ~950px. Both go back to real grids here, and the Activity/Partners tabs
+   become an iOS segmented control instead of a desktop underline strip.
+   ============================================ */
+@media (max-width: 768px) {
+
+  /* KPI strip: 2×2 instead of four stacked full-width cards. */
+  .dashboard-page__stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard-page__stat-cell {
+    padding: 9px 14px;
+    min-width: 0;
+    border-right: 1px solid #F0F0F6;
+    border-bottom: 1px solid #F0F0F6;
+  }
+
+  .dashboard-page__stat-cell:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .dashboard-page__stat-cell:nth-last-child(-n+2) {
+    border-bottom: 0;
+  }
+
+  .dashboard-page__stat-label {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  .dashboard-page__stat-value {
+    font-size: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Chart rows: partner and amount on one line, bar beneath. Six partners
+     now fit on one screen instead of spanning three. */
+  .dashboard-page__bar-row {
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding: 5px 4px;
+  }
+
+  .dashboard-page__bar-row__label {
+    grid-row: 1;
+    grid-column: 1;
+    text-align: left;
+  }
+
+  .dashboard-page__bar-row__value {
+    grid-row: 1;
+    grid-column: 2;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .dashboard-page__bar-row__bar {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    height: 8px;
+  }
+
+  .dashboard-page__chart-card {
+    padding: 14px 16px 12px;
+  }
+
+  /* Activity Hub / Partners → iOS segmented control. The desktop treatment
+     is a bottom-border underline, which on a phone reads as two pieces of
+     text rather than as a control you can press. */
+  .view-toggle:not(.type-filter-bar) {
+    gap: 3px;
+    padding: 3px;
+    margin: 2px 0 14px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-light);
+    border-radius: 10px;
+  }
+
+  .view-toggle:not(.type-filter-bar) .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 10px;
+    margin-bottom: 0;
+    border-bottom: 0;
+    border-radius: 8px;
+  }
+
+  .view-toggle:not(.type-filter-bar) .btn--primary {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    border-bottom-color: transparent;
+    box-shadow: 0 1px 3px rgba(26, 26, 46, 0.14);
+  }
+
+  .view-toggle:not(.type-filter-bar) .btn--secondary {
+    border-bottom: 0;
+  }
+
+  /* Partner activity cards: tighter shell, and the metric row keeps all
+     four figures side by side rather than wrapping to 60px columns. */
+  .activity-card {
+    padding: 14px 14px 12px;
+  }
+
+  .activity-card__header {
+    margin-bottom: 10px;
+  }
+
+  .activity-card__metrics {
+    grid-template-columns: repeat(4, 1fr);
+    padding: 9px 4px;
+    margin-bottom: 10px;
+  }
+
+  .activity-card__metric-value {
+    font-size: 14px;
+  }
+
+  .activity-card__metric-label {
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+
+  /* "Partner Activity" and "Upcoming Joint Events" rendered hard against the
+     RIGHT edge of the screen. Two rules colliding: responsive.css flips
+     .section-header to `flex-direction: column`, which turns dashboard.css's
+     row-oriented `align-items: flex-end` (meant as "sit the CTA on the
+     title's baseline") into "align to the right edge". Put the titles back on
+     the left margin. Listed at matching specificity so this wins on source
+     order rather than by escalating to !important. */
+  .dashboard-page__events-panel .section-header,
+  #dashboard-activity-view .section-header,
+  #dashboard-partners-view .section-header,
+  .section-header {
+    align-items: flex-start;
+  }
+
+  /* Dashboard empty states: the base is 64px of padding around a 20px
+     headline, so "No upcoming events" cost more screen than a list of them
+     would have. */
+  .dashboard-page .empty-state {
+    padding: 22px 14px;
+  }
+
+  .dashboard-page .empty-state__title {
+    font-size: 16px;
+  }
+
+  .dashboard-page .empty-state__description {
+    font-size: 13px;
+  }
+
+  /* Upcoming-events timeline cards. */
+  .timeline-card {
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  /* Partners tab: donut above its breakdown, and both the type cards and the
+     partner thumbnails go two-up — as flex/auto-fill they each stretched to
+     the full width, so five type cards and eight partners were thirteen
+     full-width rows. */
+  .type-distribution {
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: 16px;
+  }
+
+  .type-breakdown {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2);
+  }
+
+  .partner-thumb-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+  }
+}
+
+/* ============================================
    Icon-only actions on touch screens
    ============================================
    Icon buttons rely on hover tooltips for their names — phones have no
