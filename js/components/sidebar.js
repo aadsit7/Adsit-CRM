@@ -152,11 +152,11 @@ export function renderSidebar() {
  * stays reachable. Rebuilt on each navigation (renderSidebar runs per
  * route), so the active tab is always correct.
  *
- * Admins additionally get a prominent center "Add" button that opens the
- * SAME Quick Add sheet Randy uses (create/update an opportunity, partner,
- * or event). It's admin-only because those writes require the admin Sheets
- * token; partners have no write access, so surfacing it for them would
- * only produce failed saves.
+ * Admins additionally get a prominent leading "Add" button — first tab, to
+ * the left of Dashboard — that opens the SAME Quick Add sheet Randy uses
+ * (create/update an opportunity, partner, or event). It's admin-only
+ * because those writes require the admin Sheets token; partners have no
+ * write access, so surfacing it for them would only produce failed saves.
  */
 export function renderBottomNav() {
   const bottomNav = $('#bottom-nav');
@@ -174,8 +174,8 @@ export function renderBottomNav() {
   const primaryPaths = new Set(primary.map(item => item.path));
   const currentPath = getCurrentPath();
 
-  // Build the tabs as an ordered list so the Add button can be spliced into
-  // the visual center without disturbing the primary/More ordering.
+  // Build the tabs as an ordered list so the Add button can be prepended
+  // without disturbing the primary/More ordering.
   const tabs = primary.map(item =>
     el('a', {
       class: `bottom-nav__tab ${isTabActive(item.path, currentPath) ? 'bottom-nav__tab--active' : ''}`,
@@ -210,7 +210,9 @@ export function renderBottomNav() {
     )
   );
 
-  // Center "Add" (admins only) — the same Quick Add sheet Randy exposes.
+  // Leading "Add" (admins only) — the same Quick Add sheet Randy exposes.
+  // It sits first, left of Dashboard, so the most frequent action lands
+  // under the thumb without hunting for it mid-bar.
   if (user.is_admin) {
     const addTab = el('button', {
       class: 'bottom-nav__tab bottom-nav__tab--add',
@@ -224,7 +226,7 @@ export function renderBottomNav() {
       el('span', { class: 'bottom-nav__icon', html: ICONS.add }),
       el('span', { class: 'bottom-nav__label' }, 'Add'),
     );
-    tabs.splice(Math.floor(tabs.length / 2), 0, addTab);
+    tabs.unshift(addTab);
   }
 
   bottomNav.innerHTML = '';

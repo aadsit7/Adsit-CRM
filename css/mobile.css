@@ -141,10 +141,10 @@ html {
     letter-spacing: 0.01em;
   }
 
-  /* Center "Add" — a prominent accent create button (admins only). Opens
-     the same Quick Add sheet Randy uses. Styled as a filled rounded-square
-     to match the app's radius language, so it reads as an action rather
-     than a destination tab. */
+  /* Leading "Add" — a prominent accent create button (admins only), first
+     in the bar, left of Dashboard. Opens the same Quick Add sheet Randy
+     uses. Styled as a filled rounded-square to match the app's radius
+     language, so it reads as an action rather than a destination tab. */
   .bottom-nav__tab--add {
     color: var(--color-primary);
   }
