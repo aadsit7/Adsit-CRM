@@ -2063,6 +2063,227 @@ function buildContactsTable(partner, contacts, contactPdfIndex) {
   );
 }
 
+// ── Copy contact emails ──────────────────────────────────────────────
+// The little copy button in the Contacts header opens a picker: check the
+// people you want, and their email addresses — and nothing else — go on the
+// clipboard, comma-separated, ready to paste straight into the To: line of
+// an email. Names, roles and companies deliberately stay out of the copied
+// text: this exists to start an outreach email, not to export the roster.
+
+const CONTACT_EMAIL_SEPARATOR = ', ';
+
+/** The email on a contact, trimmed — '' when there is none. */
+function contactEmailAddress(contact) {
+  return String((contact && contact.email) || '').trim();
+}
+
+/**
+ * The addresses to copy for a set of contacts, in the order the section
+ * lists them. Blank emails drop out, and an address that appears on two
+ * contacts is carried once (case-insensitively, keeping the casing of the
+ * first row that had it) — pasting the same address twice would put a
+ * duplicate recipient on the email.
+ */
+function contactEmailList(contacts) {
+  const seen = new Set();
+  const emails = [];
+  for (const contact of contacts || []) {
+    const email = contactEmailAddress(contact);
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emails.push(email);
+  }
+  return emails;
+}
+
+/** The exact string that lands on the clipboard. Commas (not semicolons):
+ *  Gmail, Outlook and Apple Mail all split a comma-separated To: line. */
+function contactEmailListText(contacts) {
+  return contactEmailList(contacts).join(CONTACT_EMAIL_SEPARATOR);
+}
+
+/** Plain-text clipboard write, falling back to the legacy path — the async
+ *  Clipboard API needs a secure context. Mirrors copyPartnerBio's ladder. */
+async function writeTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    throw new Error('clipboard unavailable');
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Put a list of addresses on the clipboard and say what happened. The
+ *  caller has already resolved and deduped them (the picker shows the very
+ *  string this writes), so nothing is filtered here. */
+async function copyEmailAddresses(emails) {
+  if (!emails.length) {
+    showToast('Those contacts have no email addresses to copy', 'info');
+    return;
+  }
+  const ok = await writeTextToClipboard(emails.join(CONTACT_EMAIL_SEPARATOR));
+  showToast(
+    ok
+      ? `${emails.length} email address${emails.length === 1 ? '' : 'es'} copied — paste into your email`
+      : 'Could not copy the email addresses',
+    ok ? 'success' : 'error',
+  );
+}
+
+/**
+ * The picker body, its Copy button and the wiring that keeps them in sync.
+ * Built as one unit (and returned rather than mounted) so the selection
+ * behaviour can be tested without a modal or a browser.
+ *
+ * Everyone on the roster is listed, in the section's order. Contacts with
+ * an email start checked — copying the whole roster is the common case, and
+ * unchecking is one click — while contacts without one are shown disabled
+ * and labelled, so a missing person reads as "no email on file" rather than
+ * looking like the picker dropped them.
+ *
+ * @param {Array<Object>} contacts
+ * @param {{ onCopy: (emails: string[]) => void }} handlers
+ */
+function buildContactEmailPicker(contacts, { onCopy }) {
+  const roster = contacts || [];
+  const mailable = roster.filter(c => contactEmailAddress(c));
+  const selected = new Set(mailable);
+
+  const copyButton = el('button', { class: 'btn btn--primary' }, 'Copy');
+  const selectAllInput = el('input', {
+    type: 'checkbox',
+    class: 'partner-contacts-copy__checkbox',
+    disabled: mailable.length === 0,
+  });
+  const preview = el('div', { class: 'partner-contacts-copy__preview' });
+
+  // The addresses currently checked, in roster order and deduped — the same
+  // list the button counts, the preview shows and the clipboard receives.
+  const selectedEmails = () => contactEmailList(roster.filter(c => selected.has(c)));
+
+  const syncControls = () => {
+    const emails = selectedEmails();
+    copyButton.disabled = emails.length === 0;
+    copyButton.textContent = emails.length
+      ? `Copy ${emails.length} email${emails.length === 1 ? '' : 's'}`
+      : 'Copy';
+    selectAllInput.checked = mailable.length > 0 && selected.size === mailable.length;
+    selectAllInput.indeterminate = selected.size > 0 && selected.size < mailable.length;
+    preview.textContent = emails.length
+      ? emails.join(CONTACT_EMAIL_SEPARATOR)
+      : 'Nobody selected — check at least one contact.';
+    preview.classList.toggle('partner-contacts-copy__preview--empty', emails.length === 0);
+  };
+
+  const rowInputs = [];
+  const rows = roster.map(contact => {
+    const email = contactEmailAddress(contact);
+    const input = el('input', {
+      type: 'checkbox',
+      class: 'partner-contacts-copy__checkbox',
+      disabled: !email,
+      onChange: () => {
+        if (input.checked) selected.add(contact);
+        else selected.delete(contact);
+        syncControls();
+      },
+    });
+    input.checked = !!email;
+    if (email) rowInputs.push({ contact, input });
+
+    const meta = [contact.role, contact.company].map(v => String(v || '').trim()).filter(Boolean).join(' · ');
+    return el('label', {
+      class: `partner-contacts-copy__row${email ? '' : ' partner-contacts-copy__row--disabled'}`,
+    },
+      input,
+      el('span', { class: 'partner-contacts-copy__who' },
+        el('span', { class: 'partner-contacts-copy__name' }, contact.name || '(no name)'),
+        meta ? el('span', { class: 'partner-contacts-copy__meta' }, meta) : null,
+      ),
+      email
+        ? el('span', { class: 'partner-contacts-copy__email' }, email)
+        : el('span', { class: 'partner-contacts-copy__email partner-contacts-copy__email--none' }, 'No email on file'),
+    );
+  });
+
+  selectAllInput.addEventListener('change', () => {
+    selected.clear();
+    if (selectAllInput.checked) mailable.forEach(c => selected.add(c));
+    rowInputs.forEach(({ contact, input }) => { input.checked = selected.has(contact); });
+    syncControls();
+  });
+
+  copyButton.addEventListener('click', () => {
+    const emails = selectedEmails();
+    if (!emails.length) return;
+    onCopy(emails);
+  });
+
+  const withoutEmail = roster.length - mailable.length;
+  const body = el('div', { class: 'partner-contacts-copy' },
+    el('p', { class: 'partner-contacts-copy__intro' },
+      'Pick the people to reach out to. Copying puts their email addresses — and nothing '
+      + 'else — on the clipboard, separated by commas, ready to paste into the To: line.'),
+    el('label', { class: 'partner-contacts-copy__row partner-contacts-copy__row--all' },
+      selectAllInput,
+      el('span', { class: 'partner-contacts-copy__who' },
+        el('span', { class: 'partner-contacts-copy__name' }, 'Select all'),
+      ),
+      el('span', { class: 'partner-contacts-copy__email' },
+        `${mailable.length} with an email${withoutEmail ? ` · ${withoutEmail} without` : ''}`),
+    ),
+    el('div', { class: 'partner-contacts-copy__list' }, ...rows),
+    el('div', { class: 'partner-contacts-copy__preview-label' }, 'What gets copied'),
+    preview,
+  );
+
+  syncControls();
+  return { body, copyButton, selectAllInput, rowInputs, selectedEmails };
+}
+
+function openContactEmailCopyModal(partner, contacts) {
+  const roster = contacts || [];
+  if (!roster.some(c => contactEmailAddress(c))) {
+    showToast('None of these contacts has an email address yet — add one first', 'info');
+    return;
+  }
+
+  const picker = buildContactEmailPicker(roster, {
+    onCopy: (emails) => {
+      closeModal();
+      copyEmailAddresses(emails);
+    },
+  });
+
+  openModal({
+    title: `Copy Emails — ${partner.display_name || 'Partner'}`,
+    className: 'modal--wide',
+    content: picker.body,
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Cancel'),
+      picker.copyButton,
+    ],
+  });
+}
+
 function buildPartnerContactsSection(partner, contacts, contactPdfIndex) {
   const isOpen = !collapsedContactSections.has(partner.partner_id);
 
@@ -2117,6 +2338,21 @@ function buildPartnerContactsSection(partner, contacts, contactPdfIndex) {
       chevron,
     ),
     el('div', { class: 'partner-detail-page__section-actions' },
+      // Copy emails: pick contacts, get their addresses on the clipboard.
+      // Same icon-only idiom as the Next Steps and Descriptions copy buttons.
+      contacts.length > 0
+        ? el('button', {
+            type: 'button',
+            class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary partner-detail-page__section-cta--icon',
+            title: 'Copy contact email addresses — pick who, then paste into an email',
+            'aria-label': 'Copy contact emails',
+            'data-label': 'Copy Emails',
+            onClick: (e) => {
+              e.stopPropagation();
+              openContactEmailCopyModal(partner, contacts);
+            },
+          }, el('span', { class: 'cta-glyph', html: ICONS.copy }))
+        : null,
       el('button', {
         class: 'partner-detail-page__section-cta partner-detail-page__section-cta--secondary',
         onClick: (e) => {
@@ -3614,4 +3850,15 @@ export function cleanup() {}
 export const __partnerContactsTableInternals = {
   contactAnalyzerPdfCell,
   buildContactsTable,
+  buildPartnerContactsSection,
+};
+
+// Test hook — the Contacts header's "Copy Emails" picker: which addresses a
+// selection yields and exactly what string reaches the clipboard. Same
+// pattern as above. Not used at runtime.
+export const __partnerContactEmailCopyInternals = {
+  contactEmailAddress,
+  contactEmailList,
+  contactEmailListText,
+  buildContactEmailPicker,
 };

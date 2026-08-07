@@ -24,7 +24,9 @@ attachments** — plus indexed meetings and partner documents — via the
 **Scan Sources** action. They can also be added or corrected by hand
 (**Add Contact** / Edit / Delete), and each row has an **Analyze** action
 that verifies that individual from public professional sources — see
-[PARTNER_CONTACT_LEADCHECK.md](PARTNER_CONTACT_LEADCHECK.md).
+[PARTNER_CONTACT_LEADCHECK.md](PARTNER_CONTACT_LEADCHECK.md). The header's
+copy button puts a chosen set of contact **email addresses** on the
+clipboard — see "Copy Emails" below.
 
 > **Accuracy is the design goal.** Nothing reaches the table unless it is
 > literally present in this partner's own sources or was typed in manually.
@@ -231,6 +233,49 @@ Scan results merge into `Partner_Contacts` via `mergeExtractedContacts`:
 Deleting a contact deletes its row; a later scan may re-add the person if
 they still appear in the sources (the confirm dialog says so).
 
+## Copy Emails
+
+The Contacts header carries a small **copy icon button** (the same icon-only
+`section-cta` idiom as the Next Steps and Descriptions copy buttons), sitting
+directly above the roster. It opens a picker listing every contact on the
+partner — name, role · company, address — with a checkbox each and a
+**Select all** header row. Choose one person, a few, or the whole roster,
+and **Copy** puts their addresses on the clipboard.
+
+What lands there is **email addresses only**, comma-separated:
+
+```
+jane@insight.com, rob@insight.com, priya@insight.com
+```
+
+Nothing else — no names, roles, companies or table columns — so it pastes
+straight into the **To:** line of Gmail, Outlook or Apple Mail, all of which
+split on commas. A preview under the list shows the exact string before it is
+copied.
+
+Four rules the picker keeps:
+
+- **Everyone with an email starts checked.** Copying the whole roster is the
+  common case and unchecking is one click; Select all clears or restores the
+  lot.
+- **A contact with no email is listed, disabled, and labelled** *No email on
+  file* — a person missing from the picker would read as a bug, and silently
+  dropping them would hide that the record is incomplete.
+- **One address, one recipient.** An address that appears on two rows (a
+  shared alias, or a duplicate a scan created) is copied once,
+  case-insensitively, keeping the casing of the first row that had it. The
+  button counts recipients, not rows — two rows sharing an address read as
+  "Copy 1 email".
+- **Roster order is preserved**, so the copied list matches the order the
+  table shows.
+
+The button is only rendered when the partner has at least one contact, and
+clicking it never toggles the section's collapse. Clipboard writes go through
+the async Clipboard API with the legacy `execCommand('copy')` fallback (the
+async API needs a secure context), the same ladder as the other copy actions
+on this page; a toast reports how many addresses were copied, or that the
+copy failed.
+
 ## Storage
 
 New `Partner_Contacts` tab (created automatically on first scan / manual
@@ -257,8 +302,13 @@ client-side path against older deployments.
 | --- | --- |
 | `js/utils/partner-contacts.js` | Source collection, prompt, strict verbatim validation, attendee mapping, merge, company default, row (de)serialization |
 | `js/utils/partner-contacts-client.js` | Anthropic call (same conventions/model as the other analyzers) |
-| `js/views/admin-partner-detail.js` | Contacts section UI, table, add/edit/delete modals, scan orchestration |
+| `js/views/admin-partner-detail.js` | Contacts section UI, table, add/edit/delete modals, Copy Emails picker, scan orchestration |
 | `js/sheets.js` | `Partner_Contacts` headers/init/demo + `ensureSheetWithHeaders` |
+
+Tests: `tests/partner-contacts-copy-emails.test.mjs` covers the Copy Emails
+picker — emails-only output, roster order, duplicate collapse, email-less
+contacts being listed-but-unselectable, per-row toggling, and the preview
+matching what is copied.
 
 Tests: `tests/partner-contacts.test.mjs` — most are adversarial
 (hallucinated people, invented emails, paraphrased titles, truncated
