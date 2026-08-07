@@ -1,52 +1,86 @@
 /* ============================================
    Partner Portal — Design Tokens
-   Adsit / Revolutionary. AI design language:
-   bright, airy, cool. White cards on a soft
-   blue-lavender canvas, one interactive blue,
-   teal for identity/success, coral for danger.
+   Recast Software brand identity:
+   deep navy as the primary brand surface, cyan
+   as the single interactive/highlight accent,
+   flat solid colors (no gradients), crisp
+   structure, generous whitespace.
+
+   Source of truth: recast-brand-styling skill.
+   Every value below traces to that palette —
+   do not introduce off-brand blues here.
    ============================================ */
 
 :root {
-  /* Primary palette */
-  --color-primary: #2F6BFF;           /* Interactive blue — everything you can touch */
-  --color-primary-light: #2456D4;     /* Hover / pressed */
-  --color-primary-lighter: #6B93FF;   /* Soft blue accent */
-  --color-accent: #2F6BFF;
-  --color-teal: #0A8F82;              /* Brand teal — identity + positive marks */
-  --color-success: #0A8F82;
-  --color-warning: #B97A1A;
-  --color-danger: #EF4E5B;            /* Coral — destructive / live-mic */
+  /* ---- Brand core (verbatim from the brand system) ---- */
+  --recast-navy: #0000CC;             /* Primary Blue — brand surface + primary action */
+  --recast-cyan: #00BFFF;             /* Accent Cyan — highlights, CTAs, bullet markers */
+  --recast-ink: #1A1A2E;              /* Dark Text */
+  --recast-gray: #4A4A5A;             /* Medium Gray — body copy */
+  --recast-muted-blue: #AABBEE;       /* Subtle text on navy surfaces only */
+  --recast-light-gray: #F0F0F6;       /* Section/card backgrounds */
+  --recast-row-tint: #FAFAFE;         /* Alternating table rows */
+  --recast-quote-bg: #F6F8FF;         /* Callout / quote blocks */
+  --recast-risk: #CC2222;             /* Risk red */
+  --recast-green: #0F7A3F;            /* Positive / confirmed */
+  --recast-amber: #CC8800;            /* Caution / unverified */
+  --recast-coral: #E07050;            /* Decorative dividers only — use sparingly */
+  --recast-decorator: #2222DD;        /* "+" texture on navy surfaces */
+  --recast-divider: #DDDDEE;          /* Hairline / column divider */
 
-  /* Neutrals — cool, slightly blue-tinted */
-  --color-bg: #F4F6FB;                /* Soft blue-lavender canvas */
+  /* ---- Primary palette ---- */
+  --color-primary: #0000CC;           /* Navy — every primary action */
+  --color-primary-light: #0000AA;     /* Hover */
+  --color-primary-dark: #00008F;      /* Pressed / active */
+  --color-primary-lighter: #00BFFF;   /* Cyan accent */
+  --color-primary-tint: #E6E6F7;      /* Navy at ~10% on white — selected rows, soft fills */
+  --color-primary-tint-strong: #CCCCEF;
+  --color-accent: #00BFFF;            /* Accent Cyan */
+  --color-accent-hover: #00A6DE;
+  --color-accent-tint: #E0F6FF;       /* Cyan wash */
+  --color-teal: #0F7A3F;              /* Retired teal → brand green */
+  --color-success: #0F7A3F;
+  --color-success-tint: #E7F2EC;
+  --color-warning: #CC8800;
+  --color-warning-tint: #FBF3E0;
+  --color-danger: #CC2222;
+  --color-danger-tint: #FBEAEA;
+  --color-coral: #E07050;
+
+  /* ---- Neutrals — cool, navy-tinted ---- */
+  --color-bg: #F0F0F6;                /* Light Gray canvas */
   --color-surface: #FFFFFF;
-  --color-surface-hover: #F7F9FD;
+  --color-surface-hover: #FAFAFE;     /* Row tint */
+  --color-surface-tint: #F6F8FF;      /* Quote background */
   --color-sidebar-bg: #FFFFFF;
-  --color-sidebar-hover: #F1F4FA;
-  --color-sidebar-active: #E8EFFD;
-  --color-sidebar-text: #4A5468;
-  --color-sidebar-text-active: #2F6BFF;
-  --color-text-primary: #171D2B;      /* Ink */
-  --color-text-secondary: #4A5468;
-  --color-text-muted: #8A93A8;
-  --color-border: #DCE1EC;            /* Hairline */
-  --color-border-light: #E8ECF5;
+  --color-sidebar-hover: #F0F0F6;
+  --color-sidebar-active: #E6E6F7;
+  --color-sidebar-text: #4A4A5A;
+  --color-sidebar-text-active: #0000CC;
+  --color-text-primary: #1A1A2E;      /* Dark Text */
+  --color-text-secondary: #4A4A5A;    /* Medium Gray */
+  --color-text-muted: #67677A;   /* darkened to clear AA on the light surfaces it sits on */
+  --color-text-tertiary: #9B9A9B;
+  --color-text-on-navy: #AABBEE;      /* Muted Blue — fine print on navy bars */
+  --color-border: #DDDDEE;            /* Hairline */
+  --color-border-light: #E8E8F2;
+  --color-border-strong: #C6C6DC;
 
-  /* Status colors */
-  --color-status-registered: #2456D4;
-  --color-status-in-progress: #2F6BFF;
-  --color-status-won: #0A8F82;
-  --color-status-lost: #EF4E5B;
+  /* ---- Status colors ---- */
+  --color-status-registered: #0000CC;
+  --color-status-in-progress: #00BFFF;
+  --color-status-won: #0F7A3F;
+  --color-status-lost: #CC2222;
 
-  /* Tier colors */
-  --color-tier-premier: #2F6BFF;
-  --color-tier-value: #0A8F82;
-  --color-tier-registered: #8A93A8;
+  /* ---- Tier colors ---- */
+  --color-tier-premier: #0000CC;
+  --color-tier-value: #00BFFF;
+  --color-tier-registered: #9B9A9B;
 
-  /* Typography — Poppins display, Figtree UI/body */
-  --font-sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-display: 'Poppins', 'Figtree', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  /* ---- Typography — Inter throughout (brand: bold sans-serif, never decorative) ---- */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
   --text-xs: 0.6875rem;
   --text-sm: 0.8125rem;
@@ -80,22 +114,24 @@
   --space-16: 4rem;
   --space-20: 5rem;
 
-  /* Border radii — soft, generous */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* Border radii — brand calls for subtle rounding (4–6px) on cards and
+     buttons and sharp section containers, not rounded-everything.
+     --radius-full stays for genuine pills (chips, avatars, toggles). */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-full: 999px;
 
-  /* Shadows — cool blue-gray, soft, layered */
-  --shadow-xs: 0 1px 2px rgba(38, 54, 89, 0.05);
-  --shadow-sm: 0 2px 6px rgba(38, 54, 89, 0.06), 0 1px 2px rgba(38, 54, 89, 0.04);
-  --shadow-md: 0 6px 16px rgba(38, 54, 89, 0.08), 0 2px 4px rgba(38, 54, 89, 0.04);
-  --shadow-lg: 0 14px 32px rgba(38, 54, 89, 0.12), 0 4px 8px rgba(38, 54, 89, 0.05);
-  --shadow-xl: 0 24px 48px rgba(38, 54, 89, 0.14), 0 8px 16px rgba(38, 54, 89, 0.06);
-  --shadow-card: 0 2px 6px rgba(38, 54, 89, 0.06), 0 1px 2px rgba(38, 54, 89, 0.04);
-  --shadow-card-hover: 0 8px 24px rgba(38, 54, 89, 0.10);
-  --focus-ring: 0 0 0 3px rgba(47, 107, 255, 0.22);
+  /* Shadows — navy-tinted ink, soft, layered (flat brand: keep them restrained) */
+  --shadow-xs: 0 1px 2px rgba(26, 26, 46, 0.05);
+  --shadow-sm: 0 2px 6px rgba(26, 26, 46, 0.06), 0 1px 2px rgba(26, 26, 46, 0.04);
+  --shadow-md: 0 6px 16px rgba(26, 26, 46, 0.08), 0 2px 4px rgba(26, 26, 46, 0.04);
+  --shadow-lg: 0 14px 32px rgba(26, 26, 46, 0.12), 0 4px 8px rgba(26, 26, 46, 0.05);
+  --shadow-xl: 0 24px 48px rgba(26, 26, 46, 0.14), 0 8px 16px rgba(26, 26, 46, 0.06);
+  --shadow-card: 0 2px 6px rgba(26, 26, 46, 0.06), 0 1px 2px rgba(26, 26, 46, 0.04);
+  --shadow-card-hover: 0 8px 24px rgba(26, 26, 46, 0.10);
+  --focus-ring: 0 0 0 3px rgba(0, 0, 204, 0.22);
 
   /* Frosted chrome */
   --blur-panel: saturate(160%) blur(14px);

@@ -2820,7 +2820,7 @@ function updateWidgetUI() {
 }
 
 // ── Assistant Mode Selector ───────────────────────────────────────
-const PRESET_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2'];
+const PRESET_COLORS = ['#0000cc', '#0f7a3f', '#cc8800', '#2222dd', '#00a6de'];
 
 // Shared with the dedicated Randy page's preset menu so the swatch shown
 // there matches the colored dot in the widget's own Mode dropdown.
@@ -2957,7 +2957,7 @@ function renderPresets() {
   // Sync the button's label + colored ring with the active preset.
   const activeIdx = loadedPresets.findIndex(p => p.prompt_id === activePresetId);
   const activePreset = activeIdx >= 0 ? loadedPresets[activeIdx] : null;
-  const activeColor = activeIdx >= 0 ? (PRESET_COLORS[activeIdx] || '#6b7280') : '';
+  const activeColor = activeIdx >= 0 ? (PRESET_COLORS[activeIdx] || '#4a4a5a') : '';
   labelEl.textContent = activePreset ? activePreset.label : 'Mode';
   labelEl.title = activePreset ? activePreset.label : 'Choose a mode';
   btn.classList.toggle('randy-ctrl-btn--mode-active', !!activePreset);
@@ -2972,7 +2972,7 @@ function renderPresets() {
   menu.appendChild(defaultItem);
 
   loadedPresets.forEach((preset, index) => {
-    const color = PRESET_COLORS[index] || '#6b7280';
+    const color = PRESET_COLORS[index] || '#4a4a5a';
     const item = buildModeItem({
       label: preset.label,
       color,

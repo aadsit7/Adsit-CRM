@@ -25,17 +25,17 @@ import { deriveForecastBoard } from './forecast-stages.js';
 import { formatDate } from './date.js';
 
 // ── Palette (mirrors css/variables.css design tokens) ─────────
-const PRIMARY_BLUE  = [47,  107, 255]; // --color-primary        #2F6BFF  (complete)
-const PRIMARY_LIGHT = [107, 147, 255]; // --color-primary-lighter #6B93FF (in_progress)
-const INK           = [23,  29,  43];  // --color-text-primary   #171D2B
-const BODY_TEXT     = [51,  51,  51];  // #333333
-const MUTED_TEXT    = [138, 147, 168]; // --color-text-muted     #8A93A8
-const SUCCESS       = [10,  143, 130]; // --color-success        #0A8F82  (met)
-const WARNING       = [185, 122, 26];  // --color-warning        #B97A1A  (partial)
-const DANGER        = [239, 78,  91];  // --color-danger         #EF4E5B  (not_met)
-const BORDER        = [220, 225, 236]; // --color-border         #DCE1EC
-const BG_LIGHT      = [244, 246, 251]; // --color-bg             #F4F6FB
-const NEUTRAL       = [188, 196, 212]; // not_started rail
+const PRIMARY_BLUE  = [0, 0, 204]; // Primary Blue   #0000CC
+const PRIMARY_LIGHT = [0, 191, 255]; // Accent Cyan    #00BFFF
+const INK           = [26, 26, 46]; // Dark Text      #1A1A2E
+const BODY_TEXT     = [74, 74, 90]; // Medium Gray    #4A4A5A
+const MUTED_TEXT    = [103, 103, 122]; // Muted text     #67677A
+const SUCCESS       = [15, 122, 63]; // Green          #0F7A3F
+const WARNING       = [204, 136, 0]; // Warn Amber     #CC8800
+const DANGER        = [204, 34, 34]; // Risk Red       #CC2222
+const BORDER        = [221, 221, 238]; // Divider        #DDDDEE
+const BG_LIGHT      = [240, 240, 246]; // Light Gray     #F0F0F6
+const NEUTRAL       = [198, 198, 220]; // Neutral rail   #C6C6DC
 const WHITE         = [255, 255, 255];
 
 // ── Page geometry (Letter @ pt) ───────────────────────────────

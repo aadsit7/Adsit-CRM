@@ -70,11 +70,13 @@ export function renderSidebar() {
   sidebar.innerHTML = '';
 
   // Header
+  // Wordmark follows the Recast lockup: solid bold name, lighter accent
+  // suffix. Colors live in layout.css so the navy header bar owns them.
   const header = el('div', { class: 'sidebar__header' },
     el('div', { class: 'sidebar__logo' },
       el('div', { class: 'sidebar__logo-text' },
-        el('span', { style: { fontWeight: 'var(--font-bold)', color: '#fff' } }, 'Partner'),
-        el('span', { style: { fontWeight: 'var(--font-normal)', color: '#2F6BFF', marginLeft: 'var(--space-1)' } }, 'Portal'),
+        el('span', { class: 'sidebar__logo-name' }, 'Partner'),
+        el('span', { class: 'sidebar__logo-suffix' }, 'Portal'),
       )
     )
   );

@@ -1,29 +1,35 @@
 /* ============================================
-   Apple-inspired design tokens (restyle R1)
+   Scoped design tokens (restyle R1)
 
    Scoped to .apple-scope instead of :root on purpose:
    --space-1..6 already exist app-wide in variables.css with
    different values (4px scale). Defining these on :root would
    re-space every page. Add .apple-scope to a view's root element
    to opt that view into this design language.
+
+   The accent set below is the Recast brand palette, NOT the iOS
+   system accents it started from — the layout grammar (generous
+   space, hairline dividers, icon tiles) is what this scope
+   contributes; color always comes from the brand system.
    ============================================ */
 
 .apple-scope {
-  /* Neutrals */
-  --ink: #1D1D1F;          /* primary text, headlines */
-  --gray: #6E6E73;         /* body & secondary text */
-  --gray-light: #86868B;   /* captions, footers, labels */
-  --hairline: #D2D2D7;     /* 1px dividers only */
-  --card: #F5F5F7;         /* card & section backgrounds */
+  /* Neutrals — brand text + surface ramp */
+  --ink: #1A1A2E;          /* primary text, headlines (Dark Text) */
+  --gray: #4A4A5A;         /* body & secondary text (Medium Gray) */
+  --gray-light: #67677A;   /* captions, footers, labels */
+  --hairline: #DDDDEE;     /* 1px dividers only */
+  --card: #F0F0F6;         /* card & section backgrounds (Light Gray) */
   --bg: #FFFFFF;           /* page background — always white */
 
-  /* Accents (use ONE per view as the primary accent) */
-  --blue: #007AFF;   --green: #34C759;  --orange: #FF9500;
-  --purple: #AF52DE; --indigo: #5856D6; --teal: #30B0C7;
-  --pink: #FF2D55;
+  /* Accents (use ONE per view as the primary accent).
+     Names are kept for existing call sites; values are brand. */
+  --blue: #0000CC;   --green: #0F7A3F;  --orange: #CC8800;
+  --purple: #2222DD; --indigo: #0000AA; --teal: #00BFFF;
+  --pink: #CC2222;
 
   /* Shape & space */
-  --radius-card: 14px;
+  --radius-card: 8px;
   --radius-tile: 24%;      /* icon tiles */
   --radius-pill: 980px;    /* buttons */
   --space-1: 8px; --space-2: 16px; --space-3: 24px;
@@ -31,6 +37,6 @@
   --content-max: 1024px;
 
   /* Typography */
-  --font-apple: -apple-system, BlinkMacSystemFont, "SF Pro Display",
-    "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-apple: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Helvetica, Arial, sans-serif;
 }

@@ -14,9 +14,9 @@
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border: 1px solid #2F6BFF;
+  border: 1px solid #0000CC;
   background: #FFFFFF;
-  color: #2F6BFF;
+  color: #0000CC;
   font-family: inherit;
   font-size: 10px;
   font-weight: 700;
@@ -29,7 +29,7 @@
 }
 
 .partner-bio__analyze:hover:not(:disabled) {
-  background: #2F6BFF;
+  background: #0000CC;
   color: #FFFFFF;
 }
 
@@ -56,8 +56,8 @@
 
 /* A run in flight reads as busy rather than broken. */
 .partner-bio__analyze--running {
-  border-color: #DCE1EC;
-  color: #4A5468;
+  border-color: #DDDDEE;
+  color: #4A4A5A;
 }
 
 /* ── Section shell ────────────────────────────────────────────────── */
@@ -69,7 +69,7 @@
 .partner-bio__chevron {
   display: inline-flex;
   align-items: center;
-  color: #2F6BFF;
+  color: #0000CC;
   transition: transform var(--transition-fast);
   align-self: center;
 }
@@ -91,9 +91,9 @@
 /* Shown only when the research succeeded but the spreadsheet write did not. */
 .partner-bio__banner {
   padding: 8px 12px;
-  border-left: 3px solid #E4A11B;
-  background: #FFF8E8;
-  color: #6B5314;
+  border-left: 3px solid #CC8800;
+  background: #FBF3E0;
+  color: #8A5C00;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -113,7 +113,7 @@
   grid-template-columns: 1fr;
   margin: 0;
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   overflow: hidden;
 }
 
@@ -162,7 +162,7 @@
 .partner-bio__fact {
   min-width: 0;
   padding: 9px 14px 10px;
-  box-shadow: 1px 0 0 #EEF1F7, 0 1px 0 #EEF1F7;
+  box-shadow: 1px 0 0 #F0F0F6, 0 1px 0 #F0F0F6;
 }
 
 .partner-bio__fact-label {
@@ -171,7 +171,7 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   line-height: 1.2;
-  color: #8A93A8;
+  color: #67677A;
   margin-bottom: 3px;
 }
 
@@ -179,7 +179,7 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
-  color: #171D2B;
+  color: #1A1A2E;
   overflow-wrap: anywhere;
 }
 
@@ -203,7 +203,7 @@
 }
 
 .partner-bio__link {
-  color: #2F6BFF;
+  color: #0000CC;
   text-decoration: none;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -216,7 +216,7 @@
 /* An unverified field. Muted, never hidden — the reader has to be able to see
    what the research could not confirm. */
 .partner-bio__na {
-  color: #8A93A8;
+  color: #67677A;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -226,8 +226,8 @@
   align-items: center;
   padding: 2px 8px;
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
-  color: #2F6BFF;
+  border: 1px solid #DDDDEE;
+  color: #0000CC;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -243,8 +243,8 @@
 }
 
 .partner-bio__block {
-  border: 1px solid #E6EAF2;
-  border-top: 2px solid #2F6BFF;
+  border: 1px solid #E8E8F2;
+  border-top: 2px solid #0000CC;
   background: #FFFFFF;
   padding: 14px 16px;
 }
@@ -254,7 +254,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #2F6BFF;
+  color: #0000CC;
   margin-bottom: 10px;
 }
 
@@ -269,19 +269,19 @@
 .partner-bio__list li {
   font-size: 13px;
   line-height: 1.55;
-  color: #2B3242;
+  color: #1A1A2E;
 }
 
 .partner-bio__block-empty {
   font-size: 12px;
-  color: #8A93A8;
+  color: #67677A;
   line-height: 1.5;
 }
 
 .partner-bio__footnote {
   font-size: 11px;
   line-height: 1.55;
-  color: #8A93A8;
+  color: #67677A;
 }
 
 /* ── Phones ───────────────────────────────────────────────────────────

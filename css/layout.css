@@ -38,9 +38,14 @@
   z-index: var(--z-sidebar);
 }
 
+/* Brand bar — the Recast lockup sits on a solid Primary Blue field, the
+   same treatment the brand system specifies for header bars. (The wordmark
+   markup already assumed a dark field: its first word was set to white and
+   was rendering invisibly against the old white header.) */
 .sidebar__header {
   padding: var(--space-5) var(--space-5) var(--space-4);
-  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-primary);
+  border-bottom: 2px solid var(--color-accent);
   flex-shrink: 0;
 }
 
@@ -65,11 +70,22 @@
 }
 
 .sidebar__logo-text {
-  color: var(--color-text-primary);
   font-family: var(--font-display);
   font-size: var(--text-lg);
-  font-weight: var(--font-bold);
   letter-spacing: -0.02em;
+}
+
+/* "Recast" equivalent — bold, white on the navy field */
+.sidebar__logo-name {
+  color: #FFFFFF;
+  font-weight: var(--font-bold);
+}
+
+/* "Software" equivalent — regular weight, Accent Cyan */
+.sidebar__logo-suffix {
+  color: var(--color-accent);
+  font-weight: var(--font-normal);
+  margin-left: var(--space-1);
 }
 
 .sidebar__nav {

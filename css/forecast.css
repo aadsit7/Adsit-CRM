@@ -315,7 +315,7 @@
 }
 .forecast-chevron--in_progress {
   background: var(--color-primary-lighter);
-  color: var(--color-surface);
+  color: var(--color-text-primary); /* cyan is a fill; its label goes dark */
 }
 .forecast-chevron--not_started {
   background: var(--color-surface-hover);
@@ -788,7 +788,7 @@
   padding-left: var(--space-3);
 }
 .event-chevron--complete { background: var(--color-primary); color: var(--color-surface); }
-.event-chevron--in_progress { background: var(--color-primary-lighter); color: var(--color-surface); }
+.event-chevron--in_progress { background: var(--color-primary-lighter); color: var(--color-text-primary); }
 .event-chevron--not_started { background: var(--color-surface-hover); color: var(--color-text-muted); }
 .event-chevron__num { font-size: var(--text-xs); font-weight: var(--font-bold); opacity: 0.8; }
 .event-chevron__name { font-size: var(--text-sm); font-weight: var(--font-bold); line-height: 1.2; }

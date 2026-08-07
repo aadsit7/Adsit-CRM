@@ -19,7 +19,7 @@ html {
 }
 
 * {
-  -webkit-tap-highlight-color: rgba(47, 107, 255, 0.12);
+  -webkit-tap-highlight-color: rgba(0, 0, 204, 0.12);
 }
 
 /* The iOS-style bottom tab bar is a phones-only affordance. Hidden by
@@ -155,7 +155,7 @@ html {
     border-radius: var(--radius-md);
     background: var(--color-primary);
     color: #fff;
-    box-shadow: 0 4px 12px rgba(47, 107, 255, 0.38);
+    box-shadow: 0 4px 12px rgba(0, 0, 204, 0.38);
   }
 
   .bottom-nav__tab--add .bottom-nav__icon svg {
@@ -619,11 +619,11 @@ html {
     gap: 6px;
     border: none;
     border-radius: 999px;
-    background: var(--color-primary, #2F6BFF);
+    background: var(--color-primary, #0000CC);
     color: #fff;
     font-size: 12px;
     font-weight: 600;
-    box-shadow: 0 2px 6px rgba(47, 107, 255, 0.35);
+    box-shadow: 0 2px 6px rgba(0, 0, 204, 0.35);
   }
   .quill-editor-wrapper .quill-editor-expand-btn::after {
     content: "Full screen";
@@ -647,7 +647,7 @@ html {
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
     border: none;
-    background: var(--color-primary, #2F6BFF);
+    background: var(--color-primary, #0000CC);
     color: #fff;
   }
   .quill-editor-fullscreen .quill-editor .ql-editor {
@@ -735,7 +735,7 @@ html {
     border-bottom: 1px solid var(--color-border-light);
     font-size: 15px;
     line-height: 1.45;
-    color: #171D2B;
+    color: #1A1A2E;
     overflow-wrap: anywhere;
   }
 
@@ -820,9 +820,9 @@ html {
   }
 
   .partner-contacts__body .partner-contacts__actions .events-page__action-link--danger {
-    color: #EF4E5B;
-    border-color: #F3C7CC;
-    background: #FDF3F4;
+    color: #CC2222;
+    border-color: #EFC0C0;
+    background: #FBEAEA;
   }
 }
 

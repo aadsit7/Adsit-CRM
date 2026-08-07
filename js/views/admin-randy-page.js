@@ -129,9 +129,9 @@ function buildPresetBar() {
     select.value = activeIdx >= 0 ? (presets[activeIdx].prompt_id || '') : '';
 
     // Colored swatch mirrors the widget's Mode dot for the active preset.
-    const color = activeIdx >= 0 ? (RANDY_PRESET_COLORS[activeIdx] || '#6b7280') : '';
+    const color = activeIdx >= 0 ? (RANDY_PRESET_COLORS[activeIdx] || '#4a4a5a') : '';
     dot.style.background = color || 'transparent';
-    dot.style.borderColor = color ? 'transparent' : '#9ca3af';
+    dot.style.borderColor = color ? 'transparent' : '#67677a';
     dot.classList.toggle('randy-preset-bar__dot--default', !color);
 
     // Guide the admin to Setup when nothing is configured yet.

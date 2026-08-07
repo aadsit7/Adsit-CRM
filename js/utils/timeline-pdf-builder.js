@@ -6,13 +6,13 @@
 // ============================================================
 
 // ── Palette ───────────────────────────────────────────────────
-const PRIMARY_BLUE = [30,  48,  204]; // #2F6BFF
-const DARK_TEXT    = [26,  26,  26];  // #1a1a1a
-const BODY_TEXT    = [51,  51,  51];  // #333333
-const MUTED_TEXT   = [102, 102, 102]; // #666666
-const CHECK_GREEN  = [46,  125, 50];  // #2e7d32
-const LIGHT_BORDER = [224, 224, 224]; // #e0e0e0
-const BG_LIGHT     = [245, 245, 245]; // #f5f5f5
+const PRIMARY_BLUE = [0, 0, 204]; // Primary Blue   #0000CC
+const DARK_TEXT    = [26, 26, 46]; // Dark Text      #1A1A2E
+const BODY_TEXT    = [74, 74, 90]; // Medium Gray    #4A4A5A
+const MUTED_TEXT   = [103, 103, 122]; // Muted text     #67677A
+const CHECK_GREEN  = [15, 122, 63]; // Green          #0F7A3F
+const LIGHT_BORDER = [221, 221, 238]; // Divider        #DDDDEE
+const BG_LIGHT     = [240, 240, 246]; // Light Gray     #F0F0F6
 const WHITE        = [255, 255, 255];
 
 // ── Page geometry ─────────────────────────────────────────────

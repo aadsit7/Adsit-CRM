@@ -61,28 +61,28 @@
 }
 
 .calendar__event--webinar {
-  background: rgba(47, 107, 255, 0.10);
-  color: #2F6BFF;
+  background: rgba(0, 0, 204, 0.10);
+  color: #0000CC;
 }
 
 .calendar__event--workshop {
-  background: rgba(47, 107, 255, 0.12);
-  color: #0099CC;
+  background: rgba(34, 34, 221, 0.12);
+  color: #2222DD;
 }
 
 .calendar__event--conference {
   background: rgba(26, 26, 46, 0.12);
-  color: #171D2B;
+  color: #1A1A2E;
 }
 
 .calendar__event--campaign {
-  background: rgba(204, 136, 0, 0.12);
-  color: #B97A1A;
+  background: rgba(204, 136, 0, 0.14);
+  color: #8A5C00;
 }
 
 .calendar__event--other {
   background: rgba(74, 74, 90, 0.12);
-  color: #4A5468;
+  color: #4A4A5A;
 }
 
 /* calendar.js uses .calendar__more */

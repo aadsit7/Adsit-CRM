@@ -1289,9 +1289,9 @@ function nextStepEmailTargetLabel(step) {
  * active amber, pending dark, no red anywhere.
  */
 function buildNextStepsEmailHtml(partner, steps) {
-  const cell = 'border:1px solid #DCE1EC;padding:6px 10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#171D2B;vertical-align:top;text-align:left;';
-  const head = `${cell}background-color:#F5F7FC;font-weight:700;font-size:12px;`;
-  const muted = '<span style="color:#8A93A6;">&mdash;</span>';
+  const cell = 'border:1px solid #DDDDEE;padding:6px 10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#1A1A2E;vertical-align:top;text-align:left;';
+  const head = `${cell}background-color:#F6F8FF;font-weight:700;font-size:12px;`;
+  const muted = '<span style="color:#67677A;">&mdash;</span>';
   const statusColor = (status) => {
     if (status === 'Complete') return '#0F7A3F';
     if (status === 'Pending') return '#1A1A2E';
@@ -1299,7 +1299,7 @@ function buildNextStepsEmailHtml(partner, steps) {
   };
 
   const rows = steps.map(step => {
-    const rowCell = step.status === 'Complete' ? `${cell}background-color:#F0FFF0;` : cell;
+    const rowCell = step.status === 'Complete' ? `${cell}background-color:#E7F2EC;` : cell;
     const milestone = step.kind === 'gate'
       ? `<strong>${escapeHtml(step.next_step)}</strong>`
       : escapeHtml(step.next_step);
@@ -1307,7 +1307,7 @@ function buildNextStepsEmailHtml(partner, steps) {
       ? `<span style="font-weight:600;">${escapeHtml(formatDate(step.due_date))}</span>`
       : (step.timing
           ? escapeHtml(step.timing)
-          : '<span style="color:#8A93A6;font-style:italic;">To be scheduled</span>');
+          : '<span style="color:#67677A;font-style:italic;">To be scheduled</span>');
     const status = step.status
       ? `<strong style="color:${statusColor(step.status)};">${escapeHtml(step.status)}</strong>`
       : muted;
@@ -1319,7 +1319,7 @@ function buildNextStepsEmailHtml(partner, steps) {
       + '</tr>';
   }).join('');
 
-  return `<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#171D2B;"><strong>Next Steps &mdash; ${escapeHtml(partner.display_name || 'Partner')}</strong></p>`
+  return `<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A2E;"><strong>Next Steps &mdash; ${escapeHtml(partner.display_name || 'Partner')}</strong></p>`
     + '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
     + '<thead><tr>'
     + `<th style="${head}">Milestone</th>`
@@ -3726,8 +3726,8 @@ function buildTranscriptsPanel(partner, transcripts) {
 // ============================================
 
 const EVENT_TYPE_COLORS = {
-  'Webinar': '#2F6BFF', 'Workshop': '#2F6BFF',
-  'Conference': '#171D2B', 'Campaign': '#B97A1A', 'Other': '#4A5468',
+  'Webinar': '#0000CC', 'Workshop': '#2222DD',
+  'Conference': '#1A1A2E', 'Campaign': '#CC8800', 'Other': '#4A4A5A',
 };
 
 // ============================================
@@ -3737,7 +3737,7 @@ const EVENT_TYPE_COLORS = {
 // Single brand-cyan fill for chart bars per the Recast brief — replaces
 // the previous near-black/per-event-type rainbow that read as "off-brand"
 // in the screenshot review.
-const PARTNER_CHART_BAR_COLOR = '#2F6BFF';
+const PARTNER_CHART_BAR_COLOR = '#0000CC';
 
 function buildPartnerRevenueByEvent(partnerEvents, opportunities) {
   const eventRevenue = {};

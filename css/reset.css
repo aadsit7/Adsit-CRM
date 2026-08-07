@@ -25,7 +25,7 @@ html, body, button, input, select, textarea {
 body {
   font-size: 14px;
   line-height: 1.5;
-  color: #171D2B;
+  color: #1A1A2E;
   background-color: var(--color-bg);
   overflow: hidden;
 }
@@ -87,9 +87,10 @@ table {
   outline-offset: 2px;
 }
 
+/* Accent Cyan is a highlight fill — the selected text stays dark on it. */
 ::selection {
   background: var(--color-primary-lighter);
-  color: white;
+  color: var(--color-text-primary);
 }
 
 /* Scrollbar styling */

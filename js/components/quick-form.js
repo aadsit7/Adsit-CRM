@@ -889,7 +889,7 @@ function makeLabel(name, label, required) {
   if (required) {
     const star = document.createElement('span');
     star.textContent = ' *';
-    star.style.color = 'var(--color-danger, #dc2626)';
+    star.style.color = 'var(--color-danger, #cc2222)';
     lbl.appendChild(star);
   }
   return lbl;
