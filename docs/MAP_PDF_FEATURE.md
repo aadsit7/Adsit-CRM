@@ -120,22 +120,41 @@ don't crash the renderer.
 Non-blocking overlay inside the Randy window (bottom-right), stacked
 if multiple generations are in flight:
 
-| Stage                    | Trigger                               |
-|--------------------------|---------------------------------------|
-| `Reading description…`   | pill created                          |
-| `Reading description…`   | `requestMapPdfJson()` request fired   |
-| `Building PDF…`          | JSON parsed successfully              |
-| `Saving to Drive…`       | Drive upload started                  |
-| `Saved to {customer}` ✓  | upload succeeded (fades after 3s)     |
-| `Failed — see card`      | any error (fades after 5s)            |
+| Stage                    | Trigger                               | Bar |
+|--------------------------|---------------------------------------|-----|
+| `Reading description…`   | pill created                          | 0/3 |
+| `Reading description…`   | `requestMapPdfJson()` request fired   | 0/3 |
+| `Building PDF…`          | JSON parsed successfully              | 1/3 |
+| `Saving to Drive…`       | Drive upload started                  | 2/3 |
+| `Saved to {customer}` ✓  | upload succeeded (fades after 3s)     | 100% |
+| `Failed — see card`      | any error (fades after 5s)            | stops where it failed |
 
 - Elapsed timer counts every second from creation: `0:00` → `1:23`.
-- At 2:30 the spinner goes amber and the stage switches to
-  "Taking longer than expected… still trying".
-- Hard failure at 4:00 with `Timed out after 4 minutes`.
+- A progress bar runs under the stage line. It is measured in the stages
+  above — the only checkpoints the pipeline actually has. Between two
+  checkpoints it creeps forward on an exponential-decay curve so a long
+  stage doesn't look frozen, but it can never reach the next checkpoint:
+  the bar never claims progress the job hasn't reported.
+- **The give-up timer measures silence, not duration.** Every stage or
+  progress update restarts it. At 2:30 *without a word* the spinner goes
+  amber ("Taking longer than expected… still trying"); at the budget
+  (default 10:00 of silence, per-caller via `hardTimeoutMs`) the pill
+  parks with `No progress for N minutes`.
+- A pill parked that way is a **guess**, not a verdict, so it does not fade
+  out and any later `updatePillStage` / `markPillSuccess` / `markPillFailure`
+  revives it and overwrites the guess with the truth. A deliberate settle
+  (success, failure, dismiss) is final and can't be overwritten.
 
 Multiple pills stack with 8px gap; pills opt back into pointer events
-so the user can interact with them (hover to keep on-screen, etc.).
+so the user can interact with them (hover to keep on-screen, click to
+dismiss). The stack scrolls past 60vh so a batch of concurrent jobs can't
+wallpaper the viewport.
+
+While any pill is unsettled the page installs a `beforeunload` guard: a
+reload or a closed tab kills every in-flight `fetch` (this is a static site
+with no server-side job runner), so the browser asks before the work is
+thrown away. In-app navigation is unaffected — no view's `cleanup()` aborts
+a run, and the stack is attached to `document.body`.
 
 ---
 

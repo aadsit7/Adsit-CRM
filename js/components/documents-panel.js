@@ -29,6 +29,12 @@ import { sectionIcon } from './section-icon.js';
 
 const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.csv', '.pptx', '.png', '.jpg', '.jpeg'];
 
+// How long the Analyze pill waits on a silent server-side extraction before
+// giving up on it. Apps Script caps a single document analysis at 6 minutes,
+// so anything shorter would routinely condemn healthy work; 10 minutes leaves
+// the cap room to be hit and reported honestly.
+const DOC_ANALYZE_PILL_TIMEOUT_MS = 10 * 60_000;
+
 /**
  * List documents stored in Drive for a given entity (opportunity or event).
  * Optional AbortSignal lets non-interactive callers (the partner contact
@@ -226,7 +232,16 @@ export function buildDocumentsPanel({
       // The floating Randy pill carries progress in the global body-fixed
       // stack, so the user can close this modal (or leave the page entirely)
       // and still watch the document analysis run to completion.
-      const pill = createPill('Analyzing document…', { label: file.file_name || 'Document' });
+      // onAnalyze is one opaque server-side extraction with no interior
+      // checkpoints, so the bar sweeps rather than inventing a percentage.
+      // The budget is generous for the same reason: a scanned PDF's OCR can
+      // run for minutes, and a pill that gives up first would report a
+      // failure for work that is still going and then swallow its result.
+      const pill = createPill('Analyzing document…', {
+        label: file.file_name || 'Document',
+        hardTimeoutMs: DOC_ANALYZE_PILL_TIMEOUT_MS,
+        progress: true,
+      });
       try {
         await onAnalyze(file, link);
         markPillSuccess(pill, 'Analyzed');

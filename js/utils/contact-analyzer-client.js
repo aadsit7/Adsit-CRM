@@ -36,7 +36,9 @@ import { parseContactBriefResponse } from './contact-analyzer-schema.js';
 const CONTACT_MODEL = 'claude-opus-4-8';
 const CONTACT_MAX_TOKENS = 16000;
 const CONTACT_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
-const CONTACT_MAX_ROUNDS = 6;               // pause_turn continuations
+// Exported so a caller's progress bar is sized by the SAME number the loop
+// runs on, instead of a copy that can drift out of step with it.
+export const CONTACT_MAX_ROUNDS = 6;        // pause_turn continuations
 const CONTACT_MAX_SEARCHES = 25;            // web_search max_uses
 
 function requireApiKey() {

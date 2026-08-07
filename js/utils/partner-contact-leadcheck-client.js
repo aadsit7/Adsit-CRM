@@ -18,8 +18,17 @@ import { buildLeadCheckPrompt, parseLeadCheckResponse } from './partner-contact-
 const LEADCHECK_MODEL = 'claude-opus-4-8';
 const LEADCHECK_MAX_TOKENS = 16000;
 const LEADCHECK_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
-const LEADCHECK_MAX_ROUNDS = 6;               // pause_turn continuations
 const LEADCHECK_MAX_SEARCHES = 25;            // web_search max_uses per round
+
+// Exported so the progress pill can size its bar from the SAME number the loop
+// runs on. A view that hard-coded its own "6" would silently misreport the
+// moment this budget changed — round 7 of 6, or a bar that stops at 75%.
+export const LEADCHECK_MAX_ROUNDS = 6;        // pause_turn continuations
+
+// Worst case one run can legitimately occupy: every round using its full
+// request budget. The caller sizes its pill from this so a healthy long run is
+// never mistaken for a wedged one.
+export const LEADCHECK_MAX_RUN_MS = LEADCHECK_MAX_ROUNDS * LEADCHECK_REQUEST_TIMEOUT_MS;
 
 function requireApiKey() {
   const key = getRuntimeConfig('ANTHROPIC_API_KEY');

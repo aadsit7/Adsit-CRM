@@ -1225,7 +1225,14 @@
   flex-direction: column-reverse; /* newest pill at bottom, older ones above */
   gap: 8px;
   pointer-events: none;
+  /* Analyzing a dozen contacts at once must not wallpaper the viewport. The
+     stack scrolls instead of growing past this; newest is at the bottom, which
+     is where the scroll rests. */
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+#map-pdf-global-pill-stack::-webkit-scrollbar { display: none; }
 #map-pdf-global-pill-stack .randy-map-pill {
   pointer-events: auto;
 }
@@ -1242,6 +1249,57 @@
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
+}
+
+/* ── Per-job progress bar ──────────────────────────────────────────────
+   Its own full-width row under the stage line (flex-wrap on the pill), so
+   every concurrently running job shows its own bar. The fill transitions
+   because the pill repaints it once a second — without the transition the
+   eased crawl between checkpoints would step visibly instead of gliding. */
+/* Inset by 4px each side: the pill is a 999px capsule, so a truly full-width
+   bar runs into the curve at both ends and reads as overflow. */
+.randy-map-pill__progress {
+  flex: 0 0 calc(100% - 8px);
+  height: 3px;
+  margin: 1px 4px 0;
+  border-radius: 999px;
+  background: #e7ebf3;
+  overflow: hidden;
+}
+.randy-map-pill__progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #2A7FFF;
+  transition: width 1s linear, background-color 0.3s ease;
+}
+.randy-map-pill--warn    .randy-map-pill__progress-fill { background: #B97A1A; }
+.randy-map-pill--success .randy-map-pill__progress-fill { background: #0A8F82; }
+.randy-map-pill--failure .randy-map-pill__progress-fill { background: #B97A1A; }
+
+/* Steps not known yet — sweep instead of sitting at zero. The fill is driven
+   by the animation here, so its width is handed over to keyframes. */
+.randy-map-pill--indeterminate .randy-map-pill__progress-fill {
+  width: 35%;
+  transition: none;
+  animation: randy-map-pill-sweep 1.4s ease-in-out infinite;
+}
+@keyframes randy-map-pill-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* A pill the give-up timer settled is NOT a reported failure — the job may
+   still land and revive it — so it reads as paused rather than finished. */
+.randy-map-pill--stalled .randy-map-pill__progress-fill {
+  opacity: 0.45;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .randy-map-pill__progress-fill { transition: none; }
+  .randy-map-pill--indeterminate .randy-map-pill__progress-fill { animation: none; width: 100%; opacity: 0.35; }
 }
 
 /* ===========================================================

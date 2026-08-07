@@ -45,8 +45,12 @@ pill in the global body-fixed stack (`createPill`), so the user can switch tabs
 or open another partner while the research continues. Only one bio run happens
 at a time (`bioRunInFlight`), the button state is restored on re-render, and
 the result is written back by `partner_id` regardless of where the user
-navigated. The pill's hard timeout is raised to 20 minutes because a real
-research pass legitimately runs for minutes across several rounds.
+navigated. The pill's give-up budget is raised to 20 minutes because a real
+research pass legitimately runs for minutes across several rounds — and that
+budget is now 20 minutes of *silence*, not of elapsed time, so each round's
+`onProgress` keeps it quiet. The pill also carries a progress bar sized by
+`BIO_MAX_ROUNDS` (imported from the client), which advances one segment per
+research pass.
 
 ## The research contract
 

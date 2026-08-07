@@ -50,7 +50,11 @@ import {
   leadCheckButtonState,
   leadCheckReportToPlainText,
 } from '../utils/partner-contact-leadcheck.js';
-import { requestLeadCheckAnalysis } from '../utils/partner-contact-leadcheck-client.js';
+import {
+  requestLeadCheckAnalysis,
+  LEADCHECK_MAX_ROUNDS,
+  LEADCHECK_MAX_RUN_MS,
+} from '../utils/partner-contact-leadcheck-client.js';
 import {
   PARTNER_BIO_HEADERS,
   NA,
@@ -59,7 +63,7 @@ import {
   partnerBioIsEmpty,
   selectPartnerBioRow,
 } from '../utils/partner-bio-schema.js';
-import { requestPartnerBio } from '../utils/partner-bio-client.js';
+import { requestPartnerBio, BIO_MAX_ROUNDS } from '../utils/partner-bio-client.js';
 import {
   PARTNER_NEXT_STEP_HEADERS,
   NEXT_STEP_STATUSES,
@@ -72,7 +76,7 @@ import {
   sanitizeNoteTextForAnalysis,
 } from '../utils/partner-next-steps-schema.js';
 import { requestPartnerNextSteps } from '../utils/partner-next-steps-client.js';
-import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
+import { createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 import { ICONS, iconButton } from '../components/icon-button.js';
 import { sectionIcon } from '../components/section-icon.js';
 
@@ -777,6 +781,7 @@ async function runPartnerBioAnalysis(partner, btn) {
   const pill = createPill('Researching…', {
     label: partner.display_name || 'Partner',
     hardTimeoutMs: BIO_PILL_TIMEOUT_MS,
+    progress: { steps: BIO_MAX_ROUNDS, stepMs: 60_000 },
   });
   let researched = false;
 
@@ -784,7 +789,10 @@ async function runPartnerBioAnalysis(partner, btn) {
     const bio = await requestPartnerBio({
       partner,
       today: todayISO(),
-      onProgress: (round) => updatePillStage(pill, round <= 1 ? 'Researching…' : `Researching… (pass ${round})`),
+      onProgress: (round) => {
+        setPillProgress(pill, round - 1, BIO_MAX_ROUNDS);
+        updatePillStage(pill, round <= 1 ? 'Researching…' : `Researching… (pass ${round})`);
+      },
     });
 
     // An all-NA profile is a failed run, not a result worth storing over a
@@ -1613,9 +1621,13 @@ async function runNextStepsAnalysis(partner, chosenTranscripts) {
 
   // Progress rides the global Randy pill so it stays visible after the user
   // leaves this partner page — the analysis keeps running either way.
+  // One opaque model call — there are no checkpoints inside it to measure, so
+  // the bar sweeps rather than pretending to a percentage it cannot know. It
+  // turns determinate at 'Saving…', the one real checkpoint this flow has.
   const pill = createPill('Analyzing notes…', {
     label: partner.display_name || 'Partner',
     hardTimeoutMs: NEXT_STEPS_PILL_TIMEOUT_MS,
+    progress: true,
   });
 
   try {
@@ -1641,6 +1653,7 @@ async function runNextStepsAnalysis(partner, chosenTranscripts) {
       console.info('[Partner Next Steps] proposals rejected by the verbatim evidence check:', result.dropped);
     }
 
+    setPillProgress(pill, 0.85);
     updatePillStage(pill, 'Saving…');
 
     let records = [];
@@ -2577,7 +2590,20 @@ async function handleScanContacts(partner, btn) {
   // Progress rides the global Randy pill so it stays visible after the user
   // leaves this partner page; setLabel also mirrors the current stage onto the
   // button while it is still on-screen.
-  const pill = createPill('Preparing…', { label: partner.display_name || 'Partner' });
+  // The bar starts indeterminate because the step count is not knowable until
+  // the attachment listing comes back; setScanProgress switches it to a real
+  // bar the moment that number exists. The budget is per-file: each attachment
+  // gets its own server-side analyze call worth up to SCAN_ANALYZE_FILE_TIMEOUT_MS,
+  // so a ten-file scan is legitimately a long job and must not be mistaken for
+  // a stuck one.
+  const pill = createPill('Preparing…', {
+    label: partner.display_name || 'Partner',
+    hardTimeoutMs: SCAN_ANALYZE_FILE_TIMEOUT_MS * 2,
+    progress: true,
+  });
+  // Total steps = prepare + one per attachment + the notes/extraction pass.
+  let scanSteps = 0;
+  const setScanProgress = (done) => { if (scanSteps > 0) setPillProgress(pill, done, scanSteps); };
   const setLabel = (text) => {
     updatePillStage(pill, text);
     if (btn.isConnected) btn.textContent = text;
@@ -2629,8 +2655,13 @@ async function handleScanContacts(partner, btn) {
     // before anything else looks at the files.
     const pendingFiles = withoutAnalyzerExports(files)
       .filter(f => String(f.analyzed || '').toUpperCase() !== 'TRUE');
+    // Step count is knowable now: preparing (done) + one per attachment + the
+    // notes pass. The bar turns determinate here.
+    scanSteps = pendingFiles.length + 2;
+    setScanProgress(1);
     for (let i = 0; i < pendingFiles.length; i++) {
       const file = pendingFiles[i];
+      setScanProgress(1 + i);
       setLabel(`Attachment ${i + 1}/${pendingFiles.length}…`);
       try {
         const data = await fileApiRequest({
@@ -2688,6 +2719,7 @@ async function handleScanContacts(partner, btn) {
     }
 
     // ── Stage 2: descriptions / meetings / partner documents ────────
+    setScanProgress(scanSteps - 1);
     setLabel('Scanning notes…');
     const { sources, coverage } = collectPartnerContactSources({
       partnerId: partner.partner_id,
@@ -2881,8 +2913,20 @@ async function runLeadCheck(partner, contact, btn) {
   btn.disabled = true;
   btn.textContent = 'Analyzing…';
   // Global Randy pill = the always-visible progress indicator, so the user can
-  // leave this partner page and still watch the contact's analysis run.
-  const pill = createPill('Analyzing…', { label: contact.name || 'Contact' });
+  // leave this partner page and still watch the contact's analysis run. Each
+  // contact gets its OWN pill (rows analyze in parallel), so the stack shows
+  // one labelled bar per contact in flight.
+  //
+  // Both budgets come from the client rather than being guessed here. This
+  // pill used to take the component's 4-minute default while the research it
+  // was reporting on is allowed 24 — so on any run past four minutes it
+  // declared a timeout, went settled, and then swallowed the real "verified"
+  // that arrived minutes later. The user saw the analysis stop; it hadn't.
+  const pill = createPill('Analyzing…', {
+    label: contact.name || 'Contact',
+    hardTimeoutMs: LEADCHECK_MAX_RUN_MS,
+    progress: { steps: LEADCHECK_MAX_ROUNDS, stepMs: 60_000 },
+  });
   const setStage = (text) => {
     updatePillStage(pill, text);
     if (btn.isConnected) btn.textContent = text;
@@ -2924,8 +2968,16 @@ async function runLeadCheck(partner, contact, btn) {
     })();
     const report = await requestLeadCheckAnalysis({
       contact, snapshot, sourceMaterial, nowIso, timezone,
-      onProgress: (round) => setStage(round > 1 ? `Verifying… (round ${round})` : 'Analyzing…'),
+      // Rounds are the only checkpoints the research genuinely has, so they
+      // are what the bar is measured in — round N starting means N-1 are done.
+      // Between them the pill eases forward on its own, which is also what
+      // keeps the give-up timer quiet: every round proves the job is alive.
+      onProgress: (round) => {
+        setPillProgress(pill, round - 1, LEADCHECK_MAX_ROUNDS);
+        setStage(round > 1 ? `Verifying… (round ${round})` : 'Analyzing…');
+      },
     });
+    setStage('Saving…');
 
     const record = buildAnalysisRecord({
       state: report.state,

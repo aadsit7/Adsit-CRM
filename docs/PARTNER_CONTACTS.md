@@ -118,6 +118,13 @@ Contacts list only re-renders if they are still on that partner's page. The
 pill settles green with the merge summary (e.g. `2 added, 1 updated`), or
 amber on failure.
 
+The pill's progress bar starts as an indeterminate sweep — the step count is
+unknowable until the attachment listing returns — and turns determinate the
+moment it isn't, sized `attachments + 2` (prepare, one per attachment, the
+notes pass). Its give-up budget is `SCAN_ANALYZE_FILE_TIMEOUT_MS × 2`, i.e.
+twice the longest single silence the scan can legitimately produce, so a
+file-heavy scan is never mistaken for a wedged one.
+
 ## Who qualifies — the affiliation rule
 
 A row in this table means "a person working for or representing **this

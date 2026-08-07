@@ -16,7 +16,7 @@ import { filterPartners, filterOpportunities } from '../utils/filters.js';
 import { ensureHtml, stripHtml } from '../components/quill-editor.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { generateMapPdfFromSelection } from '../utils/map-pdf-from-selection.js';
-import { createPill, updatePillStage, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
+import { createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 import { fileApiRequest as fileApiRequestImpl } from '../utils/file-api.js';
 import {
   buildDescriptionsPanel,
@@ -1140,7 +1140,14 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
             const descLabel = desc.description_date
               ? `Standardizing — ${formatDate(desc.description_date)}`
               : 'Standardizing description…';
-            const progressPill = createPill('Calling Claude…', { label: descLabel, global: true });
+            // Streamed output has no total to divide by, so the bar sweeps
+            // while text arrives and turns determinate at the save — the one
+            // point where a real fraction exists. (Each streamed chunk also
+            // updates the stage, which is what keeps the pill's give-up timer
+            // quiet for the whole 5-minute standardize budget.)
+            const progressPill = createPill('Calling Claude…', {
+              label: descLabel, global: true, progress: true,
+            });
 
             standardizeJobs.set(realId, { pill: progressPill, desc, status: 'running' });
 
@@ -1157,6 +1164,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
                   }
                 });
 
+                setPillProgress(progressPill, 0.85);
                 updatePillStage(progressPill, 'Saving…');
                 await applyStandardizedDescription(opportunityId, realId, result.category, result.standardizedText);
 
@@ -1518,16 +1526,19 @@ function runOppMapPdfFromSelection({ opp, entries, cardSlot, onFileSaved }) {
   // Pill lives in the global body-fixed stack — persists regardless of whether
   // the opportunity modal stays open. Label shows the customer name so the user
   // knows which generation is which when multiple are running concurrently.
+  // The pipeline announces three ordered stages, so the bar is measured in
+  // them: read/synthesize (the model call), build the PDF, save to Drive.
+  const MAP_STEPS = 3;
   const pill = createPill(
     count > 1 ? `Synthesizing ${count} descriptions…` : 'Reading description…',
-    { label: opp.customer_name || opp.deal_name || '' },
+    { label: opp.customer_name || opp.deal_name || '', progress: { steps: MAP_STEPS, stepMs: 45_000 } },
   );
 
   const onStage = (stage) => {
-    if (stage === 'synthesizing') updatePillStage(pill, `Synthesizing ${count} descriptions…`);
-    else if (stage === 'reading')  updatePillStage(pill, 'Reading description…');
-    else if (stage === 'building') updatePillStage(pill, 'Building PDF…');
-    else if (stage === 'saving')   updatePillStage(pill, 'Saving to Drive…');
+    if (stage === 'synthesizing') { setPillProgress(pill, 0, MAP_STEPS); updatePillStage(pill, `Synthesizing ${count} descriptions…`); }
+    else if (stage === 'reading')  { setPillProgress(pill, 0, MAP_STEPS); updatePillStage(pill, 'Reading description…'); }
+    else if (stage === 'building') { setPillProgress(pill, 1, MAP_STEPS); updatePillStage(pill, 'Building PDF…'); }
+    else if (stage === 'saving')   { setPillProgress(pill, 2, MAP_STEPS); updatePillStage(pill, 'Saving to Drive…'); }
   };
 
   const normalizedEntries = entries.map(d => ({

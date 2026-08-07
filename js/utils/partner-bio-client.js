@@ -26,7 +26,9 @@ import { parsePartnerBioResponse } from './partner-bio-schema.js';
 const BIO_MODEL = 'claude-opus-5';
 const BIO_MAX_TOKENS = 16000;
 const BIO_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
-const BIO_MAX_ROUNDS = 8;               // pause_turn continuations
+// Exported so a caller's progress bar is sized by the SAME number the loop
+// runs on, instead of a copy that can drift out of step with it.
+export const BIO_MAX_ROUNDS = 8;        // pause_turn continuations
 const BIO_MAX_SEARCHES = 30;            // web_search max_uses per round
 
 function requireApiKey() {
