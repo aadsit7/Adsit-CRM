@@ -31,11 +31,11 @@ const TYPE_COLORS = {
 };
 
 const EVENT_TYPE_COLORS = {
-  'Webinar': '#2F6BFF',
-  'Workshop': '#2F6BFF',
-  'Conference': '#171D2B',
-  'Campaign': '#B97A1A',
-  'Other': '#4A5468',
+  'Webinar': '#0000CC',
+  'Workshop': '#2222DD',
+  'Conference': '#1A1A2E',
+  'Campaign': '#CC8800',
+  'Other': '#4A4A5A',
 };
 
 const HQ_COORDINATES = {
@@ -57,7 +57,7 @@ const HQ_COORDINATES = {
 
 // Single brand-cyan fill for all bars per the Recast brief —
 // consistent hue, no off-brand colors (was a 6-color rainbow palette).
-const CHART_BAR_COLOR = '#2F6BFF';
+const CHART_BAR_COLOR = '#0000CC';
 
 function computePartnerSourceData(opportunities, partners) {
   const byPartner = {};
@@ -548,7 +548,7 @@ function buildPartnersView(container, partnerList, partnerStats, typeData, uniqu
     onClick: () => applyFilter('all'),
   },
     el('div', { class: 'type-card__header' },
-      el('div', { class: 'type-card__color', style: { background: '#2F6BFF' } }),
+      el('div', { class: 'type-card__color', style: { background: '#0000CC' } }),
       el('div', { class: 'type-card__name' }, 'All Types')
     ),
     el('div', { class: 'type-card__count' }, String(partnerList.length)),
@@ -718,7 +718,7 @@ function initMap(partners) {
     if (!coords) return;
 
     const tc = tierSlug(partner.tier);
-    const color = TIER_COLORS[tc] || '#2F6BFF';
+    const color = TIER_COLORS[tc] || '#0000CC';
 
     const icon = L.divIcon({
       className: 'map-marker',

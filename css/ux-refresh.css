@@ -83,7 +83,7 @@ h1, h2, h3,
 /* View toggle — segmented control */
 .view-toggle {
   display: inline-flex;
-  background: #EEF1F8;
+  background: #F0F0F6;
   border-radius: var(--radius-full);
   padding: 3px;
   gap: 2px;
@@ -118,6 +118,52 @@ h1, h2, h3,
   box-shadow: var(--shadow-xs);
 }
 
+/* A view toggle that sits *inside* a filter bar (Opportunities' Board/List
+   pair) is a control in a row of controls, not a page-level tab strip.
+   dashboard.css styles the bare .view-toggle as an underline tab bar, which
+   left this one baseline-floating next to the 40px-tall search box, selects
+   and date inputs. Restate it here as a real segmented control matched to
+   that 40px row. Specificity (0,3,0) so it beats the tab-bar rules. */
+.filter-bar .view-toggle:not(.type-filter-bar) {
+  height: 40px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+  margin: 0;
+}
+
+.filter-bar .view-toggle:not(.type-filter-bar) .btn {
+  height: 32px;
+  padding: 0 16px;
+  margin-bottom: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.filter-bar .view-toggle:not(.type-filter-bar) .btn--secondary:hover {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+/* Selected segment: navy, same primary surface as the rest of the portal. */
+.filter-bar .view-toggle:not(.type-filter-bar) .btn--primary,
+.filter-bar .view-toggle:not(.type-filter-bar) .btn--primary:hover {
+  background: var(--color-primary);
+  color: #FFFFFF;
+  border: none;
+  box-shadow: none;
+}
+
 /* ---------- Stat cards ---------- */
 .stat-card {
   background: var(--color-surface);
@@ -134,7 +180,7 @@ h1, h2, h3,
 
 .stat-card--active {
   border-color: var(--color-primary);
-  background: #F0F4FB;
+  background: #F0F0F6;
   box-shadow: var(--focus-ring);
 }
 
@@ -160,7 +206,7 @@ h1, h2, h3,
 }
 
 .table th {
-  background: #F7F9FD;
+  background: #FAFAFE;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
@@ -177,7 +223,7 @@ h1, h2, h3,
 }
 
 .table tbody tr:hover td {
-  background: #F7F9FD;
+  background: #FAFAFE;
 }
 
 .table__row--clickable {
@@ -202,7 +248,7 @@ h1, h2, h3,
 
 /* ---------- Kanban ---------- */
 .kanban__column {
-  background: #EEF1F8;
+  background: #F0F0F6;
   border-radius: var(--radius-lg);
   border: none;
 }
@@ -305,7 +351,7 @@ h1, h2, h3,
 .view-container::-webkit-scrollbar-thumb,
 .kanban__cards::-webkit-scrollbar-thumb,
 .modal__body::-webkit-scrollbar-thumb {
-  background: #C9D1E3;
+  background: #C6C6DC;
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -325,22 +371,22 @@ h1, h2, h3,
    deepened so the active row always reads above the band. */
 
 .table tbody tr:nth-child(even) td {
-  background: rgba(47, 107, 255, 0.035);
+  background: rgba(0, 0, 204, 0.035);
 }
 
 .table tbody tr:hover td,
 .table tbody tr:nth-child(even):hover td {
-  background: rgba(47, 107, 255, 0.07);
+  background: rgba(0, 0, 204, 0.07);
 }
 
 /* Comp view table — same banding. Rows that carry their own semantic
    background (flat / totals / goal-gap / excluded) are left alone. */
 .comp-table tbody tr:nth-child(even):not([class*="comp-table__row--"]) td {
-  background: rgba(47, 107, 255, 0.035);
+  background: rgba(0, 0, 204, 0.035);
 }
 
 .comp-table tbody tr:not([class*="comp-table__row--"]):hover td {
-  background: rgba(47, 107, 255, 0.07);
+  background: rgba(0, 0, 204, 0.07);
 }
 
 /* On phones the tables become stacked cards (see mobile.css) — cards

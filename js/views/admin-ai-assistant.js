@@ -341,7 +341,7 @@ export function renderAdminAIAssistant(container) {
           </div>
         </div>
         <div class="ai-header-actions">
-          <button class="ai-refresh-btn" id="ai-api-key" title="Set API key" style="${getRuntimeConfig('ANTHROPIC_API_KEY') ? '' : 'color:#dc2626;'}">🔑</button>
+          <button class="ai-refresh-btn" id="ai-api-key" title="Set API key" style="${getRuntimeConfig('ANTHROPIC_API_KEY') ? '' : 'color:#cc2222;'}">🔑</button>
           <button class="ai-refresh-btn" id="ai-refresh" title="Refresh sheet data">↻</button>
           <button class="ai-clear-btn" id="ai-clear">Clear Chat</button>
         </div>
@@ -434,7 +434,7 @@ export function renderAdminAIAssistant(container) {
     const key = prompt('Enter your Anthropic API key (copy from Setup page):', current || '');
     if (key !== null) {
       setRuntimeConfig('ANTHROPIC_API_KEY', key.trim());
-      document.getElementById('ai-api-key').style.color = key.trim() ? '' : '#dc2626';
+      document.getElementById('ai-api-key').style.color = key.trim() ? '' : '#cc2222';
     }
   });
 

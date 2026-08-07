@@ -15,9 +15,11 @@ export function tierSlug(tierName) {
 
 export const TIER_OPTIONS = ['Premier/Strategic', 'Value/Preferred', 'Registered'];
 
+// Recast brand: Primary Blue → Accent Cyan → neutral gray.
+// Keep in step with --color-tier-* in css/variables.css.
 export const TIER_COLORS = {
-  'premier-strategic': '#2F6BFF',
-  'value-preferred':   '#2F6BFF',
+  'premier-strategic': '#0000CC',
+  'value-preferred':   '#00BFFF',
   'tier-registered':   '#9B9A9B',
 };
 

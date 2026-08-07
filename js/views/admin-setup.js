@@ -467,15 +467,15 @@ export async function render(container) {
     const key = await syncAiKeyFromBackend();
     if (key) {
       aiKeyStatus.textContent = `✓ Anthropic connected — key loaded from Apps Script (…${key.slice(-4)})`;
-      aiKeyStatus.style.color = '#059669';
+      aiKeyStatus.style.color = '#0f7a3f';
     } else {
       aiKeyStatus.textContent = '✗ Anthropic: no key found. Add ANTHROPIC_API_KEY to the Apps Script Script Properties and redeploy.';
-      aiKeyStatus.style.color = '#dc2626';
+      aiKeyStatus.style.color = '#cc2222';
     }
     // Kimi presence is stashed by syncAiKeyFromBackend (server-side key).
     if (getRuntimeConfig('KIMI_KEY_PRESENT')) {
       kimiKeyStatus.textContent = '✓ Kimi connected — KIMI_API_KEY is configured in Apps Script.';
-      kimiKeyStatus.style.color = '#059669';
+      kimiKeyStatus.style.color = '#0f7a3f';
     } else {
       kimiKeyStatus.textContent = '○ Kimi not configured — add KIMI_API_KEY in Apps Script to run presets on Kimi.';
       kimiKeyStatus.style.color = 'var(--color-text-muted)';
@@ -511,7 +511,7 @@ export async function render(container) {
 
   // ── AI Assistant Presets ─────────────────────────────────────────
 
-  const PRESET_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2'];
+  const PRESET_COLORS = ['#0000cc', '#0f7a3f', '#cc8800', '#2222dd', '#00a6de'];
 
   let originalOrderIds = [];
   let dragSrc = null;
@@ -522,7 +522,7 @@ export async function render(container) {
     const dragHandle = el('span', {
       style: {
         cursor: 'grab',
-        color: '#9ca3af',
+        color: '#67677a',
         fontSize: '16px',
         lineHeight: '1',
         flexShrink: '0',
@@ -538,7 +538,7 @@ export async function render(container) {
         width: '12px',
         height: '12px',
         borderRadius: '50%',
-        background: PRESET_COLORS[index] || '#6b7280',
+        background: PRESET_COLORS[index] || '#4a4a5a',
         flexShrink: '0',
       },
     });
@@ -598,7 +598,7 @@ export async function render(container) {
 
     const deletePresetBtn = el('button', {
       class: 'btn btn--secondary',
-      style: { fontSize: '0.875rem', padding: '7px 10px', color: '#dc2626', borderColor: '#fca5a5' },
+      style: { fontSize: '0.875rem', padding: '7px 10px', color: '#cc2222', borderColor: '#efc0c0' },
       onClick: async () => {
         if (!preset._rowIndex) { card.remove(); refreshAddBtn(); return; }
         deletePresetBtn.disabled = true;
@@ -620,7 +620,7 @@ export async function render(container) {
     const card = el('div', {
       class: 'preset-card setup-card',
       draggable: 'true',
-      style: { margin: '0', padding: '14px', border: '1px solid #e5e7eb', borderRadius: '8px' },
+      style: { margin: '0', padding: '14px', border: '1px solid #e8e8f2', borderRadius: '8px' },
     },
       el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' } },
         dragHandle,
@@ -691,7 +691,7 @@ export async function render(container) {
   function updateColorDots(container) {
     Array.from(container.children).forEach((card, i) => {
       const dot = card.querySelector('.preset-color-dot');
-      if (dot) dot.style.background = PRESET_COLORS[i] || '#6b7280';
+      if (dot) dot.style.background = PRESET_COLORS[i] || '#4a4a5a';
     });
   }
 

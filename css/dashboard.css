@@ -56,9 +56,9 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border-light);
   border-left: 1px solid var(--color-border-light);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 18px 20px;
-  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.05);
   transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
   overflow: hidden;
 }
@@ -133,17 +133,17 @@
 }
 
 .dashboard-top__stats .stat-card--clickable:hover {
-  box-shadow: 0 8px 22px rgba(11, 22, 64, 0.10);
+  box-shadow: 0 8px 22px rgba(26, 26, 46, 0.10);
   transform: translateY(-2px);
   border-color: var(--color-border);
   background: var(--color-surface);
 }
 
 .dashboard-top__stats .stat-card--active {
-  background: linear-gradient(180deg, rgba(47, 107, 255, 0.06) 0%, var(--color-surface) 65%);
-  box-shadow: 0 6px 18px rgba(47, 107, 255, 0.14);
+  background: var(--color-primary-tint);
+  box-shadow: 0 6px 18px rgba(0, 0, 204, 0.14);
   transform: translateY(-1px);
-  border-color: rgba(47, 107, 255, 0.22);
+  border-color: rgba(0, 0, 204, 0.22);
 }
 
 .dashboard-top__stats .stat-card--active::before {
@@ -160,9 +160,9 @@
 .dashboard-top__chart .demandgen-chart {
   background: var(--color-surface);
   border: 1px solid var(--color-border-light);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 22px 24px 20px;
-  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.05);
   height: auto;
 }
 
@@ -192,11 +192,11 @@
 }
 
 .dashboard-top__chart .demandgen-bar-row--clickable:hover {
-  background: rgba(47, 107, 255, 0.05);
+  background: rgba(0, 0, 204, 0.05);
 }
 
 .dashboard-top__chart .demandgen-bar-row--active {
-  background: rgba(47, 107, 255, 0.10);
+  background: rgba(0, 0, 204, 0.10);
 }
 
 .dashboard-top__chart .demandgen-bar-row__label {
@@ -318,31 +318,40 @@
   transform: translateY(-1px);
 }
 
+/* Selected chip is Recast navy — the same primary surface as every other
+   primary action in the portal. It used to be near-black ink, which read
+   as a different design system sitting inside a row of blue controls. */
 .view-toggle.type-filter-bar .btn--primary {
-  background: var(--color-text-primary);
+  background: var(--color-primary);
   color: #ffffff;
-  border-color: var(--color-text-primary);
-  box-shadow: 0 2px 8px rgba(11, 22, 64, 0.18);
+  border-color: var(--color-primary);
+  box-shadow: none;
 }
 
 .view-toggle.type-filter-bar .btn--primary:hover {
-  background: var(--color-text-primary);
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-light);
 }
 
+/* Label and value are different sizes, so baseline-align them inside the
+   chip rather than centering two mismatched boxes. */
 .view-toggle.type-filter-bar .btn .type-filter-label {
   font-size: 12.5px;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .view-toggle.type-filter-bar .btn .type-filter-pipeline {
   font-size: 11px;
   color: var(--color-text-muted);
   font-weight: 500;
+  line-height: 1.2;
   opacity: 1;
 }
 
+/* Muted Blue is the brand's designated fine-print color on a navy surface. */
 .view-toggle.type-filter-bar .btn--primary .type-filter-pipeline {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--color-text-on-navy);
 }
 
 /* -----------------------------------------------
@@ -424,9 +433,9 @@
 .activity-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border-light);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 18px 18px 14px;
-  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.05);
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
   display: flex;
@@ -434,7 +443,7 @@
 }
 
 .activity-card:hover {
-  box-shadow: 0 8px 24px rgba(11, 22, 64, 0.11);
+  box-shadow: 0 8px 24px rgba(26, 26, 46, 0.11);
   transform: translateY(-3px);
   border-color: var(--color-border);
 }
@@ -563,13 +572,13 @@
   border: 1px solid var(--color-border-light);
   border-radius: 12px;
   padding: 12px 16px 12px 12px;
-  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.05);
   cursor: pointer;
   transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
 }
 
 .timeline-card:hover {
-  box-shadow: 0 6px 18px rgba(11, 22, 64, 0.10);
+  box-shadow: 0 6px 18px rgba(26, 26, 46, 0.10);
   transform: translateY(-2px);
   border-color: var(--color-border);
 }
@@ -581,11 +590,11 @@
   justify-content: center;
   min-width: 56px;
   height: 56px;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #2A3FE0 100%);
+  background: var(--color-primary);
   border-radius: 10px;
   padding: 6px 10px;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(47, 107, 255, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 204, 0.2);
 }
 
 .timeline-card__month {
@@ -649,9 +658,9 @@
    Partners View — Type Distribution panel & cards
    ----------------------------------------------- */
 .type-distribution {
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 22px 26px;
-  box-shadow: 0 1px 2px rgba(11, 22, 64, 0.05);
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.05);
   border: 1px solid var(--color-border-light);
 }
 
@@ -665,12 +674,12 @@
 .type-card:hover {
   border-color: var(--color-text-muted);
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(11, 22, 64, 0.10);
+  box-shadow: 0 6px 16px rgba(26, 26, 46, 0.10);
 }
 
 .type-card--active {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 1px var(--color-primary), 0 4px 14px rgba(47, 107, 255, 0.16);
+  box-shadow: 0 0 0 1px var(--color-primary), 0 4px 14px rgba(0, 0, 204, 0.16);
   background: var(--color-surface);
 }
 
@@ -704,14 +713,14 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   border-radius: 0;
   box-shadow: none;
 }
 
 .dashboard-page__stat-cell {
   padding: 12px 24px;
-  border-right: 1px solid #F1F4FA;
+  border-right: 1px solid #F0F0F6;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -729,16 +738,16 @@
 }
 
 .dashboard-page__stat-cell--clickable:hover {
-  background: #F7F9FD;
+  background: #FAFAFE;
 }
 
 .dashboard-page__stat-cell--active {
-  background: #F0F4FB;
-  box-shadow: inset 0 2px 0 0 #2F6BFF;
+  background: #F0F0F6;
+  box-shadow: inset 0 2px 0 0 #0000CC;
 }
 
 .dashboard-page__stat-cell--active .dashboard-page__stat-value {
-  color: #2F6BFF;
+  color: #0000CC;
 }
 
 .dashboard-page__stat-label {
@@ -746,14 +755,14 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  color: #2F6BFF;
+  color: #0000CC;
   line-height: 1.2;
 }
 
 .dashboard-page__stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: #171D2B;
+  color: #1A1A2E;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -762,7 +771,7 @@
 /* Chart card — flat white surface, sharp corners, no shadow */
 .dashboard-page__chart-card {
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   border-radius: 0;
   box-shadow: none;
   padding: 18px 22px 16px;
@@ -771,7 +780,7 @@
 .dashboard-page__chart-title {
   font-size: 14px;
   font-weight: 700;
-  color: #171D2B;
+  color: #1A1A2E;
   margin: 0;
   letter-spacing: -0.005em;
 }
@@ -779,7 +788,7 @@
 .dashboard-page__chart-subtitle {
   font-size: 12px;
   font-weight: 500;
-  color: #4A5468;
+  color: #4A4A5A;
   margin: 2px 0 14px;
 }
 
@@ -804,18 +813,18 @@
 }
 
 .dashboard-page__bar-row--clickable:hover {
-  background: #F7F9FD;
+  background: #FAFAFE;
 }
 
 .dashboard-page__bar-row--active {
-  background: #F0F4FB;
-  box-shadow: inset 2px 0 0 0 #2F6BFF;
+  background: #F0F0F6;
+  box-shadow: inset 2px 0 0 0 #0000CC;
 }
 
 .dashboard-page__bar-row__label {
   font-size: 13px;
   font-weight: 600;
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -824,7 +833,7 @@
 
 .dashboard-page__bar-row__bar {
   height: 12px;
-  background: #F1F4FA;
+  background: #F0F0F6;
   border-radius: 0;
   overflow: hidden;
   display: flex;
@@ -845,7 +854,7 @@
 .dashboard-page__bar-row__value {
   font-size: 13px;
   font-weight: 700;
-  color: #171D2B;
+  color: #1A1A2E;
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -854,7 +863,7 @@
 
 .dashboard-page__chart-empty {
   font-size: 13px;
-  color: #4A5468;
+  color: #4A4A5A;
   padding: 8px 0 4px;
 }
 
@@ -891,7 +900,7 @@
 .dashboard-page__quickform-host .qf-panel--embedded {
   width: 100% !important;
   height: clamp(460px, calc(100vh - 240px), 760px) !important;
-  border: 1px solid #DCE1EC !important;
+  border: 1px solid #DDDDEE !important;
   border-radius: 0 !important;
 }
 
@@ -918,7 +927,7 @@
     border-right: 0;
   }
   .dashboard-page__stat-cell:nth-child(-n+2) {
-    border-bottom: 1px solid #F1F4FA;
+    border-bottom: 1px solid #F0F0F6;
   }
 }
 
@@ -928,7 +937,7 @@
   }
   .dashboard-page__stat-cell {
     border-right: 0;
-    border-bottom: 1px solid #F1F4FA;
+    border-bottom: 1px solid #F0F0F6;
   }
   .dashboard-page__stat-cell:last-child {
     border-bottom: 0;

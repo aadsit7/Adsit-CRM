@@ -11,8 +11,8 @@
    decorative (aria-hidden) and never carry their own click
    behavior, so nothing here changes hit targets or handlers.
 
-   Colors are the Apple accent set from tokens.css, restated
-   here as literals because tokens.css scopes its custom
+   Colors are the Recast brand accent set from tokens.css,
+   restated here as literals because tokens.css scopes its custom
    properties to .apple-scope and these tiles also appear
    outside that scope.
    ============================================================ */
@@ -28,10 +28,9 @@
   vertical-align: middle;  /* inline contexts (labels) */
   border-radius: 24%;
   color: #FFFFFF;
-  background-color: #007AFF;
-  /* Gentle top-light sheen, like iOS tiles */
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 58%);
-  box-shadow: 0 1px 2px rgba(23, 29, 43, 0.14);
+  /* Flat solid fill — the brand system uses no gradients. */
+  background-color: #0000CC;
+  box-shadow: 0 1px 2px rgba(26, 26, 46, 0.14);
 }
 
 .section-icon svg {
@@ -63,17 +62,20 @@
   height: 20px;
 }
 
-/* iOS system accents (see tokens.css .apple-scope) */
-.section-icon--blue   { background-color: #007AFF; }
-.section-icon--green  { background-color: #34C759; }
-.section-icon--orange { background-color: #FF9500; }
-.section-icon--purple { background-color: #AF52DE; }
-.section-icon--indigo { background-color: #5856D6; }
-.section-icon--teal   { background-color: #30B0C7; }
-.section-icon--pink   { background-color: #FF2D55; }
-.section-icon--red    { background-color: #FF3B30; }
-.section-icon--yellow { background-color: #FFCC00; }
-.section-icon--gray   { background-color: #8E8E93; }
+/* Recast brand accents (see tokens.css .apple-scope). The class
+   names are historical — the values are the brand palette, kept
+   inside the navy/cyan family so tiles differentiate without
+   introducing colors the brand system doesn't own. */
+.section-icon--blue   { background-color: #0000CC; }  /* Primary Blue */
+.section-icon--green  { background-color: #0F7A3F; }  /* Green */
+.section-icon--orange { background-color: #CC8800; }  /* Warn Amber */
+.section-icon--purple { background-color: #2222DD; }  /* Decorator Blue */
+.section-icon--indigo { background-color: #0000AA; }  /* Navy, pressed */
+.section-icon--teal   { background-color: #00BFFF; }  /* Accent Cyan */
+.section-icon--pink   { background-color: #CC2222; }  /* Risk Red */
+.section-icon--red    { background-color: #CC2222; }  /* Risk Red */
+.section-icon--yellow { background-color: #CC8800; }  /* Warn Amber */
+.section-icon--gray   { background-color: #9B9A9B; }
 
 /* ------------------------------------------------------------
    Mount-point adjustments — how tiles sit inside the headers

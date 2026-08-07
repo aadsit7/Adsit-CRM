@@ -19,7 +19,7 @@
 .partner-next-steps__chevron {
   display: inline-flex;
   align-items: center;
-  color: #2F6BFF;
+  color: #0000CC;
   transition: transform var(--transition-fast);
   align-self: center;
 }
@@ -42,7 +42,7 @@
    first) plus one for hand-added steps — each a dropdown: a flat header
    row naming the run, over that run's own plan table. Header styling
    follows the select-all row of the note-selection modal below: light
-   background, square corners, #DCE1EC border. */
+   background, square corners, #DDDDEE border. */
 .partner-next-steps__log {
   display: flex;
   flex-direction: column;
@@ -50,7 +50,7 @@
 }
 
 .partner-next-steps__entry {
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   background: #FFFFFF;
 }
 
@@ -59,20 +59,20 @@
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  background: #F5F7FC;
+  background: #F6F8FF;
   cursor: pointer;
   user-select: none;
   transition: background var(--transition-fast);
 }
 
 .partner-next-steps__entry-header:hover {
-  background: #EEF1F7;
+  background: #F0F0F6;
 }
 
 .partner-next-steps__entry-title {
   font-size: 12px;
   font-weight: 700;
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
 }
 
@@ -82,7 +82,7 @@
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  color: #4A5468;
+  color: #4A4A5A;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -92,8 +92,8 @@
   flex-shrink: 0;
   padding: 2px 8px;
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
-  color: #4A5468;
+  border: 1px solid #DDDDEE;
+  color: #4A4A5A;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -104,7 +104,7 @@
 .partner-next-steps__entry-done {
   flex-shrink: 0;
   padding: 2px 8px;
-  background: #F0FFF0;
+  background: #E7F2EC;
   border: 1px solid #0F7A3F;
   color: #0F7A3F;
   font-size: 10px;
@@ -180,30 +180,30 @@
 
 /* Completed rows stay on the plan, tinted — the visual record of momentum. */
 .partner-next-steps__row--complete td {
-  background: #F0FFF0;
+  background: #E7F2EC;
 }
 
 .partner-next-steps__owner {
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
 }
 
 .partner-next-steps__due {
   font-weight: 600;
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
 }
 
 /* Relative timing the notes stated ("Post-ARB approval") — a real target,
    just not a calendar date yet. */
 .partner-next-steps__timing {
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
 }
 
 /* No date and no stated timing: say so plainly, never invent one. */
 .partner-next-steps__tbs {
-  color: #8A93A6;
+  color: #67677A;
   font-style: italic;
   white-space: nowrap;
 }
@@ -214,7 +214,7 @@
   align-items: center;
   padding: 2px 8px;
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -225,21 +225,21 @@
 .partner-next-steps__status--complete {
   color: #0F7A3F;
   border-color: #0F7A3F;
-  background: #F0FFF0;
+  background: #E7F2EC;
 }
 
 /* In Progress / Next / Scheduled — the actively-moving states. */
 .partner-next-steps__status--active {
-  color: #CC8800;
-  border-color: #E3C98E;
-  background: #FFFBF0;
+  color: #8A5C00;
+  border-color: #EBD9AE;
+  background: #FBF3E0;
 }
 
 /* Waiting on a prior milestone or someone off the call — neutral, not red. */
 .partner-next-steps__status--pending {
   color: #1A1A2E;
-  border-color: #DCE1EC;
-  background: #F5F7FC;
+  border-color: #DDDDEE;
+  background: #F6F8FF;
 }
 
 /* Provenance chip — same shape as the Contacts source chips. The
@@ -250,8 +250,8 @@
   align-items: center;
   padding: 2px 8px;
   background: #FFFFFF;
-  border: 1px solid #DCE1EC;
-  color: #2F6BFF;
+  border: 1px solid #DDDDEE;
+  color: #0000CC;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -260,7 +260,7 @@
 }
 
 .partner-next-steps__source-chip--manual {
-  color: #4A5468;
+  color: #4A4A5A;
 }
 
 /* A chip per source note, wrapping when a step cites several. */
@@ -279,13 +279,13 @@
 }
 
 .partner-next-steps__source-chip--link:hover {
-  background: #F0F5FF;
-  border-color: #2F6BFF;
+  background: #F6F8FF;
+  border-color: #0000CC;
   text-decoration: underline;
 }
 
 .partner-next-steps__source-chip--link:focus-visible {
-  outline: 2px solid #2F6BFF;
+  outline: 2px solid #0000CC;
   outline-offset: 1px;
 }
 
@@ -304,7 +304,7 @@
 .partner-next-steps-select__intro {
   font-size: 13px;
   line-height: 1.55;
-  color: #2B3242;
+  color: #1A1A2E;
   margin: 0 0 var(--space-4);
 }
 
@@ -313,7 +313,7 @@
   flex-direction: column;
   max-height: 46vh;
   overflow-y: auto;
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
 }
 
 .partner-next-steps-select__row {
@@ -322,7 +322,7 @@
   gap: 10px;
   padding: 9px 12px;
   cursor: pointer;
-  border-bottom: 1px solid #EEF1F7;
+  border-bottom: 1px solid #F0F0F6;
   transition: background var(--transition-fast);
 }
 
@@ -331,14 +331,14 @@
 }
 
 .partner-next-steps-select__row:hover {
-  background: #F5F7FC;
+  background: #F6F8FF;
 }
 
 /* The "Select all" control sits above the list, styled as its header row. */
 .partner-next-steps-select__row--all {
-  border: 1px solid #DCE1EC;
+  border: 1px solid #DDDDEE;
   border-bottom: none;
-  background: #F5F7FC;
+  background: #F6F8FF;
   font-weight: 600;
 }
 
@@ -347,7 +347,7 @@
   align-self: center;
   width: 15px;
   height: 15px;
-  accent-color: #2F6BFF;
+  accent-color: #0000CC;
   cursor: pointer;
 }
 
@@ -356,14 +356,14 @@
   min-width: 88px;
   font-size: 12px;
   font-weight: 700;
-  color: #171D2B;
+  color: #1A1A2E;
   white-space: nowrap;
 }
 
 .partner-next-steps-select__preview {
   font-size: 12px;
   line-height: 1.5;
-  color: #4A5468;
+  color: #4A4A5A;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
