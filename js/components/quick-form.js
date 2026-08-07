@@ -26,6 +26,10 @@ const EVENT_STATUSES = ['Upcoming', 'In Progress', 'Completed', 'Cancelled'];
 
 const SUBMIT_LABELS = { event: 'Create Event' };
 
+// Phone breakpoint — must match the @media (max-width: 768px) block in
+// css/quick-form.css that turns the panel into a full-screen sheet.
+const PHONE_BP = 768;
+
 // false = append-to-existing (default); true = create new
 const modeIsNew = { partner: false, opportunity: false };
 
@@ -38,6 +42,25 @@ let cachedPartners      = null;
 let cachedOpportunities = null;
 let activeDescEditor    = null; // Quill instance for opp description
 let activeTransEditor   = null; // Quill instance for transcript
+let inlineHostEl        = null; // host element passed to mountQuickFormInline
+let vvBound             = false; // visualViewport listeners attached?
+let wasPhone            = false; // last known side of the phone breakpoint
+
+function isPhone() {
+  return window.matchMedia(`(max-width: ${PHONE_BP}px)`).matches;
+}
+
+/**
+ * "Compose" modes are the two append-to-existing flows: pick a record from
+ * a couple of dropdowns, then write a long note. On a phone those get a
+ * dedicated layout (see syncComposeState / buildComposeShell) where the note
+ * editor owns all the leftover height instead of sitting as a short box
+ * inside a scrolling form.
+ */
+function isComposeMode() {
+  return (activeType === 'opportunity' && !modeIsNew.opportunity)
+      || (activeType === 'partner'     && !modeIsNew.partner);
+}
 
 // ── Public API ────────────────────────────────────────────────────
 
@@ -50,6 +73,28 @@ export function initQuickForm() {
 
   panelEl = buildPanel();
   document.body.appendChild(panelEl);
+
+  // Crossing the phone breakpoint swaps between "embedded on the page" and
+  // "launcher card + full-screen sheet", so the inline host has to be
+  // re-mounted when a rotation or a resized desktop window changes which
+  // side of 768px we're on.
+  wasPhone = isPhone();
+  window.addEventListener('resize', onViewportBreakpointChange);
+}
+
+function onViewportBreakpointChange() {
+  const nowPhone = isPhone();
+  if (wasPhone === nowPhone) return;
+  wasPhone = nowPhone;
+
+  if (!nowPhone) exitPhoneFocus();
+  else if (isVisible && !isEmbedded) enterPhoneFocus();
+
+  const host = inlineHostEl;
+  if (host && host.isConnected) {
+    if (isEmbedded) unmountQuickFormInline();
+    mountQuickFormInline(host);
+  }
 }
 
 export function toggleQuickForm() {
@@ -72,6 +117,19 @@ export function mountQuickFormInline(hostEl) {
   if (!hostEl) return false;
   initQuickForm();
   if (!panelEl) return false;
+
+  inlineHostEl = hostEl;
+
+  // Phones never embed. A fixed-height form nested inside the page's own
+  // scroller stacks three scroll areas (view-container → form body → note
+  // editor) behind the topbar and the bottom tab bar — the exact thing that
+  // makes note-taking on an iPhone miserable. Show a launcher card instead;
+  // tapping it opens the SAME singleton panel as a full-screen sheet with no
+  // app chrome around it.
+  if (isPhone()) {
+    renderInlineLauncher(hostEl);
+    return true;
+  }
 
   isEmbedded = true;
   hostEl.appendChild(panelEl);
@@ -97,12 +155,42 @@ export function mountQuickFormInline(hostEl) {
 }
 
 export function unmountQuickFormInline() {
+  inlineHostEl = null;
+  // Phone path: the panel was never moved into the host, so there is nothing
+  // to put back — and an open sheet must not be torn down underneath the user.
+  if (!isEmbedded) return;
   isEmbedded = false;
   if (!panelEl) return;
   panelEl.classList.remove('qf-panel--embedded');
   isVisible = false;
   panelEl.style.display = 'none';
   document.body.appendChild(panelEl);
+}
+
+// ── Inline launcher (phones) ──────────────────────────────────────
+// Stands in for the embedded form on phone-width screens: a single tap
+// target that opens the full-screen sheet.
+
+function renderInlineLauncher(hostEl) {
+  hostEl.innerHTML = '';
+
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'qf-launcher';
+  card.setAttribute('aria-label', 'Open quick add — opportunity, partner, or event');
+  card.innerHTML = `
+    <span class="qf-launcher__icon" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </span>
+    <span class="qf-launcher__text">
+      <span class="qf-launcher__title">Quick Add</span>
+      <span class="qf-launcher__sub">Log a description, transcript, or new record</span>
+    </span>
+    <svg class="qf-launcher__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+  `;
+  card.addEventListener('click', () => { if (!isVisible) showPanel(); });
+
+  hostEl.appendChild(card);
 }
 
 // ── Panel lifecycle ───────────────────────────────────────────────
@@ -120,6 +208,8 @@ function showPanel() {
     bindEvents();
   }
 
+  if (isPhone()) enterPhoneFocus();
+
   // Load reference data, then (re)render current type
   Promise.all([loadPartners(), loadOpportunities()]).then(() => renderTypeForm(activeType));
 
@@ -134,17 +224,72 @@ export function hidePanel() {
   panelEl.classList.remove('qf-panel--visible');
   isVisible = false;
   if (backdropEl) backdropEl.classList.remove('qf-backdrop--visible');
+  exitPhoneFocus();
   setTimeout(() => { if (!isVisible && panelEl) panelEl.style.display = 'none'; }, 320);
 
   // Reflect toggle state on both Randy buttons
   updateToggleButtons(false);
 }
 
+// ── Phone focus mode ──────────────────────────────────────────────
+// On a phone the sheet takes the whole screen, so everything that floats
+// above it (the bottom tab bar, the Randy launcher, the voice pill) is both
+// redundant and — being at a higher z-index — capable of covering the form.
+// A body class hides them for as long as the sheet is up. All three are
+// position:fixed, so hiding them reflows nothing behind the sheet.
+
+function enterPhoneFocus() {
+  document.body.classList.add('qf-phone-focus');
+  syncPhoneViewport();
+
+  const vv = window.visualViewport;
+  if (vv && !vvBound) {
+    vv.addEventListener('resize', syncPhoneViewport);
+    vv.addEventListener('scroll', syncPhoneViewport);
+    vvBound = true;
+  }
+}
+
+function exitPhoneFocus() {
+  document.body.classList.remove('qf-phone-focus');
+
+  const vv = window.visualViewport;
+  if (vv && vvBound) {
+    vv.removeEventListener('resize', syncPhoneViewport);
+    vv.removeEventListener('scroll', syncPhoneViewport);
+    vvBound = false;
+  }
+  if (panelEl) {
+    panelEl.style.removeProperty('--qf-vv-top');
+    panelEl.style.removeProperty('--qf-vv-height');
+    panelEl.classList.remove('qf-panel--composing');
+  }
+}
+
+/**
+ * Pin the sheet to the visual viewport.
+ *
+ * iOS never shrinks the layout viewport for the software keyboard, so a
+ * 100dvh sheet keeps its footer — the "Add Description" button — hidden
+ * behind the keys, and the page scrolls under the caret instead. The visual
+ * viewport is the only reliable measure of what's actually on screen: track
+ * it and the action row always sits directly above the keyboard.
+ */
+function syncPhoneViewport() {
+  if (!panelEl || !isVisible || !isPhone()) return;
+  const vv = window.visualViewport;
+  if (!vv) return;
+  panelEl.style.setProperty('--qf-vv-top', `${Math.max(0, Math.round(vv.offsetTop))}px`);
+  panelEl.style.setProperty('--qf-vv-height', `${Math.round(vv.height)}px`);
+}
+
 // ── Positioning ───────────────────────────────────────────────────
 
 function positionPanel() {
-  // On mobile let CSS own the bottom-sheet layout; clear any inline styles
-  if (window.innerWidth <= 768) {
+  // On phones CSS owns the full-screen sheet layout (sized from the
+  // --qf-vv-* custom properties syncPhoneViewport writes); clear any inline
+  // styles the desktop path may have left behind.
+  if (isPhone()) {
     panelEl.style.top       = '';
     panelEl.style.left      = '';
     panelEl.style.bottom    = '';
@@ -153,6 +298,9 @@ function positionPanel() {
     panelEl.style.maxHeight = '';
     return;
   }
+
+  panelEl.style.removeProperty('--qf-vv-top');
+  panelEl.style.removeProperty('--qf-vv-height');
 
   const PANEL_WIDTH = 340;
   const GAP = 12;
@@ -241,6 +389,18 @@ function bindEvents() {
     btn.addEventListener('click', () => switchType(btn.dataset.type));
   });
 
+  // Typing in the note collapses the record picker into its one-line summary
+  // so the editor gets the whole screen; tapping the summary brings it back.
+  // Delegated because Quill's contenteditable is created asynchronously.
+  panelEl.addEventListener('focusin', (e) => {
+    if (e.target.closest && e.target.closest('.qf-compose-editor')) setComposing(true);
+  });
+
+  // Keep the collapsed summary honest as the selections change.
+  panelEl.addEventListener('change', (e) => {
+    if (e.target.closest && e.target.closest('.qf-compose-picker')) updateComposeSummary();
+  });
+
   document.addEventListener('keydown', onDocKeydown);
 }
 
@@ -326,6 +486,80 @@ function postRenderSetup(type) {
       if (!modeIsNew.opportunity) wireOppNoteFilters();
     }
   }
+  syncComposeState();
+}
+
+// ── Compose layout (pick a record, then write the note) ───────────
+// The two append flows are a short picker followed by a long note. Marking
+// the panel lets the phone stylesheet give the editor every pixel the picker
+// doesn't need, and collapsing the picker once the user starts typing hands
+// the rest of the screen to the note without losing which record it's for.
+
+// Called only after a full re-render of the body, so the collapsed state
+// always starts fresh with the picker showing.
+function syncComposeState() {
+  if (!panelEl) return;
+  const compose = isComposeMode();
+  panelEl.classList.remove('qf-panel--composing');
+  panelEl.classList.toggle('qf-panel--compose', compose);
+  if (compose) updateComposeSummary();
+}
+
+function setComposing(on) {
+  if (!panelEl || !panelEl.classList.contains('qf-panel--compose')) return;
+  if (on) updateComposeSummary();
+  panelEl.classList.toggle('qf-panel--composing', !!on);
+}
+
+/** Build the collapsed one-liner, e.g. "Enterprise Cloud Migration · Aug 7". */
+function updateComposeSummary() {
+  const valueEl = panelEl?.querySelector('.qf-compose-summary__value');
+  if (!valueEl) return;
+
+  const recordSel = panelEl.querySelector('#qf-opportunity_id')
+                 || panelEl.querySelector('#qf-partner_id');
+  const dateInput = panelEl.querySelector('#qf-description_date')
+                 || panelEl.querySelector('#qf-conversation_date');
+
+  const record = recordSel && recordSel.value
+    ? recordSel.options[recordSel.selectedIndex]?.textContent?.trim()
+    : '';
+
+  let when = '';
+  if (dateInput && dateInput.value) {
+    // Parse as local time — `new Date('2026-08-07')` is UTC midnight and
+    // renders as the previous day west of Greenwich.
+    const [y, m, d] = dateInput.value.split('-').map(Number);
+    if (y && m && d) {
+      when = new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+  }
+
+  valueEl.textContent = [record || 'Nothing selected', when].filter(Boolean).join(' · ');
+  valueEl.classList.toggle('qf-compose-summary__value--empty', !record);
+}
+
+/** Wrap the picker fields + note editor so the phone layout can flex them. */
+function buildComposeShell(container) {
+  const shell = document.createElement('div');
+  shell.className = 'qf-compose';
+
+  const summary = document.createElement('button');
+  summary.type = 'button';
+  summary.className = 'qf-compose-summary';
+  summary.innerHTML = `
+    <span class="qf-compose-summary__value"></span>
+    <span class="qf-compose-summary__action">Change</span>
+  `;
+  summary.addEventListener('click', () => setComposing(false));
+  shell.appendChild(summary);
+
+  const picker = document.createElement('div');
+  picker.className = 'qf-compose-picker';
+  shell.appendChild(picker);
+
+  container.appendChild(shell);
+  return { shell, picker };
 }
 
 // ── Tab form builders ─────────────────────────────────────────────
@@ -429,6 +663,8 @@ function buildModeToggle(label, stateKey) {
 
       const submitBtn = panelEl.querySelector('#qf-submit-btn');
       if (submitBtn) submitBtn.textContent = getSubmitLabel();
+
+      syncComposeState();
     });
 
     grp.appendChild(btn);
@@ -465,7 +701,9 @@ function renderPartnerModeBody(container, isNew) {
 
     container.appendChild(field('hq_location', 'HQ Location', 'text', false, 'e.g., Chicago, Illinois, USA'));
   } else {
-    container.appendChild(selectField('partner_id', 'Partner', true, [
+    const { shell, picker } = buildComposeShell(container);
+
+    picker.appendChild(selectField('partner_id', 'Partner', true, [
       { value: '', label: 'Select partner…' },
       ...(cachedPartners || []).map(p => ({ value: p.partner_id, label: p.display_name })),
     ]));
@@ -473,15 +711,15 @@ function renderPartnerModeBody(container, isNew) {
     const dateWrap = field('conversation_date', 'Conversation Date', 'date', true);
     const dateInput = dateWrap.querySelector('input');
     if (dateInput) dateInput.value = todayISO();
-    container.appendChild(dateWrap);
+    picker.appendChild(dateWrap);
 
     activeTransEditor = initQuillEditor({ placeholder: 'Paste or type the call transcript here…' });
     const transcriptField = document.createElement('div');
-    transcriptField.className = 'qf-field';
+    transcriptField.className = 'qf-field qf-compose-editor';
     transcriptField.appendChild(makeLabel('transcript_text', 'Transcript', true));
     transcriptField.appendChild(activeTransEditor.wrapper);
     transcriptField.appendChild(errEl('transcript_text'));
-    container.appendChild(transcriptField);
+    shell.appendChild(transcriptField);
     requestAnimationFrame(() => activeTransEditor.mount());
   }
 }
@@ -510,12 +748,14 @@ function renderOppModeBody(container, isNew) {
     ));
     container.appendChild(r2);
   } else {
-    container.appendChild(selectField('filter_partner_id', 'Filter by Partner', false, [
+    const { shell, picker } = buildComposeShell(container);
+
+    picker.appendChild(selectField('filter_partner_id', 'Filter by Partner', false, [
       { value: '', label: 'All partners…' },
       ...(cachedPartners || []).map(p => ({ value: p.partner_id, label: p.display_name })),
     ]));
 
-    container.appendChild(selectField('opportunity_id', 'Opportunity', true, [
+    picker.appendChild(selectField('opportunity_id', 'Opportunity', true, [
       { value: '', label: 'Select opportunity…' },
       ...(cachedOpportunities || []).map(o => ({ value: o.opportunity_id, label: o.deal_name })),
     ]));
@@ -523,15 +763,15 @@ function renderOppModeBody(container, isNew) {
     const dateWrap = field('description_date', 'Description Date', 'date', true);
     const dateInput = dateWrap.querySelector('input');
     if (dateInput) dateInput.value = todayISO();
-    container.appendChild(dateWrap);
+    picker.appendChild(dateWrap);
 
     activeDescEditor = initQuillEditor({ placeholder: 'Add or update the opportunity description…' });
     const descField = document.createElement('div');
-    descField.className = 'qf-field';
+    descField.className = 'qf-field qf-compose-editor';
     descField.appendChild(makeLabel('description_text', 'Description', true));
     descField.appendChild(activeDescEditor.wrapper);
     descField.appendChild(errEl('description_text'));
-    container.appendChild(descField);
+    shell.appendChild(descField);
     requestAnimationFrame(() => activeDescEditor.mount());
   }
 }
@@ -686,6 +926,9 @@ function validate() {
       if (err) err.textContent = `${text} is required`;
       input.classList.add('qf-input--error');
       valid = false;
+      // The offending field may be inside a collapsed picker — an error the
+      // user cannot see reads as a dead Submit button.
+      if (input.closest('.qf-compose-picker')) setComposing(false);
     }
   });
 
