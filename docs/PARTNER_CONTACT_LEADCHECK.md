@@ -41,8 +41,26 @@ partner while the analysis continues. The row button still mirrors the
 `Analyzing…` state locally (restored on re-render from the `leadCheckRuns`
 map), and the result is written back by `contact_id` regardless of where the
 user navigated. Each row analyzes independently, so several pills can run at
-once. The pill settles green on `COMPLETE` / `COMPLETE_WITH_GAPS`, amber on
+once — one labelled row per contact, each with its own progress bar and clock.
+The pill settles green on `COMPLETE` / `COMPLETE_WITH_GAPS`, amber on
 `NEEDS_REVIEW` / `CONFLICT_FOUND` / `NEEDS_MORE_INFORMATION`, and on failure.
+
+**Progress is measured in research rounds.** `onProgress(round)` fires as each
+`pause_turn` continuation begins, so round N starting means N-1 finished; the
+bar is sized by `LEADCHECK_MAX_ROUNDS` imported from the client rather than a
+copy that could drift from it. Between rounds the bar eases forward without
+ever reaching the next round's mark.
+
+Both the round count and the pill's give-up budget come from the client
+(`LEADCHECK_MAX_ROUNDS`, `LEADCHECK_MAX_RUN_MS`). This matters: the pill
+previously took the component's 4-minute default while the research it reports
+on is allowed 6 rounds × 4 minutes. Any run past four minutes therefore
+declared a timeout and went *settled*, which turned the real `COMPLETE` that
+arrived minutes later into a no-op — the analysis finished and saved, but the
+pill's last word to the user was a failure that never happened. The give-up
+timer now measures silence rather than elapsed time (each round's
+`onProgress` restarts it), and a timed-out pill is revived and corrected by
+whatever the run finally reports.
 
 ## Deterministic pre-analysis validation
 

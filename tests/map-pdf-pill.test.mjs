@@ -25,10 +25,15 @@ function makeFakeDoc() {
       get innerHTML() { return this._html; },
       set innerHTML(v) {
         this._html = String(v);
-        // Populate three trivial "child query" handles the pill code reaches for.
+        // Populate the trivial "child query" handles the pill code reaches for.
         this._stage = { textContent: '' };
         this._elapsed = { textContent: '' };
         this._icon = { classList: { add() {}, remove() {} }, innerHTML: '' };
+        // The progress fill only exists when the template rendered a bar —
+        // mirroring the real DOM, where querySelector returns null otherwise.
+        this._fill = this._html.includes('randy-map-pill__progress-fill')
+          ? { style: { width: '' } }
+          : null;
       },
       get textContent() { return this._text; },
       set textContent(v) { this._text = String(v); },
@@ -36,6 +41,8 @@ function makeFakeDoc() {
       appendChild(child) { this.children.push(child); return child; },
       insertBefore(child) { this.children.unshift(child); return child; },
       querySelector(sel) {
+        // Most specific first: '__progress-fill' also contains '__progress'.
+        if (sel.includes('__progress-fill')) return this._fill || null;
         if (sel.includes('__stage'))   return this._stage   || { textContent: '' };
         if (sel.includes('__elapsed')) return this._elapsed || { textContent: '' };
         if (sel.includes('__icon'))    return this._icon    || { classList: { add() {}, remove() {} }, innerHTML: '' };
@@ -63,8 +70,15 @@ const randyRoot = globalThis.document.createElement();
 randyRoot.id = 'randy-root';
 globalThis.document._register('randy-root', randyRoot);
 
-const { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill, formatElapsed } =
-  await import('../js/components/map-pdf-pill.js');
+const {
+  createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure,
+  destroyPill, formatElapsed, easedProgress, livePillCount,
+} = await import('../js/components/map-pdf-pill.js');
+
+// Read the bar's painted position back off the fake fill element.
+function fillPct(pill) {
+  return pill.fillEl ? parseFloat(pill.fillEl.style.width) : null;
+}
 
 // ── formatElapsed is pure ────────────────────────────────────
 test('formatElapsed: 0ms → "0:00"',     () => assert.equal(formatElapsed(0),       '0:00'));
@@ -140,20 +154,105 @@ test('updatePillStage ignores settled pills', () => {
   assert.equal(pill.stageEl.textContent, 'Done');
 });
 
-// ── Hard timeout is per-caller ───────────────────────────────
-// The 4-minute default is sized for the MAP PDF flow. Work that legitimately
-// runs longer (an Analyzer run reading attachments, or the Contacts brief's
-// multi-round web research) must be able to say so: once the pill times out it
-// is SETTLED, which turns every later progress update and the final "ready"
-// into a no-op — so the wrong budget makes a healthy run report failure and
-// then never report success.
-test('createPill accepts a per-caller hard timeout', async () => {
+// ── The give-up timer is per-caller, and measures SILENCE ────
+// It used to measure total elapsed time, which raced the work itself: a
+// LeadCheck run is allowed 6 rounds x 4 minutes, so a healthy run routinely
+// blew past a 4-minute budget, went SETTLED, and swallowed the "verified" that
+// landed moments later. A duration proves nothing; silence does — so the timer
+// now fires only when the job has said nothing for the whole budget.
+test('createPill accepts a per-caller give-up budget', async () => {
   const pill = createPill('Long job…', { hardTimeoutMs: 60 });
-  // Past the custom budget, well short of the 4-minute default.
+  // Past the custom budget, well short of the default.
   await new Promise(r => setTimeout(r, 1300));
   assert.equal(pill.settled, true, 'the custom budget should have fired');
-  assert.match(pill.stageEl.textContent, /^Timed out after \d+ minute/);
+  assert.match(pill.stageEl.textContent, /^No progress for \d+ minute/);
   destroyPill(pill);
+});
+
+// This is the regression that made the reported bug possible: a job that is
+// visibly alive must never be declared timed out, no matter how long it runs.
+test('progress keeps a job alive indefinitely past its budget', async () => {
+  const pill = createPill('Round 1…', { hardTimeoutMs: 400 });
+  // Speak up more often than the budget, for longer than the budget.
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    updatePillStage(pill, `Round ${i + 2}…`);
+  }
+  assert.equal(pill.settled, false, 'a job reporting progress must never time out');
+  markPillSuccess(pill, 'Verified');
+  assert.equal(pill.stageEl.textContent, 'Verified');
+});
+
+test('setPillProgress also counts as proof of life', async () => {
+  const pill = createPill('Working…', { hardTimeoutMs: 400, progress: { steps: 6 } });
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    setPillProgress(pill, i, 6);
+  }
+  assert.equal(pill.settled, false);
+  destroyPill(pill);
+});
+
+// A timeout is a GUESS that the job died. Any later word from the caller is
+// better evidence, so it must win — otherwise the pill's last word to the user
+// is a failure that never happened.
+test('a late success revives and corrects a timed-out pill', async () => {
+  const pill = createPill('Analyzing…', { hardTimeoutMs: 60 });
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal(pill.settledBy, 'timeout', 'precondition: the timer settled it');
+
+  markPillSuccess(pill, 'Identity & role verified');
+  assert.equal(pill.stageEl.textContent, 'Identity & role verified');
+  assert.equal(pill.settledBy, 'success');
+});
+
+test('a late failure also corrects a timed-out pill', async () => {
+  const pill = createPill('Analyzing…', { hardTimeoutMs: 60 });
+  await new Promise(r => setTimeout(r, 1300));
+  markPillFailure(pill, 'Analysis failed');
+  assert.equal(pill.stageEl.textContent, 'Analysis failed');
+  assert.equal(pill.settledBy, 'failure');
+});
+
+test('a stage update revives a timed-out pill and resumes it', async () => {
+  const pill = createPill('Analyzing…', { hardTimeoutMs: 60 });
+  await new Promise(r => setTimeout(r, 1300));
+  updatePillStage(pill, 'Verifying… (round 3)');
+  assert.equal(pill.settled, false, 'the job proved it is alive');
+  assert.equal(pill.stageEl.textContent, 'Verifying… (round 3)');
+  destroyPill(pill);
+});
+
+// Settling stops the once-a-second ticker, so a revived pill has to restart
+// it — otherwise its clock freezes and it can never park again, which would be
+// a worse lie than the timeout it just replaced.
+test('a revived pill keeps ticking and can park again', async () => {
+  const pill = createPill('Analyzing…', { hardTimeoutMs: 60 });
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal(pill.settledBy, 'timeout');
+
+  updatePillStage(pill, 'Verifying…');
+  assert.ok(pill.tickHandle, 'the heartbeat must be running again');
+
+  // Silent again past the budget → parks a second time.
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal(pill.settledBy, 'timeout', 'a revived pill still watches for silence');
+  destroyPill(pill);
+});
+
+// …but a DELIBERATE settle is final. Success/failure/dismiss are the caller's
+// own verdict, not a guess, so nothing may overwrite them.
+test('a deliberately settled pill is never revived', () => {
+  const done = createPill('Working…');
+  markPillSuccess(done, 'Done');
+  updatePillStage(done, 'nope');
+  markPillFailure(done, 'nope');
+  assert.equal(done.stageEl.textContent, 'Done');
+
+  const dismissed = createPill('Working…');
+  destroyPill(dismissed);
+  markPillSuccess(dismissed, 'nope');
+  assert.equal(dismissed.settledBy, 'dismiss');
 });
 
 test('a generous budget leaves a long-running pill alive and updatable', async () => {
@@ -171,9 +270,95 @@ test('an absent / invalid hardTimeoutMs falls back to the default', async () => 
   for (const options of [{}, { hardTimeoutMs: 0 }, { hardTimeoutMs: -1 }, { hardTimeoutMs: 'soon' }]) {
     const pill = createPill('Working…', options);
     await new Promise(r => setTimeout(r, 1100));
-    assert.equal(pill.settled, false, `${JSON.stringify(options)} should use the 4-minute default`);
+    assert.equal(pill.settled, false, `${JSON.stringify(options)} should use the generous default`);
     destroyPill(pill);
   }
+});
+
+// ── Progress bar ─────────────────────────────────────────────
+// The bar is opt-in so every existing caller renders exactly as before.
+test('no bar is rendered unless the caller asks for one', () => {
+  const plain = createPill('Working…');
+  assert.ok(!plain.el.innerHTML.includes('randy-map-pill__progress'), 'no bar by default');
+  assert.equal(plain.fillEl, null);
+  // Progress calls on a barless pill are harmless — they still signal liveness.
+  setPillProgress(plain, 2, 4);
+  assert.equal(plain.settled, false);
+  destroyPill(plain);
+
+  const withBar = createPill('Working…', { progress: true });
+  assert.match(withBar.el.innerHTML, /randy-map-pill__progress-fill/);
+  destroyPill(withBar);
+});
+
+test('the step form paints completed/total and the fraction form paints exactly', () => {
+  const pill = createPill('Working…', { progress: { steps: 4, stepMs: 60_000 } });
+  setPillProgress(pill, 1, 4);
+  assert.equal(fillPct(pill), 25, 'one of four rounds done');
+  setPillProgress(pill, 3, 4);
+  assert.equal(fillPct(pill), 75);
+  destroyPill(pill);
+
+  const frac = createPill('Working…', { progress: true });
+  setPillProgress(frac, 0.85);
+  assert.equal(fillPct(frac), 85);
+  destroyPill(frac);
+});
+
+test('progress is clamped to 0..1 and never moves backwards', () => {
+  const pill = createPill('Working…', { progress: true });
+  setPillProgress(pill, 0.6);
+  setPillProgress(pill, 0.2);
+  assert.equal(fillPct(pill), 60, 'a lower value must not un-do visible progress');
+  setPillProgress(pill, 42);
+  assert.equal(fillPct(pill), 100, 'clamped to the top');
+  destroyPill(pill);
+});
+
+test('success fills the bar; failure leaves it where the work stopped', () => {
+  const ok = createPill('Working…', { progress: { steps: 4 } });
+  setPillProgress(ok, 1, 4);
+  markPillSuccess(ok, 'Done');
+  assert.equal(fillPct(ok), 100);
+
+  const bad = createPill('Working…', { progress: { steps: 4 } });
+  setPillProgress(bad, 1, 4);
+  markPillFailure(bad, 'Broke');
+  assert.equal(fillPct(bad), 25, 'a failed job did not secretly finish');
+});
+
+// The eased crawl between two real checkpoints is what stops a multi-minute
+// round from looking frozen. Its one hard rule: it may never reach the next
+// checkpoint, because that would claim progress the job has not reported.
+test('easedProgress advances but never reaches the next checkpoint', () => {
+  const base = 0.5, span = 0.25, stepMs = 60_000; // step 3 of 6, next is 0.75
+  const at = (ms) => easedProgress(base, span, ms, stepMs);
+  assert.equal(at(0), base, 'starts exactly at the reported checkpoint');
+  assert.ok(at(10_000) > at(0), 'moves forward');
+  assert.ok(at(60_000) > at(10_000), 'keeps moving');
+  // Even at an absurd multiple of the time constant it stays short of 0.75.
+  assert.ok(at(10 * 60_000) < base + span, 'never reaches the next checkpoint');
+  assert.ok(at(10 * 60_000) <= base + span * 0.9 + 1e-9, 'stays under the ease ceiling');
+});
+
+test('easedProgress is inert without a span or a time constant', () => {
+  assert.equal(easedProgress(0.5, 0, 10_000, 60_000), 0.5);
+  assert.equal(easedProgress(0.5, 0.25, 10_000, 0), 0.5);
+  assert.equal(easedProgress(0.5, 0.25, 0, 60_000), 0.5);
+});
+
+// ── Live-job registry ────────────────────────────────────────
+// Backs the unload guard: a reload or a closed tab kills every in-flight
+// fetch, so the app has to know when work is outstanding.
+test('livePillCount tracks unsettled jobs only', () => {
+  const before = livePillCount();
+  const a = createPill('A…');
+  const b = createPill('B…');
+  assert.equal(livePillCount(), before + 2);
+  markPillSuccess(a, 'done');
+  assert.equal(livePillCount(), before + 1, 'a settled job is no longer outstanding');
+  destroyPill(b);
+  assert.equal(livePillCount(), before, 'a dismissed job is no longer outstanding');
 });
 
 // ── The live region is the stage text, not the whole pill ────

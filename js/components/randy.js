@@ -15,7 +15,11 @@ import {
 import { buildMapPdf, mapFilename, blobToBase64 } from '../utils/map-pdf-builder.js';
 import { requestTimelineJsonPdf } from '../utils/timeline-pdf-client.js';
 import { buildTimelinePdf, timelineFilename } from '../utils/timeline-pdf-builder.js';
-import { createPill, updatePillStage, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
+import { createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure } from './map-pdf-pill.js';
+
+// Both of Randy's PDF flows (MAP and Timeline) run the same three ordered
+// stages — model call, build, upload — so their progress bars share the count.
+const PDF_PILL_STEPS = 3;
 import { CONFIG } from '../config.js';
 import { getCurrentUser } from '../auth.js';
 import { appendRow, updateRowById, loadCustomPrompts } from '../sheets.js';
@@ -1271,13 +1275,17 @@ function startBackgroundPdfGeneration(result) {
     opportunityId: result.opportunityId,
   };
 
-  const pill = createPill('Reading description…');
+  // Three ordered stages, so the bar is measured in them: read the notes
+  // (the model call), build the PDF, save it to Drive.
+  const pill = createPill('Reading description…', { progress: { steps: PDF_PILL_STEPS, stepMs: 45_000 } });
 
   (async () => {
     try {
+      setPillProgress(pill, 0, PDF_PILL_STEPS);
       updatePillStage(pill, 'Reading description…');
       const json = await requestMapPdfJson(opportunity, entries);
 
+      setPillProgress(pill, 1, PDF_PILL_STEPS);
       updatePillStage(pill, 'Building PDF…');
       const pdfBlob = await buildMapPdf(json, opportunity);
       // Filename always uses ISO generation date (today) — never the
@@ -1285,6 +1293,7 @@ function startBackgroundPdfGeneration(result) {
       // phrase like "April 22, 2026" that produces garbage when sliced.
       const filename = mapFilename(json.customer_name || opportunity.customerName || opportunity.name);
 
+      setPillProgress(pill, 2, PDF_PILL_STEPS);
       updatePillStage(pill, 'Saving to Drive…');
       const base64 = await blobToBase64(pdfBlob);
       const uploadResp = await fileApiRequest({
@@ -1449,17 +1458,20 @@ function startBackgroundTimelinePdfGeneration(result) {
     opportunityId: result.opportunityId,
   };
 
-  const pill = createPill('Reading descriptions…');
+  const pill = createPill('Reading descriptions…', { progress: { steps: PDF_PILL_STEPS, stepMs: 45_000 } });
 
   (async () => {
     try {
+      setPillProgress(pill, 0, PDF_PILL_STEPS);
       updatePillStage(pill, 'Reading descriptions…');
       const json = await requestTimelineJsonPdf(opportunity, entries);
 
+      setPillProgress(pill, 1, PDF_PILL_STEPS);
       updatePillStage(pill, 'Building PDF…');
       const pdfBlob = await buildTimelinePdf(json, opportunity);
       const filename = timelineFilename(json.customer_name || opportunity.customerName || opportunity.name);
 
+      setPillProgress(pill, 2, PDF_PILL_STEPS);
       updatePillStage(pill, 'Saving to Drive…');
       const base64 = await blobToBase64(pdfBlob);
       const uploadResp = await fileApiRequest({

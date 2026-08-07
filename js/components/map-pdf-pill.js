@@ -1,41 +1,62 @@
 // ============================================================
-// MAP PDF Progress Pill
+// Background-job Progress Pill
 // ============================================================
-// A small overlay that shows "what's happening right now" during
-// the MAP PDF flow. Multiple pills stack if the user kicks off two
-// generations at once.
+// A small overlay that shows "what's happening right now" while a long
+// LLM job runs. Pills stack, so every concurrently running job (three
+// contacts being analyzed at once, say) gets its own row with its own
+// label, its own progress bar and its own clock.
+//
+// The pill is the ONLY thing the user watches once they navigate away
+// from the page that started the job, so its single hardest requirement
+// is that it never lies: it must not claim failure for work that is
+// still running, and it must always report the real outcome when it
+// lands. Everything below follows from that.
 //
 // Public API (pure functions — no module-level singleton):
-//   createPill(stage, options)    → { el, id }
-//     options.label               — opportunity name shown above the stage line
+//   createPill(stage, options)    → pill
+//     options.label               — entity name shown above the stage line
 //     options.global              — use the body-fixed global stack (default)
 //     options.scopeContainer      — legacy: anchor inside a specific element
-//     options.hardTimeoutMs       — how long before the pill declares the work
-//                                   timed out (default HARD_TIMEOUT_MS, 4 min).
-//                                   Callers whose work legitimately runs longer
-//                                   pass a bigger budget — see the note there.
-//   updatePillStage(pill, text)   — swap the stage text
+//     options.progress            — true, or { steps, stepMs } to render a
+//                                   determinate progress bar (see below)
+//     options.hardTimeoutMs       — how long the pill tolerates NO PROGRESS
+//                                   before giving up (default STALL_TIMEOUT_MS)
+//   updatePillStage(pill, text)   — swap the stage text (counts as progress)
+//   setPillProgress(pill, …)      — move the bar (counts as progress)
 //   markPillSuccess(pill, text)   — green tick, hold 3s, fade out
 //   markPillFailure(pill, text)   — amber warning, hold 5s, fade out
 //   destroyPill(pill)             — immediate remove
+//   livePillCount()               — how many jobs are still unsettled
 //
 // Also exported for tests:
 //   formatElapsed(ms)             — "0:08", "1:23", etc.
+//   easedProgress(...)            — the in-step easing curve
 // ============================================================
 
-const WARN_THRESHOLD_MS = 150_000;  // 2:30 — switch to amber "taking longer…"
-const HARD_TIMEOUT_MS   = 240_000;  // 4:00 — hard fail state
+// ── Why the give-up timer measures SILENCE, not duration ────────────────
+// It used to measure total elapsed time, which made it a stopwatch racing the
+// work itself: a LeadCheck run is allowed six research rounds of up to four
+// minutes each (24 minutes), so a perfectly healthy run blew through a
+// four-minute budget as a matter of routine. Once it fired the pill was
+// SETTLED, which turns every later stage update and the final "ready" into a
+// no-op — so the user watched a job report failure and then never report the
+// success that actually happened moments later.
+//
+// A duration is not evidence of a problem; SILENCE is. Every caller drives its
+// pill from an onProgress/stage callback, so a job that is alive says so. The
+// timer therefore resets on every updatePillStage / setPillProgress call and
+// only fires when nothing has been heard for the whole budget — which catches a
+// genuinely wedged job without ever contradicting a healthy one.
+const WARN_THRESHOLD_MS  = 150_000;  // 2:30 of silence — amber "taking longer…"
+const STALL_TIMEOUT_MS   = 600_000;  // 10:00 of silence — give up
 
-// The hard timeout is a LAST RESORT for work that owns no cancellation of its
-// own — it settles the pill so a wedged job can't spin forever. It is not a
-// measurement of the work: once it fires, the pill is settled, which makes
-// every later updatePillStage / markPillSuccess a no-op. A caller whose work
-// routinely runs longer than the default must pass its own budget, or the
-// user is told the run failed while it is still going — and then gets no
-// success signal at all when it finishes.
-function resolveHardTimeout(options) {
+// The default has to clear the longest single uninterrupted network step in the
+// app, or the timer fires on work that is merely slow rather than stuck. The
+// longest is the attachment scan's per-file analyze call at 300s, so 600s
+// leaves a full 2x margin. Callers may still pass their own budget.
+function resolveStallTimeout(options) {
   const ms = Number(options && options.hardTimeoutMs);
-  return Number.isFinite(ms) && ms > 0 ? ms : HARD_TIMEOUT_MS;
+  return Number.isFinite(ms) && ms > 0 ? ms : STALL_TIMEOUT_MS;
 }
 
 // Every pill is a background thing Randy is doing (analyzing, scanning,
@@ -45,9 +66,41 @@ function resolveHardTimeout(options) {
 // (index.html at the site root), matching every other `assets/…` reference.
 const RANDY_AVATAR_SRC = 'assets/randy-avatar.png';
 
+// ── Live-job registry ───────────────────────────────────────────────────
+// Every unsettled pill is a job still holding an in-flight fetch. Navigating
+// between views cannot touch them (the router only swaps #view-container and
+// no view's cleanup aborts an analysis), but a reload or a closed tab kills
+// every fetch in the page — so the registry backs an unload guard that asks
+// before the user throws the work away. It is also what livePillCount()
+// reports for tests and callers.
+const livePills = new Set();
+let unloadGuardInstalled = false;
+
+function onBeforeUnload(event) {
+  if (!livePills.size) return undefined;
+  // Modern browsers ignore custom text and show their own wording; assigning
+  // returnValue (and preventDefault) is what actually triggers the prompt.
+  event.preventDefault();
+  event.returnValue = '';
+  return '';
+}
+
+function installUnloadGuard() {
+  if (unloadGuardInstalled) return;
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  window.addEventListener('beforeunload', onBeforeUnload);
+  unloadGuardInstalled = true;
+}
+
+function trackPill(pill)   { livePills.add(pill); installUnloadGuard(); }
+function untrackPill(pill) { livePills.delete(pill); }
+
+/** How many jobs are still running (unsettled pills). */
+export function livePillCount() { return livePills.size; }
+
 // Body-fixed global stack — created lazily, sits at viewport bottom-right.
-// All background MAP PDF jobs (both click-flow and Randy voice flow) use
-// this so pills are visible regardless of which panel or modal is open.
+// All background jobs (click flows and Randy's voice flow) use this so pills
+// are visible regardless of which panel, modal or view is open.
 function getGlobalPillHost() {
   if (typeof document === 'undefined') return null;
   let host = document.getElementById('map-pdf-global-pill-stack');
@@ -101,6 +154,36 @@ export function formatElapsed(ms) {
   return `${min}:${String(sec).padStart(2, '0')}`;
 }
 
+// ── In-step easing ──────────────────────────────────────────────────────
+// The only progress facts a job actually has are its checkpoints: "round 3 of
+// 6 has started". Painting those alone leaves the bar frozen for the minutes a
+// research round takes, which reads as "stuck" — the exact impression this
+// whole change exists to remove. So between two real checkpoints the bar
+// creeps forward on an exponential-decay curve: fast at first, slower the
+// longer the step runs, and asymptotically approaching — never reaching — the
+// next checkpoint.
+//
+// That keeps it honest in the only way that matters: the bar can never show
+// more progress than the job has actually reported. It says "this step is
+// taking a while", never "the next step is done".
+//
+// `stepMs` is the time constant, not a deadline: at t = stepMs the step is
+// ~63% consumed, at 3x ~95%. EASE_CEILING caps the crawl short of the boundary
+// so a real checkpoint is always a visible jump.
+const EASE_CEILING = 0.9;
+
+export function easedProgress(base, span, elapsedMs, stepMs) {
+  if (!(span > 0) || !(stepMs > 0) || !(elapsedMs > 0)) return base;
+  const consumed = 1 - Math.exp(-elapsedMs / stepMs);
+  return base + span * EASE_CEILING * consumed;
+}
+
+function clamp01(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.min(1, Math.max(0, v));
+}
+
 function spinnerSvg() {
   // Single rotating arc — CSS handles the spin via .randy-map-pill__spinner
   return `
@@ -116,6 +199,22 @@ function checkSvg() {
 
 function warnSvg() {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2z" fill="currentColor" opacity="0.18"/><path d="M12 3l10 18H2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1.1" fill="currentColor"/></svg>`;
+}
+
+// Default time constant for one step, used when the caller enables the bar
+// without sizing its steps. 90s suits a web-research round.
+const DEFAULT_STEP_MS = 90_000;
+
+function resolveProgressConfig(options) {
+  const p = options && options.progress;
+  if (!p) return null;
+  if (p === true) return { steps: 0, stepMs: DEFAULT_STEP_MS };
+  const steps  = Number(p.steps);
+  const stepMs = Number(p.stepMs);
+  return {
+    steps:  Number.isFinite(steps) && steps > 0 ? steps : 0,
+    stepMs: Number.isFinite(stepMs) && stepMs > 0 ? stepMs : DEFAULT_STEP_MS,
+  };
 }
 
 export function createPill(initialStage = 'Starting…', options = {}) {
@@ -146,10 +245,19 @@ export function createPill(initialStage = 'Starting…', options = {}) {
     ? `<img class="randy-map-pill__avatar" src="${escapeHtml(avatarSrc)}" alt="Randy" width="18" height="18">`
     : '';
 
+  // The bar is its own full-width row under the stage line. aria-hidden: the
+  // stage text already announces every real checkpoint in words, so a second
+  // announcement of the same fact as a percentage is pure noise on a screen
+  // reader — and the eased crawl between checkpoints has nothing to say at all.
+  const progressCfg = resolveProgressConfig(options);
+  const progressHtml = progressCfg
+    ? '<span class="randy-map-pill__progress" aria-hidden="true"><span class="randy-map-pill__progress-fill"></span></span>'
+    : '';
+
   // When a label is present, it sits on a line of its own (flex full-width)
   // above the spinner row. flex-wrap: wrap on the pill handles the break.
   el.innerHTML = `
-    ${labelHtml}${avatarHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage" role="status" aria-live="polite">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed" aria-hidden="true">0:00</span>
+    ${labelHtml}${avatarHtml}<span class="randy-map-pill__icon randy-map-pill__spinner">${spinnerSvg()}</span><span class="randy-map-pill__stage" role="status" aria-live="polite">${escapeHtml(initialStage)}</span><span class="randy-map-pill__elapsed" aria-hidden="true">0:00</span>${progressHtml}
   `.trim();
 
   // Newest pill on top (so older ones settle below if the user kicks
@@ -165,9 +273,27 @@ export function createPill(initialStage = 'Starting…', options = {}) {
     stageEl:   el.querySelector('.randy-map-pill__stage'),
     elapsedEl: el.querySelector('.randy-map-pill__elapsed'),
     iconEl:    el.querySelector('.randy-map-pill__icon'),
+    fillEl:    el.querySelector('.randy-map-pill__progress-fill'),
     tickHandle: null,
     settled: false,
+    // How the pill settled. Only a give-up timeout is reversible — see
+    // reviveIfStalled(). 'success' | 'failure' | 'dismiss' are final.
+    settledBy: null,
+    // Silence clock. Reset by every updatePillStage / setPillProgress.
+    lastProgressAt: startedAt,
+    // Determinate-bar state, null when the caller didn't ask for a bar.
+    progress: progressCfg
+      ? { ...progressCfg, base: 0, span: 0, markedAt: startedAt, shown: 0 }
+      : null,
   };
+
+  if (pill.progress && !pill.progress.steps) {
+    // Steps unknown → an indeterminate sweep until the caller supplies real
+    // numbers, rather than a bar frozen at zero.
+    if (pill.el.classList) pill.el.classList.add('randy-map-pill--indeterminate');
+  }
+
+  trackPill(pill);
 
   // Click to dismiss. The pill has no other exit if its work never settles —
   // and with a caller-supplied budget that wait can be long — so a stuck pill
@@ -180,66 +306,197 @@ export function createPill(initialStage = 'Starting…', options = {}) {
     el.addEventListener('click', () => destroyPill(pill));
   }
 
-  const hardTimeoutMs = resolveHardTimeout(options);
-
-  pill.tickHandle = setInterval(() => {
-    if (pill.settled) return;
-    const ms = Date.now() - startedAt;
-    if (pill.elapsedEl) pill.elapsedEl.textContent = formatElapsed(ms);
-    if (ms >= hardTimeoutMs) {
-      const mins = Math.max(1, Math.round(hardTimeoutMs / 60_000));
-      markPillFailure(pill, `Timed out after ${mins} minute${mins === 1 ? '' : 's'}`);
-      return;
-    }
-    if (ms >= WARN_THRESHOLD_MS && !el.classList.contains('randy-map-pill--warn')) {
-      el.classList.add('randy-map-pill--warn');
-      if (pill.stageEl) pill.stageEl.textContent = 'Taking longer than expected… still trying';
-    }
-  }, 1000);
+  pill.stallTimeoutMs = resolveStallTimeout(options);
+  startTicker(pill);
 
   return pill;
 }
 
+// The once-a-second heartbeat: repaint the clock and the eased bar, then judge
+// how long the job has been silent. Extracted from createPill because a revived
+// pill needs it started again — settling stopped it, and a revived pill whose
+// clock stayed frozen would be a worse lie than the timeout it replaced.
+function startTicker(pill) {
+  if (pill.tickHandle) return;
+  pill.tickHandle = setInterval(() => {
+    if (pill.settled) return;
+    const now = Date.now();
+    if (pill.elapsedEl) pill.elapsedEl.textContent = formatElapsed(now - pill.startedAt);
+    paintEasedProgress(pill, now);
+
+    const silentMs = now - pill.lastProgressAt;
+    if (silentMs >= pill.stallTimeoutMs) {
+      const mins = Math.max(1, Math.round(pill.stallTimeoutMs / 60_000));
+      markPillStalled(pill, `No progress for ${mins} minute${mins === 1 ? '' : 's'}`);
+      return;
+    }
+    if (silentMs >= WARN_THRESHOLD_MS && pill.el.classList && !pill.el.classList.contains('randy-map-pill--warn')) {
+      pill.el.classList.add('randy-map-pill--warn');
+      if (pill.stageEl) pill.stageEl.textContent = 'Taking longer than expected… still trying';
+    }
+  }, 1000);
+}
+
+// A pill settled by the give-up timer is the one settled state that is still a
+// guess — the job may well be alive and about to report. Any later word from
+// the caller is better evidence than the guess, so it reopens the pill instead
+// of being swallowed. Deliberate settles (success / failure / dismiss) are
+// final and still swallow whatever follows them.
+function reviveIfStalled(pill) {
+  if (!pill.settled || pill.settledBy !== 'timeout') return;
+  pill.settled = false;
+  pill.settledBy = null;
+  // Refresh the silence clock BEFORE restarting the ticker, or the stale
+  // timestamp that parked the pill would park it again on the next tick.
+  pill.lastProgressAt = Date.now();
+  trackPill(pill);
+  if (pill.el && pill.el.classList) {
+    pill.el.classList.remove('randy-map-pill--failure', 'randy-map-pill--stalled', 'randy-map-pill--warn');
+    pill.el.classList.add('randy-map-pill--active');
+  }
+  if (pill.iconEl) {
+    pill.iconEl.classList.add('randy-map-pill__spinner');
+    pill.iconEl.innerHTML = spinnerSvg();
+  }
+  startTicker(pill);
+}
+
+// Record that the job just proved it is alive: clears the amber "taking
+// longer" state and restarts the silence clock.
+function noteProgress(pill) {
+  pill.lastProgressAt = Date.now();
+  if (pill.el && pill.el.classList) pill.el.classList.remove('randy-map-pill--warn');
+}
+
+function paintFill(pill, fraction) {
+  if (!pill.progress) return;
+  // Monotonic by construction: a bar that slides backwards reads as work being
+  // undone, and no caller ever means that.
+  const next = Math.max(pill.progress.shown, clamp01(fraction));
+  pill.progress.shown = next;
+  if (pill.fillEl && pill.fillEl.style) {
+    pill.fillEl.style.width = `${(next * 100).toFixed(1)}%`;
+  }
+}
+
+function paintEasedProgress(pill, now = Date.now()) {
+  const p = pill.progress;
+  if (!p || !p.steps) return;
+  paintFill(pill, easedProgress(p.base, p.span, now - p.markedAt, p.stepMs));
+}
+
 export function updatePillStage(pill, stageText) {
-  if (!pill || !pill.el || pill.settled) return;
+  if (!pill || !pill.el) return;
+  reviveIfStalled(pill);
+  if (pill.settled) return;
+  noteProgress(pill);
   if (pill.stageEl) pill.stageEl.textContent = stageText;
 }
 
-export function markPillSuccess(pill, finalText) {
-  if (!pill || !pill.el || pill.settled) return;
+/**
+ * Move the progress bar, and tell the pill the job is still alive.
+ *
+ * Two forms:
+ *   setPillProgress(pill, 0.4)        — an exact fraction; the bar sits there.
+ *   setPillProgress(pill, step, total) — "step of total complete"; the bar
+ *                                        moves to step/total and then creeps
+ *                                        toward (step+1)/total while the step
+ *                                        runs (see easedProgress).
+ *
+ * Safe to call on a pill created without `progress` — it still counts as a
+ * liveness signal, it just has no bar to paint.
+ */
+export function setPillProgress(pill, value, total) {
+  if (!pill || !pill.el) return;
+  reviveIfStalled(pill);
+  if (pill.settled) return;
+  noteProgress(pill);
+  if (!pill.progress) return;
+
+  const totalNum = Number(total);
+  if (Number.isFinite(totalNum) && totalNum > 0) {
+    const step = Math.max(0, Number(value) || 0);
+    pill.progress.steps  = totalNum;
+    pill.progress.base   = clamp01(step / totalNum);
+    pill.progress.span   = clamp01((step + 1) / totalNum) - pill.progress.base;
+    pill.progress.markedAt = Date.now();
+    if (pill.el.classList) pill.el.classList.remove('randy-map-pill--indeterminate');
+    paintFill(pill, pill.progress.base);
+    return;
+  }
+
+  // Fraction form — an exact position with no onward creep.
+  pill.progress.base = clamp01(value);
+  pill.progress.span = 0;
+  pill.progress.markedAt = Date.now();
+  if (pill.el.classList) pill.el.classList.remove('randy-map-pill--indeterminate');
+  paintFill(pill, pill.progress.base);
+}
+
+function settle(pill, how) {
   pill.settled = true;
+  pill.settledBy = how;
+  untrackPill(pill);
   if (pill.tickHandle) { clearInterval(pill.tickHandle); pill.tickHandle = null; }
+}
+
+export function markPillSuccess(pill, finalText) {
+  if (!pill || !pill.el) return;
+  reviveIfStalled(pill);
+  if (pill.settled) return;
+  settle(pill, 'success');
   const elapsed = formatElapsed(Date.now() - pill.startedAt);
-  pill.el.classList.remove('randy-map-pill--active', 'randy-map-pill--warn');
+  pill.el.classList.remove('randy-map-pill--active', 'randy-map-pill--warn', 'randy-map-pill--indeterminate');
   pill.el.classList.add('randy-map-pill--success');
   if (pill.iconEl) {
     pill.iconEl.classList.remove('randy-map-pill__spinner');
     pill.iconEl.innerHTML = checkSvg();
   }
+  if (pill.progress) paintFill(pill, 1);
   if (pill.stageEl)   pill.stageEl.textContent = finalText || 'Saved!';
   if (pill.elapsedEl) pill.elapsedEl.textContent = `${elapsed} ✓`;
   scheduleFadeOut(pill, 3000);
 }
 
 export function markPillFailure(pill, errorText) {
-  if (!pill || !pill.el || pill.settled) return;
-  pill.settled = true;
-  if (pill.tickHandle) { clearInterval(pill.tickHandle); pill.tickHandle = null; }
-  pill.el.classList.remove('randy-map-pill--active', 'randy-map-pill--warn');
+  if (!pill || !pill.el) return;
+  reviveIfStalled(pill);
+  if (pill.settled) return;
+  settle(pill, 'failure');
+  pill.el.classList.remove('randy-map-pill--active', 'randy-map-pill--warn', 'randy-map-pill--indeterminate');
   pill.el.classList.add('randy-map-pill--failure');
   if (pill.iconEl) {
     pill.iconEl.classList.remove('randy-map-pill__spinner');
     pill.iconEl.innerHTML = warnSvg();
   }
+  // The bar stays where it stopped — that IS the honest picture of a failure.
   if (pill.stageEl)   pill.stageEl.textContent = errorText || 'Failed — see card';
   if (pill.elapsedEl) pill.elapsedEl.textContent = '';
   scheduleFadeOut(pill, 5000);
+}
+
+// The give-up timer's own settle. Unlike success/failure it does NOT schedule a
+// fade-out: the whole point is that the job may still be alive, so the pill
+// stays on screen — dismissible by click — ready to be revived and corrected by
+// a late result rather than disappearing on a guess.
+function markPillStalled(pill, text) {
+  if (!pill || !pill.el || pill.settled) return;
+  settle(pill, 'timeout');
+  pill.el.classList.remove('randy-map-pill--active', 'randy-map-pill--warn', 'randy-map-pill--indeterminate');
+  pill.el.classList.add('randy-map-pill--failure', 'randy-map-pill--stalled');
+  if (pill.iconEl) {
+    pill.iconEl.classList.remove('randy-map-pill__spinner');
+    pill.iconEl.innerHTML = warnSvg();
+  }
+  if (pill.stageEl) pill.stageEl.textContent = text;
 }
 
 export function destroyPill(pill) {
   if (!pill || !pill.el) return;
   if (pill.tickHandle) { clearInterval(pill.tickHandle); pill.tickHandle = null; }
   pill.settled = true;
+  pill.settledBy = 'dismiss';
+  untrackPill(pill);
   pill.el.remove();
 }
 

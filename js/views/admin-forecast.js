@@ -22,7 +22,7 @@ import { filterOpportunities } from '../utils/filters.js';
 import { listEntityDocuments } from '../components/documents-panel.js';
 import { ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
-import { createPill, updatePillStage, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
+import { createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure, destroyPill } from '../components/map-pdf-pill.js';
 import { requestForecastJson } from '../utils/forecast-client.js';
 import { stripHtml } from '../utils/forecast-prompts.js';
 import {
@@ -65,7 +65,7 @@ import { buildPartnerAnalysisPdf, partnerAnalysisFilename } from '../utils/partn
 // ── Contact Analyzer (fourth entity mode: partner → contact → brief) ──
 import { partnerContactFromRow } from '../utils/partner-contacts.js';
 import { loadCustomPrompts } from '../sheets.js';
-import { requestContactBriefJson } from '../utils/contact-analyzer-client.js';
+import { requestContactBriefJson, CONTACT_MAX_ROUNDS } from '../utils/contact-analyzer-client.js';
 import { deriveContactBriefBoard } from '../utils/contact-analyzer-schema.js';
 import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-analyzer-pdf-builder.js';
 // ── Auto-attach: file every "Create PDF" export onto its CRM record ───
@@ -560,7 +560,12 @@ async function runForecast(explicitOpp = null) {
   abortInflight();
   const controller = new AbortController();
   const label = opp.customer_name || opp.deal_name || 'Analyzer';
-  const pill = createPill('Reading the notes…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
+  // Two measurable phases: reading each unread attachment, then scoring. The
+  // document count isn't known until the listing lands, so the bar starts
+  // indeterminate and turns determinate below once it is.
+  const pill = createPill('Reading the notes…', {
+    label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS, progress: true,
+  });
   const job = { oppId: opp.opportunity_id, label, status: 'running', controller, pill, result: null, error: null };
   activeJob = job;
 
@@ -601,9 +606,12 @@ async function runForecast(explicitOpp = null) {
     // the coverage banner is left to name only the documents that genuinely
     // could not be read (a failed doc keeps its .analyzed flag untouched).
     const unread = collectUnreadDocuments(documents, descriptions);
+    // Steps = one per unread document + the scoring pass that follows them.
+    const docSteps = unread.length + 1;
     if (unread.length) {
       let completed = 0;
       const freshNotes = [];
+      setPillProgress(pill, 0, docSteps);
       updatePillStage(pill, `Reading documents… 0 of ${unread.length}`);
       // Bounded concurrency: analyze up to a few documents at once so a
       // document-heavy deal doesn't wait on a serial chain, without flooding
@@ -616,6 +624,7 @@ async function runForecast(explicitOpp = null) {
           console.warn('[Forecast] document analysis failed', file?.file_name, docErr);
         } finally {
           completed += 1;
+          setPillProgress(pill, completed, docSteps);
           updatePillStage(pill, `Reading documents… ${completed} of ${unread.length}`);
         }
       });
@@ -626,6 +635,10 @@ async function runForecast(explicitOpp = null) {
 
     if (controller.signal.aborted) return;
 
+    // Every document is read; only the scoring pass is left — the last step.
+    // With nothing to read there were no steps to count, so the bar keeps its
+    // indeterminate sweep rather than snapping back to 0% and creeping.
+    if (unread.length) setPillProgress(pill, docSteps - 1, docSteps);
     updatePillStage(pill, 'Randy is scoring the stages…');
 
     const forecast = await requestForecastJson(opp, descriptions, documents, controller.signal);
@@ -1434,7 +1447,12 @@ async function runEventAnalysis(explicitEvent = null) {
   abortEventInflight();
   const controller = new AbortController();
   const label = event.title || 'Event';
-  const pill = createPill('Reading the event notes…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
+  // Two phases with no measurable interior — gather evidence, then one model
+  // call — so the bar sweeps until the scoring pass, which is the one real
+  // checkpoint it has.
+  const pill = createPill('Reading the event notes…', {
+    label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS, progress: true,
+  });
   const job = { eventId: event.event_id, label, status: 'running', controller, pill, result: null, error: null };
   eventJob = job;
 
@@ -1461,6 +1479,7 @@ async function runEventAnalysis(explicitEvent = null) {
     const coverageWarnings = [];
     if (savedResult.warning) coverageWarnings.push(savedResult.warning);
 
+    setPillProgress(pill, 0.4);
     updatePillStage(pill, 'Randy is scoring the lifecycle…');
 
     const analysis = await requestEventAnalysisJson(
@@ -1924,7 +1943,9 @@ async function runPartnerAnalysis(explicitOption = null) {
   const runId = uuid('run');
   const key = makeJobKey('partner', partner.partner_id, runId);
   const label = partner.display_name || 'Partner';
-  const pill = createPill('Reading partner evidence…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
+  const pill = createPill('Reading partner evidence…', {
+    label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS, progress: true,
+  });
   const job = { key, label, status: 'running', controller, pill, result: null, error: null };
   partnerJob = job;
 
@@ -1966,6 +1987,7 @@ async function runPartnerAnalysis(explicitOption = null) {
     ]);
 
     if (!stillCurrent()) return;
+    setPillProgress(pill, 0.4);
     updatePillStage(pill, 'Randy is scoring partner maturity…');
 
     const { analysis, kpis, coverage } = await requestPartnerAnalysisJson({
@@ -2846,7 +2868,11 @@ async function runContactAnalysis(explicit = null) {
   const runId = uuid('run');
   const key = makeJobKey('contact', contactId, runId);
   const label = contact.name || 'Contact';
-  const pill = createPill('Researching the contact…', { label, hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS });
+  const pill = createPill('Researching the contact…', {
+    label,
+    hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS,
+    progress: { steps: CONTACT_MAX_ROUNDS, stepMs: 60_000 },
+  });
   const job = { key, partnerId, label, status: 'running', controller, pill, result: null, error: null };
   contactJob = job;
 
@@ -2882,7 +2908,13 @@ async function runContactAnalysis(explicit = null) {
       contact, partner, presetInstructions,
       transcripts, meetings, documents, opportunities, opportunityDescriptions,
       nowIso, timezone, signal: controller.signal,
-      onProgress: (round) => updatePillStage(pill, round > 1 ? `Researching… (round ${round})` : 'Researching the contact…'),
+      onProgress: (round) => {
+        // Round N starting means N-1 are genuinely finished — the only
+        // progress fact this research actually has. The pill eases between
+        // them on its own, and each call also restarts its silence clock.
+        setPillProgress(pill, round - 1, CONTACT_MAX_ROUNDS);
+        updatePillStage(pill, round > 1 ? `Researching… (round ${round})` : 'Researching the contact…');
+      },
     });
 
     if (!stillCurrent()) return;
