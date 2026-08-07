@@ -161,6 +161,22 @@
   gap: 10px;
 }
 
+/* ── Compose shell (append-to-existing flows) ───────────────────────
+   Groups the record pickers and the note editor so the phone stylesheet
+   can flex them independently. Everywhere else it's a transparent
+   pass-through that reproduces .qf-mode-body's column + gap. */
+.qf-compose,
+.qf-compose-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The collapsed one-line summary is a phone-only affordance. */
+.qf-compose-summary {
+  display: none;
+}
+
 /* ── Body / scrollable form area ────────────────────────────────── */
 .qf-body {
   flex: 1;
@@ -379,82 +395,123 @@
   transition: opacity 250ms ease;
 }
 
+/* ── Inline launcher (phones) ────────────────────────────────────
+   Stands in for the embedded form inside the dashboard's Quick Add slot.
+   Hidden above the phone breakpoint, where the real form embeds instead. */
+.qf-launcher { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════
+   Responsive: iPhone — full-screen focused compose sheet
+   ══════════════════════════════════════════════════════════════════
+   On a phone the Quick Add form is a task, not a widget: it takes the whole
+   screen so nothing competes with it. Three things make that work —
+
+   1. The sheet is sized from --qf-vv-* (written by syncPhoneViewport from
+      window.visualViewport) instead of dvh. iOS never shrinks the layout
+      viewport for the keyboard, so a dvh-sized sheet buries its own action
+      row under the keys. Tracking the visual viewport keeps the primary
+      button parked directly above the keyboard.
+   2. Every state has exactly ONE scroll container. Nested scrollers — page,
+      then form body, then a max-height note editor — are what made scrolling
+      and typing a fight.
+   3. body.qf-phone-focus hides the app chrome that floats above the sheet
+      (bottom tab bar, Randy launcher, voice pill). All are position:fixed,
+      so hiding them reflows nothing behind the sheet.
+   ══════════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
+
   .qf-backdrop--visible {
     opacity: 1;
     pointer-events: auto;
+    z-index: 10000;
   }
-}
 
-/* ── Responsive: iPhone / mobile Chrome bottom sheet ────────────── */
-@media (max-width: 768px) {
+  /* ---- App chrome steps aside while the sheet is up ---- */
+  body.qf-phone-focus .bottom-nav,
+  body.qf-phone-focus .randy,
+  body.qf-phone-focus .voice-widget {
+    display: none !important;
+  }
 
-  /* Panel becomes a full-width bottom sheet */
+  /* ---- Full-screen sheet ---- */
   .qf-panel {
     position: fixed !important;
-    inset: auto 0 0 0 !important;
+    top: var(--qf-vv-top, 0px) !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: auto !important;
     width: 100% !important;
-    max-height: 90dvh;            /* dvh shrinks when iOS keyboard appears  */
-    border-radius: 20px 20px 0 0;
+    height: var(--qf-vv-height, 100dvh) !important;
+    max-height: none !important;
+    border: none;
+    border-radius: 0;
+    /* Above the Randy launcher (9999) — nothing may cover the form. */
+    z-index: 10001;
     /* Slide-up animation replaces the desktop scale pop */
     transform: translateY(100%) !important;
     transition: opacity 250ms ease, transform 320ms cubic-bezier(0.32, 0.72, 0, 1) !important;
+    overscroll-behavior: contain;
   }
 
   .qf-panel--visible {
     transform: translateY(0) !important;
   }
 
-  /* Drag handle pill — sits above the header title */
-  .qf-header::before {
-    content: '';
-    display: block;
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.35);
-    pointer-events: none;
-  }
-
-  /* Taller header to make room for the drag pill */
+  /* ---- Header: clears the notch, one big close target ---- */
   .qf-header {
     position: relative;
-    height: 56px;
-    padding-top: 14px;
-    border-radius: 20px 20px 0 0;
+    height: auto;
+    min-height: calc(52px + var(--safe-top, env(safe-area-inset-top, 0px)));
+    padding: var(--safe-top, env(safe-area-inset-top, 0px)) 6px 0 16px;
+    border-radius: 0;
     flex-shrink: 0;
   }
 
-  /* Bigger close button — 44px touch target */
+  .qf-header__title {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
   .qf-close {
     width: 44px;
     height: 44px;
-    font-size: 22px;
-    border-radius: 8px;
-    margin-right: -8px; /* pull it to the edge so tap area reaches corner */
+    font-size: 26px;
+    border-radius: 10px;
   }
 
-  /* Taller tabs (44px Apple HIG) */
+  /* ---- Segmented type selector ---- */
+  .qf-type-selector {
+    padding: 8px 12px;
+    gap: 4px;
+    background: #F1F4FA;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
   .qf-type-btn {
-    height: 44px;
-    font-size: 13px;
+    height: 40px;
+    font-size: 14px;
+    border-radius: 9px;
+    border-bottom: none;
+  }
+
+  .qf-type-btn--active {
+    background: #fff;
+    border-bottom: none;
+    box-shadow: 0 1px 3px rgba(23, 29, 43, 0.12);
   }
 
   /* Stack 2-col rows into single column */
   .qf-row {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 12px;
   }
 
-  /* Bigger inputs — 44px height + 16px font stops iOS auto-zoom */
+  /* Bigger inputs — 46px height + 16px font stops iOS auto-zoom */
   .qf-input {
-    height: 44px;
+    height: 46px;
     font-size: 16px;
     padding: 0 12px;
+    border-radius: 10px;
   }
 
   .qf-textarea {
@@ -464,38 +521,248 @@
     padding: 10px 12px;
   }
 
-  /* Slightly larger labels for easier reading on small screens */
   .qf-label {
     font-size: 12px;
     letter-spacing: 0.3px;
   }
 
-  /* Touch-friendly mode toggle buttons */
-  .qf-toggle-btn {
-    height: 36px;
-    padding: 0 20px;
-    font-size: 13px;
+  /* Every field reserves a line for its validation message. On a 390px
+     screen that dead space adds up to a whole extra scroll; let it collapse
+     until there is something to say. */
+  .qf-panel .qf-error:empty {
+    min-height: 0;
   }
 
-  /* Scrollable body — momentum scrolling on iOS */
+  .qf-mode-toggle {
+    padding: 8px 12px;
+    border-radius: 10px;
+  }
+
+  .qf-toggle-btn {
+    height: 38px;
+    padding: 0 22px;
+    font-size: 14px;
+  }
+
+  /* ---- Body: the single scroll container in the default layout ---- */
   .qf-body {
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 14px 16px;
-    gap: 12px;
+    gap: 14px;
   }
 
-  /* Full-width equal footer buttons, taller tap target */
+  /* ---- Footer: one dominant action, pinned above the keyboard ----
+     The header's × already cancels, so a second dismiss button here only
+     shrinks the button the user actually came to press. */
   .qf-footer {
-    padding: 12px 16px;
-    padding-bottom: calc(12px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
+    padding: 10px 16px;
+    padding-bottom: calc(10px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
     gap: 10px;
   }
 
+  #qf-cancel-btn { display: none; }
+
   .qf-btn {
     flex: 1;
-    height: 46px;
-    font-size: 15px;
+    height: 50px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 12px;
+  }
+
+  /* ---- Rich-text editor ----
+     mobile.css carries the app-wide phone treatment for Quill fields (roomy
+     toolbar, 42dvh–60dvh scroll box, and a "Full screen" pill in a reserved
+     42px strip above the toolbar). Inside this sheet all three work against
+     us, and mobile.css loads last, so these overrides are deliberately
+     scoped one level deeper (.qf-panel .quill-editor …) to win on
+     specificity rather than on source order:
+
+       • The fullscreen pill is redundant — the sheet is already fullscreen,
+         and tapping the note gives it the whole screen. Its overlay also
+         sits at z-index 10000, i.e. *below* this panel, so it could not
+         show anyway. Button hidden, reserved strip reclaimed.
+       • No inner max-height and no inner scrollbar: the editor grows with
+         its content and .qf-body remains the single scroll container. */
+  .qf-panel .quill-editor-expand-btn { display: none; }
+
+  .qf-panel .quill-editor-wrapper { padding-top: 0; }
+
+  .qf-panel .quill-editor {
+    height: auto;
+    overflow: visible;
+  }
+
+  .qf-panel .quill-editor .ql-editor {
+    min-height: 180px;
+    max-height: none;
+    overflow-y: visible;
+    padding: 12px 14px 56px; /* bottom pad clears the floating mic button */
+    line-height: 1.55;
+  }
+
+  /* ══ Compose layout — "pick a record, then write the note" ══
+     The two append flows (opportunity description, partner transcript).
+     While the picker is open the body scrolls as normal; the moment the
+     note takes focus the picker collapses to one line and the editor
+     becomes the full-height, single scroll surface. */
+
+  .qf-compose,
+  .qf-compose-picker {
+    gap: 14px;
+  }
+
+  /* Collapsed summary — hidden until the note has focus */
+  .qf-panel--compose.qf-panel--composing .qf-compose {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .qf-panel--compose.qf-panel--composing .qf-compose-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    background: #f0f4ff;
+    border: 1px solid #dde5ff;
     border-radius: 10px;
+    text-align: left;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .qf-compose-summary__value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #171D2B;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .qf-compose-summary__value--empty {
+    color: #dc2626;
+    font-weight: 500;
+  }
+
+  .qf-compose-summary__action {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #2F6BFF;
+  }
+
+  /* Collapsed: reclaim the tabs, the New? toggle, and the picker */
+  .qf-panel--compose.qf-panel--composing .qf-type-selector,
+  .qf-panel--compose.qf-panel--composing .qf-mode-toggle,
+  .qf-panel--compose.qf-panel--composing .qf-compose-picker {
+    display: none;
+  }
+
+  /* Collapsed: the body stops scrolling and the editor fills what's left,
+     so the note itself is the one and only scroll surface. */
+  .qf-panel--compose.qf-panel--composing .qf-body {
+    overflow: hidden;
+  }
+
+  .qf-panel--compose.qf-panel--composing .qf-mode-body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .qf-panel--compose.qf-panel--composing .qf-compose-editor {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* .quill-editor IS Quill's .ql-container — flex it so the writing surface
+     stretches to the bottom of the sheet. */
+  .qf-panel--compose.qf-panel--composing .qf-compose-editor .quill-editor-wrapper,
+  .qf-panel--compose.qf-panel--composing .qf-compose-editor .quill-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .qf-panel--compose.qf-panel--composing .qf-compose-editor .quill-editor .ql-editor {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* The error line under a full-height editor would push it off-screen. */
+  .qf-panel--compose.qf-panel--composing .qf-compose-editor .qf-error:empty {
+    display: none;
+  }
+
+  /* ---- Inline launcher card (dashboard Quick Add slot) ---- */
+  .qf-launcher {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 68px;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid #DCE1EC;
+    border-radius: 14px;
+    text-align: left;
+    cursor: pointer;
+    color: #171D2B;
+    font-family: inherit;
+  }
+
+  .qf-launcher:active {
+    background: #f5f7fc;
+    transform: scale(0.99);
+  }
+
+  .qf-launcher__icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: #2F6BFF;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(47, 107, 255, 0.32);
+  }
+
+  .qf-launcher__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .qf-launcher__title {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .qf-launcher__sub {
+    font-size: 12px;
+    color: #6b7280;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .qf-launcher__chevron {
+    flex-shrink: 0;
+    color: #9ca3af;
   }
 }
 
