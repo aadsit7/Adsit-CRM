@@ -13,6 +13,7 @@ import {
   researchFraction,
   writeFraction,
   researchFailureText,
+  STAGE_CHAR_BUDGET,
 } from '../js/utils/research-progress.js';
 
 // ── The curves ──────────────────────────────────────────────────────
@@ -139,6 +140,65 @@ test('saving parks the bar just short of done', () => {
   const saving = progress.saving('Saving…');
   assert.equal(saving.stage, 'Saving…');
   assert.ok(saving.from >= 0.9 && saving.from < 1, 'only the real result finishes the bar');
+});
+
+// ── Wording fits the pill it is shown in ────────────────────────────
+// .randy-map-pill is max-width 260px and clips its stage line with an
+// ellipsis, so an over-long line is not extra information — it is the same
+// information with its most specific half cut off. Caught in a real browser,
+// where "Reading 8 results · 4 searches so far" rendered as
+// "Reading 8 results · 4 searche…".
+
+test('every stage line fits the pill without being clipped', () => {
+  const progress = createResearchProgress({ startStage: 'Researching the contact…' });
+  const lines = [
+    progress.apply({ type: 'round', round: 1 }),
+    progress.apply({ type: 'narration', round: 1, chars: 300 }),
+    progress.apply({ type: 'search', round: 1, search: 1, query: 'Insight Enterprises endpoint management leadership team' }),
+    progress.apply({ type: 'results', round: 1, search: 1, sources: 12 }),
+    progress.apply({ type: 'search', round: 1, search: 2, query: 'x' }),
+    progress.apply({ type: 'results', round: 1, search: 2, sources: 0 }),
+    progress.apply({ type: 'narration', round: 1, chars: 900 }),
+    progress.apply({ type: 'round', round: 2 }),
+    progress.apply({ type: 'retry', round: 2, delayMs: 15000, status: 429 }),
+    progress.apply({ type: 'retry', round: 2, delayMs: 15000, status: 529 }),
+    progress.apply({ type: 'retry', round: 2, delayMs: 15000, status: 0 }),
+    progress.apply({ type: 'writing', round: 2, chars: 4000 }),
+    progress.saving('Saving…'),
+  ].filter(Boolean).map(p => p.stage);
+
+  assert.ok(lines.length >= 12, 'the whole run was exercised');
+  for (const line of lines) {
+    assert.ok(
+      line.length <= STAGE_CHAR_BUDGET,
+      `"${line}" is ${line.length} chars — over the ${STAGE_CHAR_BUDGET} the pill can show`,
+    );
+  }
+});
+
+test('failure text fits the pill too', () => {
+  const cases = [
+    { status: 429 }, { status: 529 }, { status: 500 }, { status: 401 },
+    { code: 'RESEARCH_STREAM_TRUNCATED' }, { code: 'RESEARCH_ROUNDS_EXHAUSTED' },
+    { name: 'TimeoutError' }, new Error('API key not set'), new Error('cut off'), null,
+  ];
+  for (const c of cases) {
+    const text = researchFailureText(c);
+    assert.ok(text.length <= STAGE_CHAR_BUDGET, `"${text}" is ${text.length} chars`);
+  }
+});
+
+// "2 searchs" shipped to the screen. The naive `${word}s` is wrong for any
+// word ending in a sibilant, and "search" is the one this module counts most.
+test('counts are pluralized as English, not as string concatenation', () => {
+  const progress = createResearchProgress();
+  progress.apply({ type: 'round', round: 1 });
+  progress.apply({ type: 'search', round: 1, search: 1, query: 'a' });
+  assert.match(progress.apply({ type: 'results', round: 1, sources: 1 }).stage, /1 result · 1 search$/);
+  progress.apply({ type: 'search', round: 1, search: 2, query: 'b' });
+  const two = progress.apply({ type: 'results', round: 1, sources: 8 }).stage;
+  assert.match(two, /8 results · 2 searches$/);
+  assert.ok(!/searchs/.test(two), `"${two}" must not say "searchs"`);
 });
 
 // ── Failure wording ─────────────────────────────────────────────────

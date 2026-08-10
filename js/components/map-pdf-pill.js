@@ -398,7 +398,13 @@ export function updatePillStage(pill, stageText) {
   // couple of hundred characters) would re-announce one unchanged sentence
   // dozens of times. The liveness signal above is unconditional; only the DOM
   // write is skipped.
-  if (pill.stageEl && pill.stageEl.textContent !== stageText) pill.stageEl.textContent = stageText;
+  if (pill.stageEl && pill.stageEl.textContent !== stageText) {
+    pill.stageEl.textContent = stageText;
+    // The stage line is clipped with an ellipsis at the pill's 260px, so
+    // anything long loses exactly the specific half worth reading. Callers keep
+    // their wording short; this makes the whole line recoverable on hover.
+    if (typeof pill.stageEl.setAttribute === 'function') pill.stageEl.setAttribute('title', stageText);
+  }
 }
 
 /**

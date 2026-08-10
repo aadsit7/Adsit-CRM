@@ -53,22 +53,37 @@ export function writeFraction(chars) {
   return WRITE_START + (WRITE_CEILING - WRITE_START) * (1 - Math.exp(-n / WRITE_SCALE));
 }
 
+// ── The pill's width is the real constraint on wording ──────────────
+// .randy-map-pill is max-width 260px with `text-overflow: ellipsis` on the
+// stage line, which lands at roughly 30 characters once the avatar and spinner
+// take their share of the row. A longer stage line is not "more information" —
+// it is the same information with its most specific half cut off, so every
+// line below is written to fit, and STAGE_CHAR_BUDGET is asserted in the tests
+// to keep it that way. The full untruncated text is still available on hover
+// (updatePillStage sets it as the element's title).
+export const STAGE_CHAR_BUDGET = 30;
+// What is left for a search query once `Searching: ` has taken its 11.
+const QUERY_CHAR_BUDGET = 19;
+
 function truncate(text, max) {
   const s = String(text || '').trim().replace(/\s+/g, ' ');
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }
 
+// English plurals for the two words this module counts. "search" takes -es;
+// the naive `${word}s` produced "2 searchs" on screen.
 function plural(n, word) {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
+  const suffix = /(?:s|x|z|ch|sh)$/.test(word) ? 'es' : 's';
+  return `${n} ${word}${n === 1 ? '' : suffix}`;
 }
 
 // A retry is the one pause the user should be told the reason for — "rate
 // limited, back in 6s" is a different feeling to a bar that stopped.
 function retryStage({ status, delayMs }) {
   const secs = Math.max(1, Math.round((Number(delayMs) || 0) / 1000));
-  if (status === 429) return `Rate limited — retrying in ${secs}s…`;
-  if (status >= 500 || status === 529) return `Claude is busy — retrying in ${secs}s…`;
-  return `Connection hiccup — retrying in ${secs}s…`;
+  if (status === 429) return `Rate limited · retry in ${secs}s`;
+  if (status >= 500 || status === 529) return `Claude busy · retry in ${secs}s`;
+  return `Connection lost · retry in ${secs}s`;
 }
 
 /**
@@ -84,14 +99,14 @@ export function researchFailureText(err) {
   const code = String((err && err.code) || '');
   const message = String((err && err.message) || '');
 
-  if (status === 429) return 'Rate limited — try again shortly';
-  if (status === 529 || status >= 500) return 'Claude was busy — try again';
-  if (status === 401 || status === 403) return 'API key rejected — check Setup';
-  if (code === 'RESEARCH_STREAM_TRUNCATED') return 'Connection dropped — try again';
-  if (code === 'RESEARCH_ROUNDS_EXHAUSTED') return 'Research ran long — try again';
-  if (err && err.name === 'TimeoutError') return 'Timed out — try again';
-  if (/API key/i.test(message)) return 'No API key — check Setup';
-  if (/cut off/i.test(message)) return 'Answer was cut off — try again';
+  if (status === 429) return 'Rate limited · try again';
+  if (status === 529 || status >= 500) return 'Claude was busy · try again';
+  if (status === 401 || status === 403) return 'API key rejected · see Setup';
+  if (code === 'RESEARCH_STREAM_TRUNCATED') return 'Connection lost · try again';
+  if (code === 'RESEARCH_ROUNDS_EXHAUSTED') return 'Research ran long · retry';
+  if (err && err.name === 'TimeoutError') return 'Timed out · try again';
+  if (/API key/i.test(message)) return 'No API key · see Setup';
+  if (/cut off/i.test(message)) return 'Answer cut off · try again';
   return 'Analysis failed';
 }
 
@@ -150,7 +165,7 @@ export function createResearchProgress({ startStage = 'Researching…' } = {}) {
             researchFraction(state.searches),
             researchFraction(state.searches + 1),
             START_STEP_MS,
-            `Still researching — pass ${state.round}…`,
+            `Still researching · pass ${state.round}`,
           );
         }
 
@@ -158,8 +173,8 @@ export function createResearchProgress({ startStage = 'Researching…' } = {}) {
           state.searches = Math.max(state.searches, Number(event.search) || state.searches + 1);
           state.lastQuery = String(event.query || '');
           const stage = state.lastQuery
-            ? `Searching: ${truncate(state.lastQuery, 44)}`
-            : `Running web search ${state.searches}…`;
+            ? `Searching: ${truncate(state.lastQuery, QUERY_CHAR_BUDGET)}`
+            : `Running web search ${state.searches}`;
           return at(
             researchFraction(state.searches),
             researchFraction(state.searches + 1),
@@ -172,8 +187,8 @@ export function createResearchProgress({ startStage = 'Researching…' } = {}) {
           const sources = Math.max(0, Number(event.sources) || 0);
           state.sources += sources;
           const stage = sources
-            ? `Reading ${plural(sources, 'result')} · ${plural(state.searches, 'search')} so far`
-            : `Reviewing results · ${plural(state.searches, 'search')} so far`;
+            ? `${plural(sources, 'result')} · ${plural(state.searches, 'search')}`
+            : `Reviewing · ${plural(state.searches, 'search')}`;
           // Same position — results are the other half of the search that
           // already moved the bar. Only the words change.
           return at(
