@@ -53,9 +53,9 @@ import {
 } from '../utils/partner-contact-leadcheck.js';
 import {
   requestLeadCheckAnalysis,
-  LEADCHECK_MAX_ROUNDS,
-  LEADCHECK_MAX_RUN_MS,
+  LEADCHECK_STALL_MS,
 } from '../utils/partner-contact-leadcheck-client.js';
+import { createResearchProgress, researchFailureText } from '../utils/research-progress.js';
 import {
   PARTNER_BIO_HEADERS,
   NA,
@@ -2923,16 +2923,29 @@ async function runLeadCheck(partner, contact, btn) {
   // contact gets its OWN pill (rows analyze in parallel), so the stack shows
   // one labelled bar per contact in flight.
   //
-  // Both budgets come from the client rather than being guessed here. This
-  // pill used to take the component's 4-minute default while the research it
-  // was reporting on is allowed 24 — so on any run past four minutes it
-  // declared a timeout, went settled, and then swallowed the real "verified"
-  // that arrived minutes later. The user saw the analysis stop; it hadn't.
+  // The bar is driven by what the research actually does — each web search it
+  // issues, each result set it reads, each chunk of the verdict it writes —
+  // rather than by counting rounds. Rounds were the only fact a non-streaming
+  // loop had, and they made a bar that was wrong in both directions: a healthy
+  // one-round run never left its first sixth, and the pill's silence timer
+  // fired mid-run because nothing had been heard for minutes. Now every real
+  // step both moves the bar and proves the job is alive, so the give-up budget
+  // can be a fifth of what it had to be (see LEADCHECK_STALL_MS).
   const pill = createPill('Analyzing…', {
     label: contact.name || 'Contact',
-    hardTimeoutMs: LEADCHECK_MAX_RUN_MS,
-    progress: { steps: LEADCHECK_MAX_ROUNDS, stepMs: 60_000 },
+    hardTimeoutMs: LEADCHECK_STALL_MS,
+    progress: { steps: 1, stepMs: 20_000 },
   });
+  const progress = createResearchProgress({ startStage: 'Researching the contact…' });
+  // The pill carries the words; the row button carries a percentage. Stage text
+  // like `Searching: kris huff insight` belongs in the pill, not in a table
+  // cell whose width every other row depends on.
+  const paint = (next) => {
+    if (!next) return;
+    updatePillStage(pill, next.stage);
+    setPillProgress(pill, next);
+    if (btn.isConnected) btn.textContent = `Analyzing… ${next.percent}%`;
+  };
   const setStage = (text) => {
     updatePillStage(pill, text);
     if (btn.isConnected) btn.textContent = text;
@@ -2941,9 +2954,13 @@ async function runLeadCheck(partner, contact, btn) {
   try {
     // Header extension also covers sheets created before the analysis
     // columns existed.
+    setStage('Checking the contact record…');
     await ensureSheetWithHeaders(CONFIG.SHEET_PARTNER_CONTACTS, PARTNER_CONTACT_HEADERS);
 
     // Read-only snapshot of the selected record + its linked CRM sources.
+    // Three sheet reads, and on a big workbook they are not instant — say so
+    // rather than showing a bar that has not moved since the click.
+    setStage('Collecting CRM sources…');
     const [transcripts, meetings, documentsRows] = await Promise.all([
       readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(() => []),
       readSheetAsObjects(CONFIG.SHEET_MEETING_INDEX).catch(() => []),
@@ -2974,16 +2991,13 @@ async function runLeadCheck(partner, contact, btn) {
     })();
     const report = await requestLeadCheckAnalysis({
       contact, snapshot, sourceMaterial, nowIso, timezone,
-      // Rounds are the only checkpoints the research genuinely has, so they
-      // are what the bar is measured in — round N starting means N-1 are done.
-      // Between them the pill eases forward on its own, which is also what
-      // keeps the give-up timer quiet: every round proves the job is alive.
-      onProgress: (round) => {
-        setPillProgress(pill, round - 1, LEADCHECK_MAX_ROUNDS);
-        setStage(round > 1 ? `Verifying… (round ${round})` : 'Analyzing…');
-      },
+      // Every observable step of the research — createResearchProgress turns
+      // each into a stage line and a bar position that can never claim more
+      // than actually happened. Between checkpoints the pill eases forward on
+      // its own, and each checkpoint also restarts its silence clock.
+      onEvent: (event) => paint(progress.apply(event)),
     });
-    setStage('Saving…');
+    paint(progress.saving('Saving…'));
 
     const record = buildAnalysisRecord({
       state: report.state,
@@ -3029,7 +3043,10 @@ async function runLeadCheck(partner, contact, btn) {
       await saveContactAnalysis(partner, contactId, { state: 'FAILED', lastVerified: '', record });
     } catch { /* ignore secondary failures */ }
     showToast(err.message || 'Contact analysis failed', 'error');
-    markPillFailure(pill, 'Analysis failed');
+    // Name the reason on the pill too. The toast is gone in seconds and the
+    // pill is what the user is actually watching — "Analysis failed" for a
+    // rate limit sends them to re-check the record instead of just retrying.
+    markPillFailure(pill, researchFailureText(err));
   } finally {
     leadCheckRuns.delete(contactId);
     btn.disabled = false;

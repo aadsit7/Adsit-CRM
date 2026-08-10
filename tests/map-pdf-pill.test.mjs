@@ -305,6 +305,67 @@ test('the step form paints completed/total and the fraction form paints exactly'
   destroyPill(frac);
 });
 
+// The span form exists for jobs whose steps are real but whose TOTAL is not
+// knowable — how many web searches an analysis needs is decided while it runs.
+// step/total would have to invent a denominator; from/to states only what is
+// actually known: where we are, and the next checkpoint we may creep toward.
+test('the span form paints `from` and creeps only toward `to`', async () => {
+  const pill = createPill('Working…', { progress: { steps: 1, stepMs: 60_000 } });
+
+  setPillProgress(pill, { from: 0.28, to: 0.37, stepMs: 40 });
+  assert.equal(fillPct(pill), 28);
+
+  // Long enough for several time constants of creep — it must approach the
+  // next checkpoint without ever passing it.
+  await new Promise(r => setTimeout(r, 1200));
+  const crept = fillPct(pill);
+  assert.ok(crept > 28, `the bar should creep while a step runs, sat at ${crept}`);
+  assert.ok(crept < 37, `the creep must never reach the next checkpoint, hit ${crept}`);
+
+  // A later checkpoint below where the bar already sits cannot rewind it.
+  setPillProgress(pill, { from: 0.1, to: 0.2, stepMs: 40 });
+  assert.ok(fillPct(pill) >= crept, 'the bar never slides backwards');
+
+  destroyPill(pill);
+});
+
+test('the span form counts as proof of life', async () => {
+  const pill = createPill('Working…', { hardTimeoutMs: 400, progress: { steps: 1 } });
+  for (let i = 0; i < 5; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    setPillProgress(pill, { from: i / 10, to: (i + 1) / 10, stepMs: 20_000 });
+  }
+  assert.equal(pill.settled, false);
+  destroyPill(pill);
+});
+
+// A zero-width span is "sit exactly here" (a retry, a saving hold). The bar
+// must not drift while nothing is running.
+// A streaming caller re-reports the same span every couple of hundred
+// characters. Each repeat must NOT restart the easing clock, or the bar sits
+// at `from` for the whole step — the frozen bar this all exists to fix.
+test('re-reporting the same span keeps the creep going', async () => {
+  const pill = createPill('Working…', { progress: { steps: 1, stepMs: 60_000 } });
+  setPillProgress(pill, { from: 0.3, to: 0.45, stepMs: 60 });
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 100));
+    setPillProgress(pill, { from: 0.3, to: 0.45, stepMs: 60 });
+  }
+  const crept = fillPct(pill);
+  assert.ok(crept > 31, `chatty repeats must not pin the bar at its floor, sat at ${crept}`);
+  assert.ok(crept < 45);
+  destroyPill(pill);
+});
+
+test('a zero-width span holds the bar still', async () => {
+  const pill = createPill('Working…', { progress: { steps: 1, stepMs: 10 } });
+  setPillProgress(pill, { from: 0.5, to: 0.5, stepMs: 10 });
+  assert.equal(fillPct(pill), 50);
+  await new Promise(r => setTimeout(r, 1200));
+  assert.equal(fillPct(pill), 50);
+  destroyPill(pill);
+});
+
 test('progress is clamped to 0..1 and never moves backwards', () => {
   const pill = createPill('Working…', { progress: true });
   setPillProgress(pill, 0.6);
