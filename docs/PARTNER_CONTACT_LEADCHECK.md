@@ -53,6 +53,14 @@ each chunk of the verdict it writes. `js/utils/research-progress.js` maps those
 onto the stage line and the bar; the row button carries a compact
 `Analyzing… 42%` so a long stage line never widens the table.
 
+Stage wording is written to the pill's real width. `.randy-map-pill` is
+`max-width: 260px` and clips its stage line with an ellipsis, so an over-long
+line is not extra information — it is the same information with its most
+specific half cut off (`Reading 8 results · 4 searches so far` rendered as
+`Reading 8 results · 4 searche…`). Every line fits inside
+`STAGE_CHAR_BUDGET`, asserted in the tests, and the full text is available on
+hover via the stage element's `title`.
+
 Before that, the pill names the local phases too — `Checking the contact
 record…`, `Collecting CRM sources…` — so it is informative from the first
 second rather than a bar that has not moved since the click.
