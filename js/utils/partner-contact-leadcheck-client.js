@@ -10,14 +10,19 @@
 //     call loops (bounded) until a final text answer arrives.
 // The strict JSON answer is in the LAST text block; earlier text blocks are
 // pre-search narration. Validation lives in partner-contact-leadcheck.js.
+//
+// The transport for both of those — the SSE stream, the continuation loop,
+// the per-round idle budget and retry — lives in anthropic-research-stream.js
+// and is shared with the contact-brief client. What is left here is this
+// analysis's own prompt, its own budgets, and its own parser.
 // ============================================================
 
 import { getRuntimeConfig } from '../config.js';
 import { buildLeadCheckPrompt, parseLeadCheckResponse } from './partner-contact-leadcheck.js';
+import { runResearchStream } from './anthropic-research-stream.js';
 
 const LEADCHECK_MODEL = 'claude-opus-4-8';
 const LEADCHECK_MAX_TOKENS = 16000;
-const LEADCHECK_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
 const LEADCHECK_MAX_SEARCHES = 25;            // web_search max_uses per round
 
 // Exported so the progress pill can size its bar from the SAME number the loop
@@ -25,36 +30,24 @@ const LEADCHECK_MAX_SEARCHES = 25;            // web_search max_uses per round
 // moment this budget changed — round 7 of 6, or a bar that stops at 75%.
 export const LEADCHECK_MAX_ROUNDS = 6;        // pause_turn continuations
 
-// Worst case one run can legitimately occupy: every round using its full
-// request budget. The caller sizes its pill from this so a healthy long run is
-// never mistaken for a wedged one.
-export const LEADCHECK_MAX_RUN_MS = LEADCHECK_MAX_ROUNDS * LEADCHECK_REQUEST_TIMEOUT_MS;
+// How long the run may say NOTHING before a round is abandoned and retried.
+// The research streams: searches, their results, and every character of the
+// answer all arrive as events, so silence here is a wedged connection rather
+// than a thorough analysis.
+export const LEADCHECK_IDLE_TIMEOUT_MS = 120_000;
+
+// The give-up budget the caller hands its pill. It measures silence too, so it
+// only has to clear the longest legitimate quiet stretch — one idle timeout,
+// its retry backoff, and the reconnect — with room to spare. It used to be
+// 6 rounds x 4 minutes (24 min) because a non-streaming round was a black box
+// for its whole duration; with real events there is no reason to wait that long
+// before telling the user something is wrong.
+export const LEADCHECK_STALL_MS = 300_000;
 
 function requireApiKey() {
   const key = getRuntimeConfig('ANTHROPIC_API_KEY');
   if (!key) throw new Error('API key not set. Configure it on the Setup page or click the 🔑 icon in AI Assistant.');
   return key;
-}
-
-function buildHeaders(apiKey) {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
-}
-
-function makeTimeoutSignal(signal, ms) {
-  const ts = typeof AbortSignal.timeout === 'function'
-    ? AbortSignal.timeout(ms)
-    : (() => {
-        const c = new AbortController();
-        setTimeout(() => c.abort(new DOMException('Request timed out', 'TimeoutError')), ms);
-        return c.signal;
-      })();
-  if (!signal) return ts;
-  return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, ts]) : signal;
 }
 
 /**
@@ -68,63 +61,41 @@ function makeTimeoutSignal(signal, ms) {
  * @param {string} params.nowIso         Timestamp used for the loop check.
  * @param {string} [params.timezone]
  * @param {AbortSignal} [params.signal]
- * @param {Function} [params.onProgress] (roundNumber) => void
+ * @param {Function} [params.onProgress] (roundNumber) => void — round starts only.
+ * @param {Function} [params.onEvent]    (event) => void — every research event;
+ *                                       see runResearchStream for the shapes.
  * @returns {Promise<object>} validated LeadCheck report
  */
 export async function requestLeadCheckAnalysis({
-  contact, snapshot, sourceMaterial, nowIso, timezone = 'UTC', signal, onProgress,
+  contact, snapshot, sourceMaterial, nowIso, timezone = 'UTC', signal, onProgress, onEvent,
 } = {}) {
   const apiKey = requireApiKey();
   const prompt = buildLeadCheckPrompt({ snapshot, sourceMaterial, nowIso, timezone });
-  const messages = [{ role: 'user', content: prompt }];
 
-  for (let round = 1; round <= LEADCHECK_MAX_ROUNDS; round++) {
-    if (typeof onProgress === 'function') onProgress(round);
+  const { text, stopReason } = await runResearchStream({
+    apiKey,
+    model: LEADCHECK_MODEL,
+    maxTokens: LEADCHECK_MAX_TOKENS,
+    messages: [{ role: 'user', content: prompt }],
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: LEADCHECK_MAX_SEARCHES }],
+    maxRounds: LEADCHECK_MAX_ROUNDS,
+    idleTimeoutMs: LEADCHECK_IDLE_TIMEOUT_MS,
+    signal,
+    logTag: 'LeadCheck',
+    onEvent: (event) => {
+      // Round starts are still forwarded to onProgress so existing callers
+      // (and their round-shaped bars) keep working unchanged.
+      if (event.type === 'round' && typeof onProgress === 'function') onProgress(event.round);
+      if (typeof onEvent === 'function') onEvent(event);
+    },
+  });
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: buildHeaders(apiKey),
-      body: JSON.stringify({
-        model: LEADCHECK_MODEL,
-        max_tokens: LEADCHECK_MAX_TOKENS,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: LEADCHECK_MAX_SEARCHES }],
-        messages,
-      }),
-      signal: makeTimeoutSignal(signal, LEADCHECK_REQUEST_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      let errBody = {};
-      try { errBody = await response.json(); } catch { /* ignore */ }
-      const msg = errBody.error?.message || `API error: ${response.status}`;
-      console.error('[LeadCheck] API error', { status: response.status, body: errBody });
-      const err = new Error(msg);
-      err.status = response.status;
-      err.code = 'LEADCHECK_API_ERROR';
-      throw err;
-    }
-
-    const data = await response.json();
-
-    if (data.stop_reason === 'refusal') {
-      throw new Error('The model declined to research this contact.');
-    }
-    if (data.stop_reason === 'pause_turn') {
-      // Continue the same research turn with the partial content appended.
-      messages.push({ role: 'assistant', content: data.content });
-      continue;
-    }
-    if (data.stop_reason === 'max_tokens') {
-      throw new Error('The analysis output was cut off before completing — try again.');
-    }
-
-    // Final answer: the strict JSON is in the LAST text block.
-    let text = '';
-    for (const block of data.content || []) {
-      if (block?.type === 'text' && typeof block.text === 'string') text = block.text;
-    }
-    return parseLeadCheckResponse(text, { contact, nowIso });
+  if (stopReason === 'refusal') {
+    throw new Error('The model declined to research this contact.');
+  }
+  if (stopReason === 'max_tokens') {
+    throw new Error('The analysis output was cut off before completing — try again.');
   }
 
-  throw new Error('The research did not finish within the allowed number of rounds — try again.');
+  return parseLeadCheckResponse(text, { contact, nowIso });
 }

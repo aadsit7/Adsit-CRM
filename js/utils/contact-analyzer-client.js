@@ -32,40 +32,25 @@ import {
 } from './partner-analyzer-evidence.js';
 import { buildContactBriefPrompt, buildPartnerContextBlock } from './contact-analyzer-prompts.js';
 import { parseContactBriefResponse } from './contact-analyzer-schema.js';
+import { runResearchStream } from './anthropic-research-stream.js';
 
 const CONTACT_MODEL = 'claude-opus-4-8';
 const CONTACT_MAX_TOKENS = 16000;
-const CONTACT_REQUEST_TIMEOUT_MS = 240_000; // per round — research turns are long
 // Exported so a caller's progress bar is sized by the SAME number the loop
 // runs on, instead of a copy that can drift out of step with it.
 export const CONTACT_MAX_ROUNDS = 6;        // pause_turn continuations
 const CONTACT_MAX_SEARCHES = 25;            // web_search max_uses
 
+// Silence budgets, not duration budgets — the research streams its searches,
+// its results and its answer, so a round that has said nothing for two minutes
+// is stuck rather than thorough. See anthropic-research-stream.js.
+export const CONTACT_IDLE_TIMEOUT_MS = 120_000;
+export const CONTACT_STALL_MS = 300_000;    // what a caller's pill should allow
+
 function requireApiKey() {
   const key = getRuntimeConfig('ANTHROPIC_API_KEY');
   if (!key) throw new Error('API key not set. Configure it on the Setup page or click the 🔑 icon in AI Assistant.');
   return key;
-}
-
-function buildHeaders(apiKey) {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
-}
-
-function makeTimeoutSignal(signal, ms) {
-  const ts = typeof AbortSignal.timeout === 'function'
-    ? AbortSignal.timeout(ms)
-    : (() => {
-        const c = new AbortController();
-        setTimeout(() => c.abort(new DOMException('Request timed out', 'TimeoutError')), ms);
-        return c.signal;
-      })();
-  if (!signal) return ts;
-  return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, ts]) : signal;
 }
 
 // ── Partner note collection (bounded, newest-first) ─────────────────
@@ -167,12 +152,14 @@ export function prepareContactBrief({
  * @param {string} [params.nowIso]
  * @param {string} [params.timezone]
  * @param {AbortSignal} [params.signal]
- * @param {Function} [params.onProgress]  (roundNumber) => void
+ * @param {Function} [params.onProgress]  (roundNumber) => void — round starts only.
+ * @param {Function} [params.onEvent]     (event) => void — every research event;
+ *                                        see runResearchStream for the shapes.
  * @returns {Promise<object>} the validated brief
  */
 export async function requestContactBriefJson(params = {}) {
   const {
-    contact = {}, presetInstructions = '', nowIso = '', timezone = 'UTC', signal, onProgress,
+    contact = {}, presetInstructions = '', nowIso = '', timezone = 'UTC', signal, onProgress, onEvent,
   } = params;
   const apiKey = requireApiKey();
 
@@ -202,53 +189,29 @@ export async function requestContactBriefJson(params = {}) {
     content: [{ type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }],
   }];
 
-  for (let round = 1; round <= CONTACT_MAX_ROUNDS; round += 1) {
-    if (typeof onProgress === 'function') onProgress(round);
+  const { text, stopReason } = await runResearchStream({
+    apiKey,
+    model: CONTACT_MODEL,
+    maxTokens: CONTACT_MAX_TOKENS,
+    messages,
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: CONTACT_MAX_SEARCHES }],
+    maxRounds: CONTACT_MAX_ROUNDS,
+    idleTimeoutMs: CONTACT_IDLE_TIMEOUT_MS,
+    signal,
+    logTag: 'Contact Analyzer',
+    onEvent: (event) => {
+      // Round starts are still forwarded to onProgress so existing callers
+      // (and their round-shaped bars) keep working unchanged.
+      if (event.type === 'round' && typeof onProgress === 'function') onProgress(event.round);
+      if (typeof onEvent === 'function') onEvent(event);
+    },
+  });
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: buildHeaders(apiKey),
-      body: JSON.stringify({
-        model: CONTACT_MODEL,
-        max_tokens: CONTACT_MAX_TOKENS,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: CONTACT_MAX_SEARCHES }],
-        messages,
-      }),
-      signal: makeTimeoutSignal(signal, CONTACT_REQUEST_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      let errBody = {};
-      try { errBody = await response.json(); } catch { /* ignore */ }
-      const msg = errBody.error?.message || `API error: ${response.status}`;
-      console.error('[Contact Analyzer] API error', { status: response.status, body: errBody });
-      const err = new Error(msg);
-      err.status = response.status;
-      err.code = 'CONTACT_BRIEF_API_ERROR';
-      throw err;
-    }
-
-    const data = await response.json();
-
-    if (data.stop_reason === 'refusal') {
-      throw new Error('The model declined to research this contact.');
-    }
-    if (data.stop_reason === 'pause_turn') {
-      // Continue the same research turn with the partial content appended.
-      messages.push({ role: 'assistant', content: data.content });
-      continue;
-    }
-
-    // Final (or cut-off) answer: the strict JSON is in the LAST text block.
-    let text = '';
-    for (const block of data.content || []) {
-      if (block?.type === 'text' && typeof block.text === 'string') text = block.text;
-    }
-    const truncated = data.stop_reason === 'max_tokens';
-    // On max_tokens the JSON tail is cut off; the parser repairs a truncated
-    // object rather than discarding a mostly-complete brief.
-    return parseContactBriefResponse(text, { contact, truncated });
+  if (stopReason === 'refusal') {
+    throw new Error('The model declined to research this contact.');
   }
 
-  throw new Error('The research did not finish within the allowed number of rounds — try again.');
+  // On max_tokens the JSON tail is cut off; the parser repairs a truncated
+  // object rather than discarding a mostly-complete brief.
+  return parseContactBriefResponse(text, { contact, truncated: stopReason === 'max_tokens' });
 }

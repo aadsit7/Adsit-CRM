@@ -65,7 +65,8 @@ import { buildPartnerAnalysisPdf, partnerAnalysisFilename } from '../utils/partn
 // ── Contact Analyzer (fourth entity mode: partner → contact → brief) ──
 import { partnerContactFromRow } from '../utils/partner-contacts.js';
 import { loadCustomPrompts } from '../sheets.js';
-import { requestContactBriefJson, CONTACT_MAX_ROUNDS } from '../utils/contact-analyzer-client.js';
+import { requestContactBriefJson, CONTACT_STALL_MS } from '../utils/contact-analyzer-client.js';
+import { createResearchProgress, researchFailureText } from '../utils/research-progress.js';
 import { deriveContactBriefBoard } from '../utils/contact-analyzer-schema.js';
 import { buildContactBriefPdf, contactBriefFilename } from '../utils/contact-analyzer-pdf-builder.js';
 // ── Auto-attach: file every "Create PDF" export onto its CRM record ───
@@ -2868,11 +2869,20 @@ async function runContactAnalysis(explicit = null) {
   const runId = uuid('run');
   const key = makeJobKey('contact', contactId, runId);
   const label = contact.name || 'Contact';
+  // Same evidence-driven bar as the LeadCheck pill on the partner page: the
+  // research streams every search, result set and chunk of the brief, so the
+  // position comes from work actually done rather than from counting rounds.
   const pill = createPill('Researching the contact…', {
     label,
-    hardTimeoutMs: ANALYZER_PILL_TIMEOUT_MS,
-    progress: { steps: CONTACT_MAX_ROUNDS, stepMs: 60_000 },
+    hardTimeoutMs: CONTACT_STALL_MS,
+    progress: { steps: 1, stepMs: 20_000 },
   });
+  const progress = createResearchProgress({ startStage: 'Researching the contact…' });
+  const paint = (next) => {
+    if (!next) return;
+    updatePillStage(pill, next.stage);
+    setPillProgress(pill, next);
+  };
   const job = { key, partnerId, label, status: 'running', controller, pill, result: null, error: null };
   contactJob = job;
 
@@ -2908,13 +2918,10 @@ async function runContactAnalysis(explicit = null) {
       contact, partner, presetInstructions,
       transcripts, meetings, documents, opportunities, opportunityDescriptions,
       nowIso, timezone, signal: controller.signal,
-      onProgress: (round) => {
-        // Round N starting means N-1 are genuinely finished — the only
-        // progress fact this research actually has. The pill eases between
-        // them on its own, and each call also restarts its silence clock.
-        setPillProgress(pill, round - 1, CONTACT_MAX_ROUNDS);
-        updatePillStage(pill, round > 1 ? `Researching… (round ${round})` : 'Researching the contact…');
-      },
+      // Every observable step of the research. Each one both repaints the bar
+      // and restarts the pill's silence clock, so a healthy long run is never
+      // mistaken for a wedged one.
+      onEvent: (event) => paint(progress.apply(event)),
     });
 
     if (!stillCurrent()) return;
@@ -2930,7 +2937,7 @@ async function runContactAnalysis(explicit = null) {
     console.error('[Contact Analyzer] failed', err);
     job.status = 'error';
     job.error = err.message || 'Something went wrong. Try again.';
-    markPillFailure(pill, 'Analysis failed');
+    markPillFailure(pill, researchFailureText(err));
     paintContactError(job);
     notifyContactIfAway(job);
   } finally {

@@ -381,7 +381,10 @@ function paintFill(pill, fraction) {
 
 function paintEasedProgress(pill, now = Date.now()) {
   const p = pill.progress;
-  if (!p || !p.steps) return;
+  // A zero span is the indeterminate case (no checkpoints yet) and the exact-
+  // fraction case (a position with no onward creep) — both want the bar left
+  // exactly where the caller put it.
+  if (!p || !(p.span > 0)) return;
   paintFill(pill, easedProgress(p.base, p.span, now - p.markedAt, p.stepMs));
 }
 
@@ -390,18 +393,32 @@ export function updatePillStage(pill, stageText) {
   reviveIfStalled(pill);
   if (pill.settled) return;
   noteProgress(pill);
-  if (pill.stageEl) pill.stageEl.textContent = stageText;
+  // Rewriting the same text still replaces the node inside an aria-live
+  // region, so a caller that reports steadily ("Writing the verdict…" every
+  // couple of hundred characters) would re-announce one unchanged sentence
+  // dozens of times. The liveness signal above is unconditional; only the DOM
+  // write is skipped.
+  if (pill.stageEl && pill.stageEl.textContent !== stageText) pill.stageEl.textContent = stageText;
 }
 
 /**
  * Move the progress bar, and tell the pill the job is still alive.
  *
- * Two forms:
+ * Three forms:
  *   setPillProgress(pill, 0.4)        — an exact fraction; the bar sits there.
  *   setPillProgress(pill, step, total) — "step of total complete"; the bar
  *                                        moves to step/total and then creeps
  *                                        toward (step+1)/total while the step
  *                                        runs (see easedProgress).
+ *   setPillProgress(pill, { from, to, stepMs })
+ *                                      — an explicit span: the bar sits at
+ *                                        `from` and creeps toward `to`. For
+ *                                        jobs whose steps are real but whose
+ *                                        TOTAL is unknowable (how many web
+ *                                        searches will this take?), where
+ *                                        step/total would have to invent a
+ *                                        denominator. `stepMs` is optional and
+ *                                        defaults to the pill's existing one.
  *
  * Safe to call on a pill created without `progress` — it still counts as a
  * liveness signal, it just has no bar to paint.
@@ -412,6 +429,26 @@ export function setPillProgress(pill, value, total) {
   if (pill.settled) return;
   noteProgress(pill);
   if (!pill.progress) return;
+
+  // Span form — the caller knows both ends of the current step.
+  if (value && typeof value === 'object') {
+    const from = clamp01(value.from);
+    const to = Math.max(from, clamp01(value.to));
+    const stepMs = Number(value.stepMs);
+    // Re-reporting the SAME span means the same step is still running, so the
+    // creep must carry on from where it is. Restarting markedAt on every such
+    // call — and a streaming caller makes many — would reset the easing curve
+    // each time and leave the bar pinned at `from` for as long as the step
+    // keeps talking, which is precisely the frozen bar this all exists to fix.
+    const sameSpan = pill.progress.base === from && pill.progress.span === (to - from);
+    pill.progress.base = from;
+    pill.progress.span = to - from;
+    if (!sameSpan) pill.progress.markedAt = Date.now();
+    if (Number.isFinite(stepMs) && stepMs > 0) pill.progress.stepMs = stepMs;
+    if (pill.el.classList) pill.el.classList.remove('randy-map-pill--indeterminate');
+    paintFill(pill, from);
+    return;
+  }
 
   const totalNum = Number(total);
   if (Number.isFinite(totalNum) && totalNum > 0) {

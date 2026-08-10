@@ -45,22 +45,50 @@ once — one labelled row per contact, each with its own progress bar and clock.
 The pill settles green on `COMPLETE` / `COMPLETE_WITH_GAPS`, amber on
 `NEEDS_REVIEW` / `CONFLICT_FOUND` / `NEEDS_MORE_INFORMATION`, and on failure.
 
-**Progress is measured in research rounds.** `onProgress(round)` fires as each
-`pause_turn` continuation begins, so round N starting means N-1 finished; the
-bar is sized by `LEADCHECK_MAX_ROUNDS` imported from the client rather than a
-copy that could drift from it. Between rounds the bar eases forward without
-ever reaching the next round's mark.
+**Progress is measured in work actually done.** The research runs as a
+**streamed** Messages call (`js/utils/anthropic-research-stream.js`), so every
+step it takes arrives as an event while it happens: each web search it issues
+(with the query), each result set that comes back (with the source count), and
+each chunk of the verdict it writes. `js/utils/research-progress.js` maps those
+onto the stage line and the bar; the row button carries a compact
+`Analyzing… 42%` so a long stage line never widens the table.
 
-Both the round count and the pill's give-up budget come from the client
-(`LEADCHECK_MAX_ROUNDS`, `LEADCHECK_MAX_RUN_MS`). This matters: the pill
-previously took the component's 4-minute default while the research it reports
-on is allowed 6 rounds × 4 minutes. Any run past four minutes therefore
-declared a timeout and went *settled*, which turned the real `COMPLETE` that
-arrived minutes later into a no-op — the analysis finished and saved, but the
-pill's last word to the user was a failure that never happened. The give-up
-timer now measures silence rather than elapsed time (each round's
-`onProgress` restarts it), and a timed-out pill is revived and corrected by
-whatever the run finally reports.
+Before that, the pill names the local phases too — `Checking the contact
+record…`, `Collecting CRM sources…` — so it is informative from the first
+second rather than a bar that has not moved since the click.
+
+The bar can never claim more than happened. Searching fills it along a decaying
+curve toward a ceiling it never reaches (every real search is a visible step,
+and no number of them finishes the bar); only the answer being written takes it
+to the top, and only the saved result settles it. That is deliberate: the
+number of searches an analysis needs is decided while it runs, so any fixed
+denominator would be a guess in one direction or the other.
+
+*Why this replaced round-counting.* Rounds were the only fact a non-streaming
+loop had — one request, up to four minutes, nothing until it landed — and a bar
+drawn in sixths was wrong in both directions. A healthy run finishes in one or
+two rounds, so it spent the whole analysis inside its first sixth and then
+jumped to done: it looked stuck because there was genuinely nothing to report.
+And because nothing was heard for minutes at a time, the pill's own
+"taking longer than expected" warning fired *on a healthy run*.
+
+**Budgets measure silence, not duration.** With a streaming run, saying nothing
+is diagnostic: a round that has gone quiet for `LEADCHECK_IDLE_TIMEOUT_MS`
+(2 min) is abandoned and retried, and the pill's give-up budget
+(`LEADCHECK_STALL_MS`, 5 min) only has to clear one such cycle. It used to be
+24 minutes — 6 rounds × the 4-minute request budget — because a black-box round
+could not be distinguished from a wedged one. A pill that does give up is still
+revived and corrected by whatever the run finally reports.
+
+**A transient failure costs a round, not the run.** Each round gets up to three
+attempts with backoff. A rate limit, an overloaded window, a dropped
+connection, or a stream that ends without a `stop_reason` is retried, and the
+retry is *announced* on the pill (`Rate limited — retrying in 6s…`) rather than
+looking like a hang. Genuine faults — a bad request, a rejected key — surface
+immediately instead of burning retries. When a run does fail, the pill names
+the kind of failure (`Claude was busy — try again`), because the toast carrying
+the full message is gone in seconds and the pill is what the user is still
+looking at.
 
 ## Deterministic pre-analysis validation
 

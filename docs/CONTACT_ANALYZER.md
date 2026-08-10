@@ -73,6 +73,13 @@ Then **live web research** (Anthropic's server-side `web_search` tool, the same
 mechanism LeadCheck uses, with a bounded `pause_turn` continuation loop) verifies
 the person and discovers the surrounding buying group.
 
+The transport is the shared streaming runner
+(`js/utils/anthropic-research-stream.js`), so the brief's pill is driven by the
+same evidence as LeadCheck's: each search issued, each result set read, each
+chunk of the brief written — never by counting rounds. Its silence budgets
+(`CONTACT_IDLE_TIMEOUT_MS`, `CONTACT_STALL_MS`) and its per-round retry come
+from there too. See `docs/PARTNER_CONTACT_LEADCHECK.md` for the reasoning.
+
 ## The brief (Account Intelligence Brief)
 
 The strict JSON output contract is stated **last** in the prompt and explicitly
