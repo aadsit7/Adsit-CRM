@@ -174,11 +174,17 @@ export function createSettingsButton() {
     popover.classList.toggle('tts-popover--open');
   });
 
-  document.addEventListener('click', (e) => {
+  // Self-removing: the AI Assistant view calls createSettingsButton on every
+  // render, and each call added a permanent document listener holding the
+  // detached popover DOM. Once this instance's DOM is gone, the next click
+  // anywhere unhooks it.
+  const onDocClick = (e) => {
+    if (!wrapper.isConnected) { document.removeEventListener('click', onDocClick); return; }
     if (!wrapper.contains(e.target)) {
       popover.classList.remove('tts-popover--open');
     }
-  });
+  };
+  document.addEventListener('click', onDocClick);
 
   popover.querySelector('#tts-toggle').addEventListener('change', (e) => {
     setRuntimeConfig('TTS_ENABLED', e.target.checked);

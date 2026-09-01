@@ -6,7 +6,7 @@ import { getCurrentUser } from '../auth.js';
 import { readSheetAsObjects, appendRow, updateRowById, updateRowsById, deleteRowById, isConfigured, addDemoRow } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, uuid, $, debounce, formatCurrency } from '../utils/dom.js';
-import { nowISO, formatDate, todayISO } from '../utils/date.js';
+import { nowISO, formatDate, todayISO, parseDate } from '../utils/date.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { buildForm } from '../components/form.js';
 import { showToast } from '../components/toast.js';
@@ -17,6 +17,7 @@ import { sanitizeHtml } from '../utils/sanitize-html.js';
 import { ensureHtml, stripHtml } from '../components/quill-editor.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { generateMapPdfFromSelection } from '../utils/map-pdf-from-selection.js';
+import { getCurrentPath } from '../router.js';
 import { createPill, updatePillStage, setPillProgress, markPillSuccess, markPillFailure } from '../components/map-pdf-pill.js';
 import { fileApiRequest as fileApiRequestImpl } from '../utils/file-api.js';
 import {
@@ -159,7 +160,15 @@ function renderWithTypeFilter(container) {
 function reRender() {
   const viewContainer = document.getElementById('view-container');
   return loadOpportunityData()
-    .then(() => renderWithTypeFilter(viewContainer))
+    .then(() => {
+      // The modal that triggered this can be open on ANOTHER view (the
+      // Analyzer's "Open source note", the dashboard's event chips), and the
+      // user can navigate away during the refetch. Painting this view over
+      // whichever one is live desyncs the route, topbar, and the router's
+      // registered cleanup — so repaint only when this view owns the screen.
+      if (getCurrentPath() !== '/admin/opportunities') return;
+      renderWithTypeFilter(viewContainer);
+    })
     .catch((err) => {
       showToast(err.message || 'Saved, but the list could not be refreshed. Reload the page.', 'error');
     });
@@ -325,9 +334,15 @@ function buildStageMultiSelect({ allStages, selected, onChange }) {
 
   panel.addEventListener('click', (e) => e.stopPropagation());
 
-  document.addEventListener('click', (e) => {
+  // Self-removing: every re-render builds a new multi-select, and a plain
+  // anonymous listener per build accumulated on document for the life of the
+  // session (each one holding its detached panel DOM). Once this instance's
+  // DOM is gone, the next click anywhere unhooks it.
+  const onDocClick = (e) => {
+    if (!wrapper.isConnected) { document.removeEventListener('click', onDocClick); return; }
     if (!wrapper.contains(e.target)) setOpen(false);
-  });
+  };
+  document.addEventListener('click', onDocClick);
 
   syncAllCheckbox();
   updateLabel();
@@ -372,7 +387,13 @@ function renderView(container, opportunities, filterBar) {
       }
       if (filters.dateFrom != null || filters.dateTo != null) {
         if (!opp.expected_close) return false;
-        const closeTime = new Date(opp.expected_close).getTime();
+        // parseDate (local midnight), matching how the From/To boundaries
+        // are built ('T00:00:00' → local). A bare 'YYYY-MM-DD' parses as
+        // UTC midnight, which sits BEFORE the local From boundary west of
+        // UTC — so a deal closing exactly on the From date was excluded.
+        const closeDate = parseDate(opp.expected_close);
+        if (!closeDate) return false;
+        const closeTime = closeDate.getTime();
         if (filters.dateFrom != null && closeTime < filters.dateFrom) return false;
         if (filters.dateTo != null && closeTime > filters.dateTo) return false;
       }
@@ -807,23 +828,41 @@ async function saveOppStage(opportunityId, stage) {
 // `notes` is the one that bites: it is the JSON array Randy appends to (see
 // ai.js), so writing it from `opp` reverts any note added since this page was
 // drawn. It used to be hardcoded '', which wiped the history outright.
-async function saveOppRow(opp) {
+// `changedFields` (a column name or array of them) names what this save may
+// take from `opp`; every other editable column is read back from the sheet
+// at write time. The details modal can be opened from an Analyzer board
+// whose `opp` snapshot is minutes old — writing that whole snapshot back
+// silently reverted every column edited elsewhere since (deal value, stage,
+// partner, close date…). With the changed set, an inline edit writes exactly
+// the field the user touched. Omitting it keeps the whole-row behavior for
+// callers that own a fresh row.
+async function saveOppRow(opp, changedFields = null) {
   const updatedAt = nowISO();
-  await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => [
-    opp.opportunity_id,
-    opp.partner_id || '',
-    opp.deal_name || '',
-    opp.customer_name || '',
-    opp.deal_value ?? '',
-    opp.status || 'Registered',
-    opp.stage || '',
-    opp.expected_close || '',
-    fresh.description || '',
-    fresh.created_at || opp.created_at || updatedAt,
-    updatedAt,
-    fresh.notes || '',
-    opp.lead_source || 'salesperson',
-  ]);
+  const changed = changedFields == null ? null : new Set([].concat(changedFields));
+  await updateRowById(CONFIG.SHEET_OPPORTUNITIES, 'opportunity_id', opp.opportunity_id, (fresh) => {
+    const pick = (field, oppValue) => {
+      if (changed === null || changed.has(field)) return oppValue;
+      // Also realign the in-memory row so the modal's other field cards
+      // repaint with what is actually stored.
+      opp[field] = fresh[field];
+      return fresh[field] ?? '';
+    };
+    return [
+      opp.opportunity_id,
+      pick('partner_id', opp.partner_id || ''),
+      pick('deal_name', opp.deal_name || ''),
+      pick('customer_name', opp.customer_name || ''),
+      pick('deal_value', opp.deal_value ?? ''),
+      pick('status', opp.status || 'Registered'),
+      pick('stage', opp.stage || ''),
+      pick('expected_close', opp.expected_close || ''),
+      fresh.description || '',
+      fresh.created_at || opp.created_at || updatedAt,
+      updatedAt,
+      fresh.notes || '',
+      pick('lead_source', opp.lead_source || 'salesperson'),
+    ];
+  });
   opp.updated_at = updatedAt;
 }
 
@@ -924,7 +963,7 @@ function editableField(opp, spec, onChange) {
         return;
       }
       try {
-        await saveOppRow(opp);
+        await saveOppRow(opp, spec.key);
         showToast('Updated', 'success');
         editing = false;
         renderDisplay();
@@ -1197,8 +1236,14 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
                 } catch { /* card may be gone */ }
                 showToast(err.message || 'Standardize failed', 'error');
               } finally {
-                // Remove the job entry after a grace period so a re-render shows a clean button.
-                setTimeout(() => standardizeJobs.delete(realId), 30_000);
+                // Remove the job entry after a grace period so a re-render
+                // shows a clean button — but only OUR entry: a retry started
+                // within the grace period stores a new entry under the same
+                // id, and this timer must not delete that running job.
+                const entryAtSchedule = standardizeJobs.get(realId);
+                setTimeout(() => {
+                  if (standardizeJobs.get(realId) === entryAtSchedule) standardizeJobs.delete(realId);
+                }, 30_000);
               }
             })();
           });
@@ -1250,7 +1295,10 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
             try {
               await deleteRowById(CONFIG.SHEET_OPP_DESCRIPTIONS, 'description_id', desc.description_id);
               cardRow.remove();
-              if (onDescriptionDeleted) onDescriptionDeleted(idx);
+              // Identify by id, not the index captured at render: earlier
+              // deletes shift the array, so a stale index spliced out the
+              // WRONG entry (delete A then B removed C from memory).
+              if (onDescriptionDeleted) onDescriptionDeleted(desc.description_id);
               showToast('Description removed', 'success');
             } catch (err) {
               showToast(err.message || 'Failed to remove description', 'error');
@@ -1337,7 +1385,7 @@ async function copyTextToClipboard(text) {
   }
 }
 
-function setupDescriptionsSelection({ descriptions, copyBtn, generateBtn, toolbarSlot, listSlot, onGenerate, opportunityId = null }) {
+function setupDescriptionsSelection({ descriptions, copyBtn, generateBtn, toolbarSlot, listSlot, onGenerate, opportunityId = null, opp = null, onDescriptionDeleted = null }) {
   if (!descriptions || descriptions.length === 0) {
     copyBtn.hidden = true;
     if (generateBtn) generateBtn.hidden = true;
@@ -1380,6 +1428,11 @@ function setupDescriptionsSelection({ descriptions, copyBtn, generateBtn, toolba
         render();
       },
       opportunityId,
+      // Leaving selection mode rebuilds the plain list — without these the
+      // rebuilt cards lost their edit/delete wiring, so later sheet deletes
+      // stopped updating the in-memory array.
+      opp,
+      onDescriptionDeleted,
     }));
   };
 
@@ -1752,10 +1805,19 @@ export async function openOppDetailsModal(opp, opts = {}) {
   // lead source label) and are typically already cached by the list view.
   // Always refresh events so the lead source label resolves correctly even
   // for events created since this view was last rendered.
-  const [partnersResult, eventsResult] = await Promise.all([
-    cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-    readSheetAsObjects(CONFIG.SHEET_EVENTS),
-  ]);
+  let partnersResult, eventsResult;
+  try {
+    [partnersResult, eventsResult] = await Promise.all([
+      cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+      readSheetAsObjects(CONFIG.SHEET_EVENTS),
+    ]);
+  } catch (err) {
+    // Surface pre-modal read failures — most callers fire-and-forget, so
+    // without this a failed read is a click that silently does nothing
+    // plus an unhandled rejection.
+    showToast(err.message || 'Could not open the opportunity — reload and try again.', 'error');
+    return; // no caller handles a rejection from here — the toast is the signal
+  }
   if (partnersResult) cachedPartners = partnersResult.filter(p => String(p.is_admin).toUpperCase() !== 'TRUE');
   cachedEvents = eventsResult;
 
@@ -2037,7 +2099,10 @@ export async function openOppDetailsModal(opp, opts = {}) {
     descriptionsSlot.replaceChildren(buildDetailsDescriptionsSection(descriptions, {
       opportunityId: opp.opportunity_id,
       opp,
-      onDescriptionDeleted: (idx) => { descriptions.splice(idx, 1); },
+      onDescriptionDeleted: (descriptionId) => {
+        const i = descriptions.findIndex(d => d.description_id === descriptionId);
+        if (i >= 0) descriptions.splice(i, 1);
+      },
     }));
     setupDescriptionsSelection({
       descriptions,
@@ -2047,6 +2112,11 @@ export async function openOppDetailsModal(opp, opts = {}) {
       listSlot: descriptionsSlot,
       onGenerate: handleGenerateFromSelection,
       opportunityId: opp.opportunity_id,
+      opp,
+      onDescriptionDeleted: (descriptionId) => {
+        const i = descriptions.findIndex(d => d.description_id === descriptionId);
+        if (i >= 0) descriptions.splice(i, 1);
+      },
     });
 
     currentFiles = docsResult.status === 'fulfilled' ? [...docsResult.value] : [];
@@ -2107,10 +2177,19 @@ export async function openOppModal(opp, container, onSaved) {
   // any events that have been added since this view was last loaded.
   // Partners are loaded only when missing — they don't change as often
   // and re-rendering the page would refresh them anyway.
-  const [partnersResult, eventsResult] = await Promise.all([
-    cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-    readSheetAsObjects(CONFIG.SHEET_EVENTS),
-  ]);
+  let partnersResult, eventsResult;
+  try {
+    [partnersResult, eventsResult] = await Promise.all([
+      cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+      readSheetAsObjects(CONFIG.SHEET_EVENTS),
+    ]);
+  } catch (err) {
+    // Surface pre-modal read failures — most callers fire-and-forget, so
+    // without this a failed read is a click that silently does nothing
+    // plus an unhandled rejection.
+    showToast(err.message || 'Could not open the opportunity — reload and try again.', 'error');
+    return; // no caller handles a rejection from here — the toast is the signal
+  }
   if (partnersResult) cachedPartners = partnersResult.filter(p => String(p.is_admin).toUpperCase() !== 'TRUE');
   cachedEvents = eventsResult;
 
@@ -2594,7 +2673,7 @@ export const __inlineRowActionsInternals = {
   ],
 
   // Handler factory: mirrors the description delete button's onClick logic with injected deps.
-  makeDescriptionDeleteHandler: (desc, idx, cardRow, onDescriptionDeleted, deps) =>
+  makeDescriptionDeleteHandler: (desc, cardRow, onDescriptionDeleted, deps) =>
     async () => {
       const confirmed = await deps.confirmDialog(
         'Delete Description',
@@ -2603,7 +2682,9 @@ export const __inlineRowActionsInternals = {
       if (!confirmed) return;
       await deps.deleteRowById(deps.SHEET_OPP_DESCRIPTIONS, 'description_id', desc.description_id);
       cardRow.remove();
-      if (onDescriptionDeleted) onDescriptionDeleted(idx);
+      // By id, not index — see the live handler: a stale render-time index
+      // splices the wrong entry after an earlier delete shifts the array.
+      if (onDescriptionDeleted) onDescriptionDeleted(desc.description_id);
       deps.showToast('Description removed', 'success');
     },
 

@@ -119,8 +119,8 @@ test('description delete handler deletes by description_id and fires onDescripti
   const desc = { description_id: 'dsc_2', _rowIndex: 7 };
   const SHEET = 'OPP_DESCRIPTIONS';
   const cardRow = { remove: mock.fn() };
-  let deletedIdx = null;
-  const onDescriptionDeleted = mock.fn(i => { deletedIdx = i; });
+  let deletedId = null;
+  const onDescriptionDeleted = mock.fn(id => { deletedId = id; });
 
   const deps = {
     confirmDialog: mock.fn(async () => true),
@@ -129,7 +129,7 @@ test('description delete handler deletes by description_id and fires onDescripti
     showToast: mock.fn(),
   };
 
-  const handler = makeDescriptionDeleteHandler(desc, 2, cardRow, onDescriptionDeleted, deps);
+  const handler = makeDescriptionDeleteHandler(desc, cardRow, onDescriptionDeleted, deps);
   await handler();
 
   assert.equal(deps.confirmDialog.mock.calls.length, 1, 'confirmDialog should be called once');
@@ -138,7 +138,10 @@ test('description delete handler deletes by description_id and fires onDescripti
     'addressed by description_id — never by the _rowIndex captured when the card was drawn');
   assert.equal(cardRow.remove.mock.calls.length, 1, 'cardRow.remove should be called');
   assert.equal(onDescriptionDeleted.mock.calls.length, 1, 'onDescriptionDeleted should be called');
-  assert.equal(deletedIdx, 2, 'onDescriptionDeleted should receive the correct index');
+  // The callback identifies the row by its id, never by a render-time index:
+  // earlier deletes shift the array, so a captured index splices the wrong
+  // entry (delete A then B used to remove C from the in-memory list).
+  assert.equal(deletedId, 'dsc_2', 'onDescriptionDeleted should receive the description_id');
 });
 
 // ---- Test 3 ---------------------------------------------------------------
@@ -155,7 +158,7 @@ test('description delete handler does nothing when user cancels confirmation', a
     showToast: mock.fn(),
   };
 
-  const handler = makeDescriptionDeleteHandler(desc, 0, cardRow, onDescriptionDeleted, deps);
+  const handler = makeDescriptionDeleteHandler(desc, cardRow, onDescriptionDeleted, deps);
   await handler();
 
   assert.equal(deps.confirmDialog.mock.calls.length, 1, 'confirmDialog should be called once');

@@ -370,30 +370,43 @@ function waitForTokenClient(timeoutMs = 5000) {
  * Stores the new token (with Google's actual expires_in) before resolving,
  * so callers don't have to.
  */
+let refreshInFlight = null;
+
 export async function refreshAccessToken() {
-  const ready = await waitForTokenClient();
-  if (!ready) return null;
+  // Coalesce concurrent callers into one GIS request. Several 401'd reads
+  // retry in parallel (e.g. the dashboard's three-sheet Promise.all after
+  // token expiry), and each call used to overwrite the shared
+  // tokenClient.callback — earlier waiters then hung until their 10s
+  // timeout and resolved null even though a fresh token arrived.
+  if (refreshInFlight) return refreshInFlight;
 
-  return new Promise((resolve) => {
-    // Hard timeout so a stuck callback can't leave the scheduler hanging
-    const timeout = setTimeout(() => resolve(null), 10000);
+  refreshInFlight = (async () => {
+    const ready = await waitForTokenClient();
+    if (!ready) return null;
 
-    tokenClient.callback = (tokenResponse) => {
-      clearTimeout(timeout);
-      if (tokenResponse?.access_token) {
-        storeAccessToken(tokenResponse.access_token, tokenResponse.expires_in);
-        resolve(tokenResponse.access_token);
-      } else {
+    return new Promise((resolve) => {
+      // Hard timeout so a stuck callback can't leave the scheduler hanging
+      const timeout = setTimeout(() => resolve(null), 10000);
+
+      tokenClient.callback = (tokenResponse) => {
+        clearTimeout(timeout);
+        if (tokenResponse?.access_token) {
+          storeAccessToken(tokenResponse.access_token, tokenResponse.expires_in);
+          resolve(tokenResponse.access_token);
+        } else {
+          resolve(null);
+        }
+      };
+      try {
+        tokenClient.requestAccessToken({ prompt: 'none' });
+      } catch {
+        clearTimeout(timeout);
         resolve(null);
       }
-    };
-    try {
-      tokenClient.requestAccessToken({ prompt: 'none' });
-    } catch {
-      clearTimeout(timeout);
-      resolve(null);
-    }
-  });
+    });
+  })().finally(() => { refreshInFlight = null; });
+
+  return refreshInFlight;
 }
 
 /**

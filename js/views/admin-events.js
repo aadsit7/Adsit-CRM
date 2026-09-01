@@ -15,6 +15,7 @@ import { filterPartners, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { stripHtml, ensureHtml } from '../components/quill-editor.js';
 import { fileApiRequest } from '../utils/file-api.js';
+import { getCurrentPath } from '../router.js';
 import { fileStoreKey, legacyFileStoreKey } from '../utils/file-store-keys.js';
 import {
   buildDescriptionsPanel,
@@ -104,7 +105,9 @@ function renderWithTypeFilter(container) {
   const selectedTypes = loadTypeFilter();
   const allTypeData = computeTypeData(allBasePartners, allBaseOpps);
   const allUniqueTypes = Object.keys(allTypeData);
-  const allTotalPipeline = allBaseOpps.reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
+  // Excludes Won like the per-type chips (computeTypeData) and the
+  // Partners page — see the matching note in admin-dashboard.js.
+  const allTotalPipeline = allBaseOpps.filter(o => o.status !== 'Won').reduce((s, o) => s + (parseFloat(o.deal_value) || 0), 0);
   const validSelected = selectedTypes.filter(t => allUniqueTypes.includes(t));
 
   const { partners: tfPartners, events: tfEvents } = applyTypeFilter({
@@ -131,7 +134,15 @@ function renderWithTypeFilter(container) {
 function reRender() {
   const viewContainer = document.getElementById('view-container');
   return loadEventData()
-    .then(() => renderWithTypeFilter(viewContainer))
+    .then(() => {
+      // The modal that triggered this can be open on ANOTHER view (the
+      // Analyzer's "Open source note", the dashboard's event chips), and the
+      // user can navigate away during the refetch. Painting this view over
+      // whichever one is live desyncs the route, topbar, and the router's
+      // registered cleanup — so repaint only when this view owns the screen.
+      if (getCurrentPath() !== '/admin/events') return;
+      renderWithTypeFilter(viewContainer);
+    })
     .catch((err) => {
       showToast(err.message || 'Saved, but the list could not be refreshed. Reload the page.', 'error');
     });
@@ -937,10 +948,19 @@ export async function openEventModal(event, container, onSaved) {
   // Always refresh the opportunities list so the "Sourced Opportunities"
   // rollup picks up any opps that were tagged to this event since the
   // page was last rendered. Partners are loaded only when missing.
-  const [partnersFresh, oppsFresh] = await Promise.all([
-    cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-    readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
-  ]);
+  let partnersFresh, oppsFresh;
+  try {
+    [partnersFresh, oppsFresh] = await Promise.all([
+      cachedPartners ? Promise.resolve(null) : readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+    ]);
+  } catch (err) {
+    // Every caller fires this without awaiting — surface the failure here
+    // so a bad read shows a toast instead of a click that does nothing
+    // plus an unhandled rejection.
+    showToast(err.message || 'Could not open the event — reload and try again.', 'error');
+    return; // no caller handles a rejection from here — the toast is the signal
+  }
   if (partnersFresh) {
     cachedPartners = partnersFresh.filter(p => String(p.is_admin).toUpperCase() !== 'TRUE');
   }

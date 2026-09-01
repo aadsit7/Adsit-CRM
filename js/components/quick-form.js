@@ -980,7 +980,15 @@ async function handleSubmit() {
         await submitEvent(data);
         break;
     }
-    hidePanel();
+    if (isEmbedded) {
+      // hidePanel() is a deliberate no-op while embedded on the Randy page,
+      // which used to leave the submitted values (Quill text included) live
+      // in the form — a second click then wrote a duplicate row. Rebuild
+      // the form fresh instead.
+      renderTypeForm(activeType);
+    } else {
+      hidePanel();
+    }
   } catch (err) {
     showToast(err.message || 'Failed to save. Please try again.', 'error');
   } finally {
