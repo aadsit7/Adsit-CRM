@@ -109,7 +109,11 @@ export function debounce(fn, ms = 300) {
  */
 export function collapsibleSection({ id, title, summaryItems, content, defaultOpen = true }) {
   const STORAGE_KEY = `dashboard-collapsed-${id}`;
-  const stored = localStorage.getItem(STORAGE_KEY);
+  // Guarded: with "block all cookies"-style settings the accessor itself
+  // throws, and an unguarded read here would break the whole dashboard
+  // render just to lose a collapsed-state nicety.
+  let stored = null;
+  try { stored = localStorage.getItem(STORAGE_KEY); } catch { /* storage blocked */ }
   const isOpen = stored !== null ? stored === 'open' : defaultOpen;
 
   const chevronSvg = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -134,7 +138,7 @@ export function collapsibleSection({ id, title, summaryItems, content, defaultOp
       class: 'dashboard-section__header',
       onClick: () => {
         const nowOpen = section.classList.toggle('dashboard-section--open');
-        localStorage.setItem(STORAGE_KEY, nowOpen ? 'open' : 'collapsed');
+        try { localStorage.setItem(STORAGE_KEY, nowOpen ? 'open' : 'collapsed'); } catch { /* storage blocked */ }
       },
     },
       el('div', { class: 'dashboard-section__title-group' },

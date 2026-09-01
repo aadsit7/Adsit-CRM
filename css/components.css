@@ -1726,14 +1726,20 @@
   .quill-editor-mic-btn--active { animation: none; }
 }
 
-.quill-editor .ql-toolbar {
+/* NOTE: Quill inserts its toolbar as a SIBLING of .quill-editor (both
+   inside .quill-editor-wrapper), and .quill-editor itself IS Quill's
+   .ql-container — a `.quill-editor .ql-toolbar` descendant selector matches
+   nothing. These rules are scoped to the wrapper with .ql-snow appended so
+   they also out-specify quill.snow.css, which loads after every local
+   stylesheet (see index.html). */
+.quill-editor-wrapper .ql-toolbar.ql-snow {
   border: none;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-bg);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
-.quill-editor .ql-container {
+.quill-editor-wrapper .ql-container.ql-snow {
   border: none;
   font-size: var(--text-sm);
 }
@@ -1842,12 +1848,12 @@
   border-radius: 0;
 }
 
-.quill-editor-fullscreen .quill-editor .ql-toolbar {
+.quill-editor-fullscreen .ql-toolbar.ql-snow {
   border-radius: 0;
   padding: var(--space-3) var(--space-6);
 }
 
-.quill-editor-fullscreen .quill-editor .ql-container {
+.quill-editor-fullscreen .ql-container.ql-snow {
   flex: 1;
 }
 
@@ -2083,11 +2089,10 @@
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 8px solid currentColor;
-}
-
-.map-marker__pin::after {
-  border-top-color: inherit;
+  /* --pin-color is set inline by the marker builder alongside background.
+     currentColor resolved to the pin's `color: white`, so the pointer
+     rendered as a floating white tail instead of the tier color. */
+  border-top: 8px solid var(--pin-color, #9B9A9B);
 }
 
 .map-popup__name {
@@ -6798,8 +6803,13 @@
   color: #CC2222;
 }
 
-/* Action links in the events table — pure text links, underline on hover */
-.events-page__actions {
+/* Action links in the events table — pure text links, underline on hover.
+   Renamed from .events-page__actions: that class also names the page-level
+   Playbook/New-Event toolbar, and the later of the two bare-class blocks
+   won for BOTH — the toolbar collapsed to a left-hugging inline-flex box
+   (defeating its pinned-right intent) while every table row inherited the
+   toolbar's 20px bottom margin. */
+.events-page__row-actions {
   display: inline-flex;
   align-items: center;
   gap: 14px;
@@ -8226,6 +8236,6 @@
    .events-page__actions class keeps its own spacing. */
 .partner-contacts__actions,
 .transcript-card__actions,
-.events-page__td--actions .events-page__actions {
+.events-page__td--actions .events-page__row-actions {
   gap: 8px;
 }

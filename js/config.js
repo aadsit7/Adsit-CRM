@@ -128,7 +128,10 @@ export const CONFIG = {
   // Session key
   SESSION_KEY: 'pp_user',
 
-  // Default password for new partners (SHA-256 hash of "Portal2026")
+  // Default password for new partners — stored as PLAINTEXT on purpose:
+  // demo-mode login compares it directly, and partner creation hashes it
+  // at use time (sha256(CONFIG.DEFAULT_PASSWORD)). Do NOT replace it with
+  // a hash; that breaks both.
   DEFAULT_PASSWORD: 'Portal2026',
 
   // Content visibility defaults (false = hidden, true = shown)

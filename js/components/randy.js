@@ -6,6 +6,7 @@
 
 import { SYSTEM_PROMPT, loadSheetData, callClaudeStream, warmSheetData, getOpportunityDescription, requestMapPdfJson } from '../utils/ai.js';
 import { parseActions, executeAction } from '../utils/ai-actions.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
 import { detectMapPdfIntent } from '../utils/map-pdf-intent.js';
 import {
   detectOpenItemIntent, matchDocuments, resolveDescriptionTarget,
@@ -484,6 +485,11 @@ function stopAll() {
   conversationHistory = [];
   pendingActions = null;
   pendingOpenItem = null;
+  // These survived stopAll while the Close/New Chat buttons clear them —
+  // so a "make a MAP" ask-back abandoned with "stop" hijacked the NEXT
+  // session's first message as an opportunity hint.
+  pendingMapIntent = null;
+  pendingTimelineIntent = null;
   confirmAttempts = 0;
   accumulatedTranscript = '';
   currentConvId = null;
@@ -526,6 +532,25 @@ function initRecognition() {
 
     // During speaking: check for intentional interrupt vs echo
     if (isRandySpeaking) {
+      // A yes/no spoken while the confirmation prompt is still being read
+      // is the ANSWER, not an interruption or echo. Without this, the echo
+      // heuristic swallowed it ("yes" appears in the prompt's own words),
+      // or the interrupt path nulled the completion callback that enters
+      // CONFIRMING — orphaning pendingActions so the confirmed write never
+      // ran.
+      if (pendingActions) {
+        const lowerT = transcript.toLowerCase();
+        if (CONFIRM_WORDS.some(w => lowerT.includes(w)) || DENY_WORDS.some(w => lowerT.includes(w))) {
+          synth.cancel();
+          speechChainCancelled = true;
+          isRandySpeaking = false;
+          currentSpokenText = '';
+          currentSpeechOnComplete = null;
+          transition(STATES.CONFIRMING, true);
+          handleConfirmation(lowerT);
+          return;
+        }
+      }
       if (isInterrupt(transcript)) {
         synth.cancel();
         speechChainCancelled = true;
@@ -542,7 +567,18 @@ function initRecognition() {
           accumulatedTranscript = '';
           updateWidgetUI();
         }
-        handleTranscript(transcript);
+        // The aborted turn still holds isProcessing until its rejection
+        // unwinds (a later microtask), so a synchronous handleTranscript
+        // here hit processUserInput's re-entry guard and the interrupting
+        // words simply evaporated. Hand them to a fresh turn as soon as
+        // the old one has let go.
+        const bargeIn = transcript;
+        const resumeBargeIn = (attempts = 0) => {
+          if (!isProcessing) { handleTranscript(bargeIn); return; }
+          if (attempts < 20) setTimeout(() => resumeBargeIn(attempts + 1), 50);
+          // else: the old turn never unwound — drop rather than queue forever.
+        };
+        resumeBargeIn();
       }
       return;
     }
@@ -1523,7 +1559,7 @@ function announceTimelinePdfReady({ opportunityName, opportunityId, driveUrl, fi
   if (!isTypeModeActive && randyIsIdle()) {
     speakText(`Timeline PDF saved for ${opportunityName} — sweet. Link's in the chat.`);
   }
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
   if (msgEl && opportunityId) {
     const selectors = ['.randy-timeline-card__btn--in-portal', '.randy-timeline-card__secondary-link'];
     for (const sel of selectors) {
@@ -1560,7 +1596,7 @@ function announceTimelinePdfError(err, opportunity) {
     technicalDetail: msg || String(err || 'Unknown error'),
   });
   if (!isTypeModeActive && randyIsIdle()) speakText(spoken);
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
   if (msgEl && opportunity?.opportunityId) {
     const retry = msgEl.querySelector('.randy-timeline-card__retry');
     if (retry) retry.addEventListener('click', async (e) => {
@@ -1642,7 +1678,7 @@ function announceMapPdfReady({ opportunityName, opportunityId, driveUrl, filenam
   if (!isTypeModeActive && randyIsIdle()) {
     speakText(`Saved to ${opportunityName} — right on. The MAP PDF is in the opportunity's documents — link's in the chat.`);
   }
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
 
   // Wire every in-portal navigation link post-render — sanitizeHTML()
   // strips on* handlers from the string, so we attach listeners now.
@@ -1692,7 +1728,7 @@ function announceMapPdfError(err, opportunity) {
   });
 
   if (!isTypeModeActive && randyIsIdle()) speakText(spoken);
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
 
   // Wire "Try again" to re-run the flow for the same opportunity.
   if (msgEl && opportunity?.opportunityId) {
@@ -1812,13 +1848,13 @@ ${retry}
 // ambiguous is read back to the user instead of guessed.
 
 // Speak + render the same turn-ending response the other flows use.
-function respondOpenItem(display, spoken) {
+function respondOpenItem(display, spoken, opts) {
   if (isTypeModeActive) {
-    renderMessage('assistant', display);
+    renderMessage('assistant', display, opts);
     transition(STATES.PASSIVE, true);
   } else {
     speakText(spoken || display, () => transition(STATES.ACTIVE_LISTENING));
-    renderMessage('assistant', display);
+    renderMessage('assistant', display, opts);
   }
 }
 
@@ -1925,7 +1961,7 @@ async function resolveAndOpenDocument(opp, docHint) {
     ? `A few documents on ${opp.opportunityName} match that, man.`
     : `I don't see a document matching that on ${opp.opportunityName}, man.`;
   const spoken = `${lead} I've got ${spokenNames.join(', ')}${extra}. Which one?`;
-  respondOpenItem(buildDocListCardHtml(opp, candidates), spoken);
+  respondOpenItem(buildDocListCardHtml(opp, candidates), spoken, { trustedHtml: true });
 }
 
 function openDocumentForRandy(file, opp) {
@@ -1945,7 +1981,7 @@ function openDocumentForRandy(file, opp) {
   } else {
     spoken = `Opening ${human} for ${opp.opportunityName}, man.`;
   }
-  respondOpenItem(buildOpenDocCardHtml(opp, file), spoken);
+  respondOpenItem(buildOpenDocCardHtml(opp, file), spoken, { trustedHtml: true });
 }
 
 async function resolveAndOpenNote(opp, noteHint) {
@@ -2232,10 +2268,29 @@ function startConfirmTimeout() {
 
 // ── Speech Synthesis ──────────────────────────────────────────────
 function speakText(text, onComplete) {
-  if (isMuted) { if (onComplete) onComplete(); return; }
   // Clean text for speech
   const clean = cleanForSpeech(text);
-  if (!clean) { if (onComplete) onComplete(); return; }
+  if (isMuted || !clean) {
+    // Muted (or nothing sayable) still has to move the state machine the
+    // way a spoken reply would. Returning early used to strand a voice
+    // turn in PROCESSING forever: startRecognition refuses there, the
+    // Voice button and Alt+Z are no-ops there, and the ask-back callbacks'
+    // PROCESSING → ACTIVE_LISTENING hop is not an allowed transition — so
+    // one muted question bricked voice until New Chat. Walk the same legal
+    // hops the spoken path takes (→ SPEAKING, then the completion), which
+    // also re-opens the mic via ACTIVE_LISTENING's enter hook.
+    if (currentState !== STATES.CONFIRMING && currentState !== STATES.PASSIVE) {
+      if (currentState === STATES.PROCESSING || currentState === STATES.ACTIVE_LISTENING) {
+        transition(STATES.SPEAKING);
+      }
+    }
+    if (onComplete) {
+      onComplete();
+    } else if (currentState === STATES.SPEAKING) {
+      transition(STATES.ACTIVE_LISTENING);
+    }
+    return;
+  }
 
   // Set echo prevention flag — mic stays running for barge-in
   isRandySpeaking = true;
@@ -2258,8 +2313,10 @@ function speakText(text, onComplete) {
 }
 
 function finishSpeaking() {
+  const chainId = speechChainId;
   clearSpeakingHighlight();
   setTimeout(() => {
+    if (chainId !== speechChainId) return; // a newer chain owns the state now
     lastSpokenText = currentSpokenText;
     lastSpeechEndTime = Date.now();
     isRandySpeaking = false;
@@ -2273,6 +2330,13 @@ function finishSpeaking() {
     }
   }, 300);
 }
+
+// Monotonic id of the CURRENT speech chain. A new speakText cancels the old
+// chain, but the old utterances' 'canceled'/'interrupted'/onend events land
+// asynchronously — without the token they mutated the shared speech state
+// (speechChainCancelled, currentSpeechOnComplete) out from under the NEW
+// chain, truncating it after one sentence or firing/losing its completion.
+let speechChainId = 0;
 
 function speakWithWebSpeech(clean) {
   // Split into sentences at . ? ! boundaries
@@ -2291,7 +2355,10 @@ function speakWithWebSpeech(clean) {
   const wordCount = clean.split(/\s+/).length;
   const isShort = wordCount < 6;
 
+  const chainId = ++speechChainId;
+
   function handleError(e) {
+    if (chainId !== speechChainId) return; // stale event from a superseded chain
     clearSpeakingHighlight();
     if (e.error === 'canceled') {
       speechChainCancelled = true;
@@ -2315,7 +2382,7 @@ function speakWithWebSpeech(clean) {
   }
 
   function speakPart(i) {
-    if (speechChainCancelled || i >= parts.length) return;
+    if (speechChainCancelled || chainId !== speechChainId || i >= parts.length) return;
 
     const utterance = new SpeechSynthesisUtterance(parts[i]);
     if (selectedVoice) utterance.voice = selectedVoice;
@@ -2330,6 +2397,7 @@ function speakWithWebSpeech(clean) {
     const isLast = i === parts.length - 1;
 
     utterance.onend = () => {
+      if (chainId !== speechChainId) return; // superseded mid-utterance
       if (isLast) {
         finishSpeaking();
       } else if (!speechChainCancelled) {
@@ -2576,22 +2644,17 @@ function containsHTMLResponse(text) {
   return /class\s*=\s*["'][^"']*\bresponse-container\b/.test(text);
 }
 
-function sanitizeHTML(html) {
-  return html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object\b[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed\b[^>]*\/?>/gi, '')
-    .replace(/<link\b[^>]*\/?>/gi, '')
-    .replace(/<meta\b[^>]*\/?>/gi, '')
-    .replace(/<img\b[^>]*\/?>/gi, '')
-    .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-    .replace(/<input\b[^>]*\/?>/gi, '')
-    .replace(/[\s/]+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
-    .replace(/javascript\s*:/gi, '');
-}
+// Shared allowlist sanitizer (js/utils/sanitize-html.js) for MODEL-emitted
+// response-container HTML. The regex blacklist it replaces was bypassable:
+// `<div class="…"onclick=…>` has no whitespace before the handler, and an
+// entity-encoded `javascript:` href survived the literal replace. Randy's
+// OWN card templates (MAP/Timeline/doc cards — escaped data, svg icons,
+// retry buttons) don't go through it: their call sites pass
+// { trustedHtml: true } instead, because the strict pass would strip the
+// very svg/button elements those trusted templates rely on.
+const sanitizeHTML = sanitizeHtml;
 
-function renderMessage(role, text) {
+function renderMessage(role, text, { trustedHtml = false } = {}) {
   const chat = document.getElementById('randy-chat');
   if (!chat) return;
 
@@ -2619,6 +2682,10 @@ function renderMessage(role, text) {
   bubble.className = 'randy-bubble';
   if (isUser) {
     bubble.textContent = text;
+  } else if (trustedHtml) {
+    // App-built card templates: every interpolation goes through
+    // escapeMapHtml at the build site, so the markup itself is ours.
+    bubble.innerHTML = text;
   } else if (containsHTMLResponse(text)) {
     bubble.innerHTML = sanitizeHTML(text);
   } else {
@@ -2639,7 +2706,7 @@ function renderMessage(role, text) {
           copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
           copyBtn.classList.remove('randy-copy-btn--copied');
         }, 1500);
-      });
+      }).catch(() => { /* clipboard denied or unfocused — leave the button as-is */ });
     });
     bubble.appendChild(copyBtn);
   }
@@ -2903,7 +2970,7 @@ function selectPreset(promptId) {
     const presetName = promptId
       ? (loadedPresets.find(p => p.prompt_id === promptId)?.label || 'this mode')
       : 'Default';
-    chat.innerHTML = `<div class="randy-welcome"><p>Switched to <strong>${presetName}</strong>. How can I help?</p></div>`;
+    chat.innerHTML = `<div class="randy-welcome"><p>Switched to <strong>${escapeMapHtml(presetName)}</strong>. How can I help?</p></div>`;
   }
 
   renderPresets();

@@ -13,6 +13,7 @@ import {
   buildContactAggregates,
   buildLinkedOppFacts,
   parseSavedPlaybook,
+  assembleStagesFromPlaybookRows,
   buildEventFacts,
 } from '../js/utils/event-analyzer-evidence.js';
 
@@ -237,4 +238,36 @@ test('stripTeamNotes trims the mirror section only', () => {
   assert.equal(stripTeamNotes('Base.\n\n⸻ Team Notes ⸻\n[Event] x'), 'Base.');
   assert.equal(stripTeamNotes('No marker here'), 'No marker here');
   assert.equal(stripTeamNotes(''), '');
+});
+
+// ── assembleStagesFromPlaybookRows (multi-row Event_Playbook schema) ──
+// The deployed Apps Script writes one row per activity/gate/note; the
+// analyzer used to read only a `stages_json` column that sheet never has,
+// so every manually-checked activity was silently invisible to it.
+test('multi-row playbook rows assemble into the shape parseSavedPlaybook accepts', () => {
+  const rows = [
+    { event_id: 'evt_002', stage_key: 'setup', row_type: 'activity', act_index: '0', text: 'Book venue', owner: 'AA', due_date: '2026-04-01', done: 'TRUE' },
+    { event_id: 'evt_002', stage_key: 'setup', row_type: 'activity', act_index: '1', text: 'Send invites', owner: '', due_date: '', done: 'FALSE' },
+    { event_id: 'evt_002', stage_key: 'setup', row_type: 'gate', done: 'TRUE' },
+    { event_id: 'evt_002', stage_key: 'setup', row_type: 'note', note_text: 'Venue confirmed by email.' },
+    { event_id: 'evt_002', stage_key: 'audience', row_type: 'activity', act_index: '0', text: 'Host event', done: 'FALSE' },
+  ];
+  const stages = assembleStagesFromPlaybookRows(rows);
+  assert.equal(stages.length, 2);
+  const plan = stages.find(s => s.key === 'setup');
+  assert.equal(plan.gate, true);
+  assert.equal(plan.note, 'Venue confirmed by email.');
+  assert.equal(plan.acts.length, 2);
+  assert.deepEqual(plan.acts[0], { i: 0, x: 'Book venue', o: 'AA', dt: '2026-04-01', d: true });
+
+  const parsed = parseSavedPlaybook(stages);
+  assert.equal(parsed.found, true);
+  assert.equal(parsed.notes.setup, 'Venue confirmed by email.');
+  const checkedIds = Object.keys(parsed.checked);
+  assert.equal(checkedIds.length, 1, 'only the done activity counts as an operational confirmation');
+});
+
+test('assembleStagesFromPlaybookRows returns null when rows hold no stage data', () => {
+  assert.equal(assembleStagesFromPlaybookRows([]), null);
+  assert.equal(assembleStagesFromPlaybookRows([{ event_id: 'evt_002', stages_json: '[]' }]), null);
 });

@@ -144,7 +144,9 @@ export function statCard(label, value, options) {
 }
 
 function getStagePercent(stage) {
-  const stages = { Prospect: 15, Qualified: 35, Proposal: 55, Negotiation: 75, Closed: 100 };
+  // Develop sits between Qualified and Proposal (see OPP_STAGES); without
+  // it the fallback 10% drew a Develop deal's progress bar below Prospect.
+  const stages = { Prospect: 15, Qualified: 35, Develop: 45, Proposal: 55, Negotiation: 75, Closed: 100 };
   return stages[stage] || 10;
 }
 

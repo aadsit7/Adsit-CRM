@@ -5,7 +5,7 @@
 import { readSheetAsObjects, appendRow, appendRows, updateRowById, updateRowsById, deleteRowById, isConfigured, addDemoRow, ensureSheetWithHeaders } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, uuid } from '../utils/dom.js';
-import { formatDate, todayISO, nowISO } from '../utils/date.js';
+import { formatDate, todayISO, nowISO, parseDate } from '../utils/date.js';
 import { navigate, getCurrentPath, getQueryParams } from '../router.js';
 import { tierSlug } from '../utils/tiers.js';
 import { dealCard } from '../components/card.js';
@@ -15,6 +15,7 @@ import { openOppModal } from './admin-opportunities.js';
 import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { filterOpportunities, filterEvents } from '../utils/filters.js';
+import { sanitizeHtml, safeUrl } from '../utils/sanitize-html.js';
 import { stripHtml, ensureHtml, initQuillEditor } from '../components/quill-editor.js';
 import { buildDocumentsPanel, listEntityDocuments } from '../components/documents-panel.js';
 import { fileApiRequest } from '../utils/file-api.js';
@@ -186,6 +187,11 @@ export async function render(container, params) {
 }
 
 function reRender(partnerId) {
+  // Only repaint when this partner's page still owns the screen: reRender
+  // fires from awaited flows (deletes, re-analyzes, modal saves) that can
+  // resolve after the admin navigated away — painting the partner page
+  // over the live view desyncs route, topbar and the router's cleanup.
+  if (getCurrentPath() !== '/admin/partner-detail' || getQueryParams().id !== partnerId) return;
   const viewContainer = document.getElementById('view-container');
   render(viewContainer, { id: partnerId });
 }
@@ -299,11 +305,16 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
           el('button', {
             class: 'partner-detail-page__section-cta',
             onClick: () => {
-              openOppModal(null, null, () => reRender(partner.partner_id));
-              setTimeout(() => {
-                const sel = document.querySelector('#field-partner_id');
-                if (sel) { sel.value = partner.partner_id; }
-              }, 50);
+              // Preselect AFTER the modal has mounted: openOppModal awaits
+              // sheet reads first, so a fixed 50ms timer routinely fired
+              // into nothing once the 30s cache had expired and the partner
+              // silently wasn't preselected.
+              openOppModal(null, null, () => reRender(partner.partner_id))
+                .then(() => {
+                  const sel = document.querySelector('#field-partner_id');
+                  if (sel) { sel.value = partner.partner_id; }
+                })
+                .catch(() => { /* open failure already surfaced */ });
             },
           },
             el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
@@ -314,7 +325,10 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
 
       el('div', { class: 'partner-detail-page__stat-strip stagger' },
         buildPartnerStatCell('Total Deals', String(opportunities.length)),
-        buildPartnerStatCell('Active Pipeline', formatCurrency(totalValue)),
+        // pipelineValue, not totalValue: marking a deal Won must not
+        // INCREASE "Active Pipeline" (the hero cell above already showed
+        // the correct figure, so the same page contradicted itself).
+        buildPartnerStatCell('Active Pipeline', formatCurrency(pipelineValue)),
         buildPartnerStatCell('Deals Won', String(wonDeals.length)),
         buildPartnerStatCell('Revenue Won', formatCurrency(wonValue)),
       ),
@@ -561,7 +575,7 @@ function bioLinkCell(href) {
   if (!s || s === NA) return bioValueCell(NA);
   return el('a', {
     class: 'partner-bio__link',
-    href: s,
+    href: safeUrl(s),
     target: '_blank',
     rel: 'noopener',
     title: s,
@@ -1001,7 +1015,7 @@ function openNextStepNoteModal(transcript) {
     title: `Description Note · ${noteDateLabel(transcript)}`,
     className: 'modal--wide',
     content: el('div', { class: 'partner-next-steps__note-view' },
-      el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
+      el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(transcript.transcript_text || '')) }),
     ),
     footer: [
       el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
@@ -3112,7 +3126,7 @@ function lcBadge(value) {
 
 function lcLink(url, label) {
   if (!url) return el('span', { class: 'partner-contacts__muted' }, '—');
-  return el('a', { class: 'partner-lc__link', href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url);
+  return el('a', { class: 'partner-lc__link', href: safeUrl(url), target: '_blank', rel: 'noopener noreferrer' }, label || url);
 }
 
 function lcKV(label, value) {
@@ -3425,7 +3439,9 @@ function triggerReAnalyze(partner, contact) {
 // ============================================
 
 function transcriptCard(transcript, partner) {
-  const dateStr = formatDate(transcript.conversation_date) || formatDate(transcript.created_at);
+  // Fall back on the missing FIELD — formatDate('') returns the truthy
+  // placeholder '—', so chaining formatDate calls with || never fell back.
+  const dateStr = formatDate(transcript.conversation_date || transcript.created_at);
   const plainText = stripHtml(transcript.transcript_text || '');
   const preview = plainText.slice(0, 120) + (plainText.length > 120 ? '...' : '');
 
@@ -3435,7 +3451,7 @@ function transcriptCard(transcript, partner) {
   });
 
   const body = el('div', { class: 'transcript-card__body' },
-    el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
+    el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(transcript.transcript_text || '')) }),
     el('div', { class: 'transcript-card__actions' },
       iconButton({
         icon: ICONS.copy,
@@ -3525,7 +3541,7 @@ function openTranscriptModal(partner, existingTranscript, previousTranscripts, o
       el('div', { class: 'transcript-form__history-title' }, `Previous Transcripts (${previousTranscripts.length})`),
       ...previousTranscripts.slice(0, 5).map(t =>
         el('div', { class: 'transcript-form__history-item' },
-          el('div', { class: 'transcript-form__history-date' }, formatDate(t.conversation_date) || formatDate(t.created_at)),
+          el('div', { class: 'transcript-form__history-date' }, formatDate(t.conversation_date || t.created_at)),
           el('div', { class: 'transcript-form__history-preview' },
             (() => { const p = stripHtml(t.transcript_text || ''); return p.slice(0, 200) + (p.length > 200 ? '...' : ''); })()
           )
@@ -3662,7 +3678,9 @@ function downloadTranscriptPDF(transcript) {
 function copyAllTranscripts(partner, transcripts) {
   const divider = '\n\n' + '='.repeat(60) + '\n\n';
   const text = transcripts.map(t => {
-    const date = formatDate(t.conversation_date) || formatDate(t.created_at) || 'Undated';
+    // Fall back on the missing FIELD — formatDate('') returns the truthy
+    // placeholder '—', so chaining formatDate calls with || never fell back.
+    const date = (t.conversation_date || t.created_at) ? formatDate(t.conversation_date || t.created_at) : 'Undated';
     const body = stripHtml(t.transcript_text || '').trim();
     return `${date}\n${'-'.repeat(60)}\n\n${body}`;
   }).join(divider);
@@ -3841,11 +3859,13 @@ function buildUpcomingEventsSection(allEvents, partner, container) {
         el('button', {
           class: 'partner-detail-page__section-cta',
           onClick: () => {
-            openEventModal(null, container, () => reRender(partner.partner_id));
-            setTimeout(() => {
-              const sel = document.querySelector('#field-partner_id');
-              if (sel) sel.value = partner.partner_id;
-            }, 50);
+            // Preselect after mount — same reasoning as the opportunity CTA.
+            openEventModal(null, container, () => reRender(partner.partner_id))
+              .then(() => {
+                const sel = document.querySelector('#field-partner_id');
+                if (sel) sel.value = partner.partner_id;
+              })
+              .catch(() => { /* open failure already surfaced */ });
           },
         },
           el('span', { html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' }),
@@ -3866,7 +3886,10 @@ function buildUpcomingEventsSection(allEvents, partner, container) {
 
 function upcomingEventRow(evt, container) {
   const typeColor = EVENT_TYPE_COLORS[evt.event_type] || '#9B9A9B';
-  const startDate = new Date(evt.event_date);
+  // parseDate (local midnight): a bare 'YYYY-MM-DD' parses as UTC midnight,
+  // so west of UTC the badge showed the PREVIOUS day while the formatDate
+  // range right beside it showed the correct one.
+  const startDate = parseDate(evt.event_date) || new Date(evt.event_date);
   const month = startDate.toLocaleDateString('en-US', { month: 'short' });
   const day = startDate.getDate();
 

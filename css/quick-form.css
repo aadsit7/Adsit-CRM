@@ -14,7 +14,7 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
   display: none; /* toggled to flex by JS */
   flex-direction: column;
-  z-index: 9997; /* below Randy window (9998) and modals (9999) */
+  z-index: 9997; /* below the Randy window (9999); NOTE modals use --z-modal: 300 and toasts --z-toast: 400, so both layer UNDER this panel and Randy — confirmDialog protects itself with an inline 10001 */
   overflow: hidden;
   /* Entry animation */
   opacity: 0;
@@ -359,13 +359,16 @@
 }
 
 /* ── Quill editor overrides inside quick form ───────────────────── */
-.qf-panel .ql-toolbar {
+/* .ql-snow appended for specificity: quill.snow.css loads after this file
+   and its equal-specificity .ql-toolbar.ql-snow/.ql-container.ql-snow rules
+   won the tie, reverting the border color and padding to stock Quill. */
+.qf-panel .ql-toolbar.ql-snow {
   border-radius: 6px 6px 0 0;
   border-color: #ddddee;
   padding: 4px 6px;
 }
 
-.qf-panel .ql-container {
+.qf-panel .ql-container.ql-snow {
   border-radius: 0 0 6px 6px;
   border-color: #ddddee;
   font-size: 13px;

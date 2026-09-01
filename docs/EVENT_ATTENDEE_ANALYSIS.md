@@ -3,9 +3,12 @@
 > **Looking for the complete, ready-to-paste script?** The full backend —
 > every action handler, including the attendee analysis, web-search
 > enrichment, and Drive-file resolver described below — lives at
-> [`docs/apps-script/Code.gs`](apps-script/Code.gs). Paste that entire file
-> over the Apps Script editor contents and redeploy; the sections below
-> explain the attendee-analysis design piece by piece.
+> [`apps-script/Code.gs`](../apps-script/Code.gs), the repo's ONE canonical
+> copy (a stale duplicate under `docs/apps-script/` used to live here and
+> lacked the four playbook actions — deploying it silently broke playbook
+> saves). Paste that entire file over the Apps Script editor contents and
+> redeploy; the sections below explain the attendee-analysis design piece
+> by piece.
 
 The Events view now has an **Analyze** action on attached documents (mirroring
 the one on Opportunities). For events, the portal sends an extra

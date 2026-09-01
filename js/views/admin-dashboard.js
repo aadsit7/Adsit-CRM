@@ -5,10 +5,10 @@
 import { readSheetAsObjects } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, formatCurrency, debounce } from '../utils/dom.js';
-import { navigate } from '../router.js';
+import { navigate, getCurrentPath } from '../router.js';
 import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { tierSlug, TIER_COLORS, TIER_ICONS } from '../utils/tiers.js';
-import { formatDate } from '../utils/date.js';
+import { formatDate, parseDate } from '../utils/date.js';
 import { openEventModal } from './admin-events.js';
 import { filterPartners, filterOpportunities, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
@@ -146,6 +146,17 @@ export async function render(container) {
 }
 
 function renderDashboard(container, partners, opportunities, events) {
+  // An in-place re-render (type-filter click) replaces the DOM holding the
+  // Leaflet map, but the module-level mapInstance survived — the next Map
+  // View click then called invalidateSize() on a map bound to the detached
+  // old node and the panel stayed blank until leaving the route. Tear the
+  // old map down with its DOM.
+  if (mapInstance) {
+    mapInstance.remove();
+    mapInstance = null;
+  }
+  mapMarkers = [];
+
   // --- Base filtered lists (admin/inactive/cancelled excluded) ---
   const partnerList = filterPartners(partners);
   const filteredOpps = filterOpportunities(opportunities);
@@ -157,7 +168,10 @@ function renderDashboard(container, partners, opportunities, events) {
   // Unfiltered type data for button labels (always show full counts)
   const allTypeData = computeTypeData(partnerList, filteredOpps);
   const allUniqueTypes = Object.keys(allTypeData);
-  const allTotalPipeline = filteredOpps.reduce((sum, o) => sum + (parseFloat(o.deal_value) || 0), 0);
+  // Excludes Won like the per-type chips (computeTypeData) and the
+  // Partners page — the "All Types" figure used to include Won revenue
+  // and disagree with the sum of the chips beside it.
+  const allTotalPipeline = filteredOpps.filter(o => o.status !== 'Won').reduce((sum, o) => sum + (parseFloat(o.deal_value) || 0), 0);
 
   // Prune selectedTypes: remove any that no longer exist in the data
   const validSelected = selectedTypes.filter(t => allUniqueTypes.includes(t));
@@ -355,7 +369,11 @@ function buildActivityView(container, partnerStats, viewContainer) {
           class: 'activity-card__event-chip',
           onClick: (e) => {
             e.stopPropagation();
-            openEventModal(evt, viewContainer);
+            // onSaved refreshes THIS view: openEventModal's default repaint
+            // targets the Events page, which is not on screen here.
+            openEventModal(evt, viewContainer, () => {
+              if (getCurrentPath() === '/admin/dashboard') render(viewContainer);
+            });
           },
         },
           el('span', {
@@ -441,16 +459,21 @@ function buildActivityView(container, partnerStats, viewContainer) {
 // ============================================
 
 function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
-  const now = new Date();
-  const sixtyDaysOut = new Date(now);
+  // parseDate, not new Date('YYYY-MM-DD'): the bare form parses as UTC
+  // midnight, which in US timezones lands the previous local day — so an
+  // event happening TODAY was excluded from this panel (while the KPI
+  // counted it), and the month badge below showed "Sep" for an Oct 1 event.
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const sixtyDaysOut = new Date(todayStart);
   sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
 
   const timelineEvents = upcomingEvents
     .filter(evt => {
-      const d = new Date(evt.event_date);
-      return d >= now && d <= sixtyDaysOut;
+      const d = parseDate(evt.event_date);
+      return d && d >= todayStart && d <= sixtyDaysOut;
     })
-    .sort((a, b) => new Date(a.event_date) - new Date(b.event_date));
+    .sort((a, b) => (parseDate(a.event_date) || 0) - (parseDate(b.event_date) || 0));
 
   const timelineTitle = el('div', { class: 'section-header' },
     el('div', {},
@@ -472,14 +495,16 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
   const timelineCards = timelineEvents.map(evt => {
     return el('div', {
       class: 'timeline-card',
-      onClick: () => openEventModal(evt, viewContainer),
+      onClick: () => openEventModal(evt, viewContainer, () => {
+        if (getCurrentPath() === '/admin/dashboard') render(viewContainer);
+      }),
     },
       el('div', { class: 'timeline-card__date-col' },
         el('div', { class: 'timeline-card__month' },
-          new Date(evt.event_date).toLocaleDateString('en-US', { month: 'short' })
+          (parseDate(evt.event_date) || new Date()).toLocaleDateString('en-US', { month: 'short' })
         ),
         el('div', { class: 'timeline-card__day' },
-          String(parseInt((evt.event_date || '').split('-')[2], 10) || new Date(evt.event_date).getDate())
+          String(parseInt((evt.event_date || '').split('-')[2], 10) || (parseDate(evt.event_date) || new Date()).getDate())
         )
       ),
       el('div', { class: 'timeline-card__content' },
@@ -722,7 +747,7 @@ function initMap(partners) {
 
     const icon = L.divIcon({
       className: 'map-marker',
-      html: `<div class="map-marker__pin" style="background:${color}">
+      html: `<div class="map-marker__pin" style="background:${color}; --pin-color:${color}">
         <span>${(partner.display_name || '?').slice(0, 2).toUpperCase()}</span>
       </div>`,
       iconSize: [36, 44],
@@ -730,15 +755,18 @@ function initMap(partners) {
       popupAnchor: [0, -46],
     });
 
+    // Popup content is raw HTML to Leaflet — partner fields are sheet data,
+    // so they are escaped like every other render path in this file.
+    const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const marker = L.marker(coords, { icon }).addTo(mapInstance);
     marker.bindPopup(`
       <div class="map-popup">
-        <div class="map-popup__name">${partner.display_name}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Type:</span> ${partner.partner_type || '—'}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Region:</span> ${partner.region || '—'}</div>
-        <div class="map-popup__row"><span class="map-popup__label">HQ:</span> ${partner.hq_location}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Tier:</span> ${partner.tier || '—'}</div>
-        <div class="map-popup__link"><a href="#/admin/partner-detail?id=${partner.partner_id}">View Partner →</a></div>
+        <div class="map-popup__name">${escAttr(partner.display_name)}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Type:</span> ${escAttr(partner.partner_type || '—')}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Region:</span> ${escAttr(partner.region || '—')}</div>
+        <div class="map-popup__row"><span class="map-popup__label">HQ:</span> ${escAttr(partner.hq_location)}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Tier:</span> ${escAttr(partner.tier || '—')}</div>
+        <div class="map-popup__link"><a href="#/admin/partner-detail?id=${encodeURIComponent(partner.partner_id || '')}">View Partner →</a></div>
       </div>
     `, { maxWidth: 250 });
 

@@ -13,6 +13,7 @@ import { attachSpeakerButton, autoSpeak, stopTTS, createSettingsButton, isTTSEna
 import { getCurrentUser } from '../auth.js';
 import { appendRow, updateRowById, deleteRowById, readSheetAsObjects } from '../sheets.js';
 import { showToast } from '../components/toast.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
 
 // ── State ──────────────────────────────────────────────────────────
 let conversationHistory = [];
@@ -53,20 +54,11 @@ function containsHTMLResponse(text) {
   return text.includes('class="response-container"') || text.includes("class='response-container'");
 }
 
-function sanitizeHTML(html) {
-  return html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object\b[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed\b[^>]*\/?>/gi, '')
-    .replace(/<link\b[^>]*\/?>/gi, '')
-    .replace(/<meta\b[^>]*\/?>/gi, '')
-    .replace(/<img\b[^>]*\/?>/gi, '')
-    .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-    .replace(/<input\b[^>]*\/?>/gi, '')
-    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
-    .replace(/javascript\s*:/gi, '');
-}
+// Shared allowlist sanitizer (js/utils/sanitize-html.js) — the old regex
+// blacklist here was bypassable (`<svg/onload=…>`, entity-encoded
+// `javascript:` hrefs), and this HTML can carry attacker-influenced content,
+// since model output is steered by whatever the spreadsheet holds.
+const sanitizeHTML = sanitizeHtml;
 
 // ── Chat Message Rendering ─────────────────────────────────────────
 function renderMessage(role, text, container) {
@@ -122,6 +114,17 @@ function removeLoading() {
   if (el) el.remove();
 }
 
+// Escape a model-produced string for interpolation into innerHTML. Every
+// field of an action is model output, and model output can be steered by
+// spreadsheet content — so nothing from an action lands in HTML unescaped.
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function renderConfirmationCard(action, container) {
   const icons = { update: '✏️', create: '➕', delete: '🗑️' };
   const card = document.createElement('div');
@@ -129,9 +132,9 @@ function renderConfirmationCard(action, container) {
   card.innerHTML = `
     <div class="action-card__header">
       <div class="action-card__icon">${icons[action.type] || '⚡'}</div>
-      <div class="action-card__summary">${(action.summary || '').replace(/</g, '&lt;')}</div>
+      <div class="action-card__summary">${escapeHtml(action.summary || '')}</div>
     </div>
-    <div class="action-card__detail">${action.sheet} · ${action.type} · ${JSON.stringify(action.row_match || {})}</div>
+    <div class="action-card__detail">${escapeHtml(action.sheet)} · ${escapeHtml(action.type)} · ${escapeHtml(JSON.stringify(action.row_match || {}))}</div>
     <div class="action-card__buttons">
       <button class="action-card__confirm">Confirm</button>
       <button class="action-card__cancel">Cancel</button>
@@ -151,7 +154,7 @@ function renderConfirmationCard(action, container) {
       buttonsDiv.innerHTML = '<div class="action-card__status action-card__status--applied">✓ Applied</div>';
       showToast('Change applied successfully', 'success');
     } catch (err) {
-      buttonsDiv.innerHTML = `<div class="action-card__status action-card__status--cancelled">✗ Failed: ${err.message}</div>`;
+      buttonsDiv.innerHTML = `<div class="action-card__status action-card__status--cancelled">✗ Failed: ${escapeHtml(err.message)}</div>`;
       showToast(err.message, 'error');
     }
   });
@@ -254,7 +257,14 @@ function loadConversation(conv) {
     const chatArea = document.getElementById('ai-chat-area');
     if (!chatArea) return;
     chatArea.innerHTML = '';
-    msgs.forEach(m => renderMessage(m.role, m.content, chatArea));
+    // Assistant turns are stored raw (action blocks included, so the model
+    // keeps its own context on later turns) — strip the blocks for display,
+    // exactly as the live render does.
+    msgs.forEach(m => renderMessage(
+      m.role,
+      m.role === 'assistant' ? parseActions(m.content || '').cleanText : m.content,
+      chatArea,
+    ));
     renderHistoryList();
   } catch (err) {
     console.error('Failed to load conversation:', err);

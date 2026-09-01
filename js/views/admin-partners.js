@@ -6,7 +6,7 @@ import { readSheetAsObjects, appendRow, updateRowById, deleteRowById, isConfigur
 import { CONFIG } from '../config.js';
 import { sha256 } from '../utils/hash.js';
 import { el, mount, uuid, $, debounce, formatCurrency, collapsibleSection } from '../utils/dom.js';
-import { navigate } from '../router.js';
+import { navigate, getCurrentPath } from '../router.js';
 import { nowISO, formatDate } from '../utils/date.js';
 import { tierSlug, TIER_OPTIONS, TIER_COLORS } from '../utils/tiers.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
@@ -103,7 +103,15 @@ function renderWithTypeFilter(container) {
 function reRender() {
   const viewContainer = document.getElementById('view-container');
   return loadPartnerData()
-    .then(() => renderWithTypeFilter(viewContainer))
+    .then(() => {
+      // The modal that triggered this can be open on ANOTHER view (the
+      // Analyzer's "Open source note", the dashboard's event chips), and the
+      // user can navigate away during the refetch. Painting this view over
+      // whichever one is live desyncs the route, topbar, and the router's
+      // registered cleanup — so repaint only when this view owns the screen.
+      if (getCurrentPath() !== '/admin/partners') return;
+      renderWithTypeFilter(viewContainer);
+    })
     .catch((err) => {
       // Never leave the view showing pre-mutation data: the write already
       // happened, so a silent failure here would be the same stale-list lie.
@@ -422,7 +430,14 @@ function openPartnerModal(partner) {
     hq_location: partner.hq_location,
   } : {};
 
+  // Re-entrancy guard: the footer button re-dispatches submit, and a second
+  // click during the Sheets round-trip used to run this handler again — for
+  // a new partner that appended a second row with a fresh uuid. Same guard
+  // the event modal carries (its `saving` flag).
+  let saving = false;
   const form = buildForm(fields, async (data) => {
+    if (saving) return;
+    saving = true;
     try {
       if (isEdit) {
         await savePartnerEdit(partner.partner_id, data);
@@ -456,6 +471,7 @@ function openPartnerModal(partner) {
       reRender();
     } catch (err) {
       showToast(err.message || 'Failed to save partner', 'error');
+      saving = false; // failed — allow the corrected retry
     }
   }, initialValues);
 

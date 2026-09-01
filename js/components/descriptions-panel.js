@@ -15,6 +15,7 @@ import { el, uuid } from '../utils/dom.js';
 import { nowISO, formatDate, todayISO } from '../utils/date.js';
 import { confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
 import { initQuillEditor, ensureHtml, stripHtml } from './quill-editor.js';
 import { ICONS, iconButton } from './icon-button.js';
 import { sectionIcon } from './section-icon.js';
@@ -236,7 +237,7 @@ function descriptionCard(desc, onListChanged, opts) {
 
   function renderViewBody() {
     return el('div', { class: 'transcript-card__body transcript-card__body--open' },
-      el('div', { class: 'transcript-card__text', html: ensureHtml(desc.description_text || '') }),
+      el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(desc.description_text || '')) }),
       el('div', { class: 'transcript-card__actions' },
         iconButton({
           icon: ICONS.edit,

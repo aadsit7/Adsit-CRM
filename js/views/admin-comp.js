@@ -74,6 +74,11 @@ const STAGE_ORDER = ['Prospect', 'Qualified', 'Develop', 'Proposal', 'Negotiatio
 const STAGE_WIN_PROBABILITY = {
   'Prospect': 0.10,
   'Qualified': 0.30,
+  // Between Qualified and Proposal, matching its slot in STAGE_ORDER. It
+  // was missing and fell to the generic 0.25 fallback — BELOW Qualified —
+  // so the Weighted projection ranked a further-along deal lower than an
+  // earlier one.
+  'Develop': 0.42,
   'Proposal': 0.55,
   'Negotiation': 0.80,
   'Closed': 1.00,
@@ -840,9 +845,13 @@ function buildStageMultiSelect({ allStages, selected, onChange }) {
     setOpen(!wrapper.classList.contains('multi-select--open'));
   });
   panel.addEventListener('click', (e) => e.stopPropagation());
-  document.addEventListener('click', (e) => {
+  // Self-removing — see the note in admin-opportunities' multi-select: one
+  // listener per render accumulated on document holding detached DOM.
+  const onDocClick = (e) => {
+    if (!wrapper.isConnected) { document.removeEventListener('click', onDocClick); return; }
     if (!wrapper.contains(e.target)) setOpen(false);
-  });
+  };
+  document.addEventListener('click', onDocClick);
 
   sync(); updateLabel();
   return wrapper;

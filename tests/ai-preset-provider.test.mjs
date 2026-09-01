@@ -215,8 +215,11 @@ test('admin-setup.js renders a provider slider and persists the choice', async (
   assert.ok(/function buildProviderSlider\(/.test(src), 'setup builds a provider slider');
   assert.ok(/class:\s*'provider-slider'/.test(src), 'the slider uses the provider-slider class');
   assert.ok(/const provider = providerSlider\.get\(\)/.test(src), 'save reads the slider value');
+  // The id is generated up front for new presets (see admin-setup.js —
+  // guessing the label as the id afterwards created duplicate rows), so the
+  // call passes promptId rather than `preset.prompt_id || null`.
   assert.ok(
-    /saveCustomPrompt\(preset\.prompt_id \|\| null, label, icon, instructions, provider\)/.test(src),
+    /saveCustomPrompt\(promptId, label, icon, instructions, provider\)/.test(src),
     'save passes the provider to saveCustomPrompt',
   );
 });

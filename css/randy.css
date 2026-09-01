@@ -1134,7 +1134,7 @@
   max-width: 260px;
   padding: 8px 14px;
   background: #fff;
-  border: 1px solid #ddde;
+  border: 1px solid #ddddee;
   border-radius: 999px;
   box-shadow: 0 2px 8px rgba(26, 26, 46, 0.10);
   font-size: 12px;
@@ -1448,7 +1448,7 @@
   background: #0000AA;
   border-color: #0000AA;
 }
-.opp-map-card__btn--in-portal:hover { background: #0000AA; border-color: #0000AA; }
+.opp-map-card__btn--in-portal:hover { background: #000088; border-color: #000088; } /* darker than the #0000AA base — was identical */
 
 .opp-map-card__details {
   margin-top: 4px;

@@ -373,7 +373,7 @@
 }
 
 .modal--apple .btn--primary:hover {
-  background: #0000CC; /* ~8% darker */
+  background: #0000B0; /* ~8% darker than --blue #0000CC — was the same color, so no hover feedback */
   box-shadow: none;
 }
 

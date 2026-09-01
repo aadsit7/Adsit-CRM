@@ -65,7 +65,9 @@ function hasSpeechSupport() {
 }
 
 function isOptedOut() {
-  return localStorage.getItem(STORAGE_KEY) === 'off';
+  // Guarded: with storage blocked the accessor itself throws, and this runs
+  // on every page load via initFieldDictation.
+  try { return localStorage.getItem(STORAGE_KEY) === 'off'; } catch { return false; }
 }
 
 // ── Eligibility ────────────────────────────────────────────────────
@@ -249,6 +251,7 @@ function initRecognition() {
 
   rec.onresult = (event) => {
     if (!currentInsert) return;
+    if (!sinkStillMounted()) { stopDictation(); return; }
     let interim = '';
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
@@ -277,13 +280,28 @@ function initRecognition() {
 
   rec.onend = () => {
     // Chrome ends recognition after a stretch of silence even with
-    // continuous=true. Restart automatically while we're still listening.
+    // continuous=true. Restart automatically while we're still listening —
+    // unless the sink's DOM is gone, in which case the session dies here
+    // instead of restarting forever.
     if (listening && currentInsert) {
+      if (!sinkStillMounted()) { stopDictation(); return; }
       try { rec.start(); } catch { /* already starting */ }
     }
   };
 
   return rec;
+}
+
+// The element the active sink lives in — a plain field, or an external
+// editor's anchor (Quill passes its container). When it leaves the document
+// (its modal was closed without toggling the mic off), the dictation session
+// must die with it: recognition otherwise held the device mic open
+// indefinitely — recording indicator lit, "Listening…" pill stranded —
+// inserting transcripts into a detached editor. A sink that registered no
+// anchor can't be checked and keeps the old behavior.
+function sinkStillMounted() {
+  const target = activeField || currentAnchor;
+  return !target || target.isConnected;
 }
 
 // Fire (and clear) the current sink's teardown callback. Used when a new sink
@@ -469,10 +487,10 @@ export function stopExternalDictation() {
 // Optional programmatic opt-out/opt-in (defaults to on).
 export function setFieldDictationEnabled(enabled) {
   if (enabled) {
-    localStorage.removeItem(STORAGE_KEY);
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage blocked */ }
     disabled = false;
   } else {
-    localStorage.setItem(STORAGE_KEY, 'off');
+    try { localStorage.setItem(STORAGE_KEY, 'off'); } catch { /* storage blocked */ }
     detach();
   }
 }

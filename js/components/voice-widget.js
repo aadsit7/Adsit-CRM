@@ -107,7 +107,11 @@ function initRecognition() {
     if (event.error === 'no-speech') {
       // No speech detected — restart if still in voice mode
       if (!stopping && voiceState === 'listening') {
-        setTimeout(() => { if (!stopping) startListening(); }, 300);
+        // Re-check the STATE inside the timer too (like onend below): a
+        // typed submit can flip to 'processing' within the 300ms, and
+        // restarting then reopens the mic mid-turn — with no echo
+        // suppression here, the widget would transcribe its own TTS.
+        setTimeout(() => { if (!stopping && voiceState === 'listening') startListening(); }, 300);
       }
       return;
     }
@@ -195,6 +199,9 @@ async function handleVoiceInput(text) {
     );
 
     voiceHistory.push({ role: 'assistant', content: response });
+    // Bounded like Randy's history: long sessions otherwise resend an
+    // ever-growing transcript with every turn.
+    if (voiceHistory.length > 20) voiceHistory = voiceHistory.slice(-20);
     renderInChatIfVisible('assistant', response);
 
     // Fall back to speaking the full response if no Summary block was found

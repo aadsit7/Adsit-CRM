@@ -575,9 +575,15 @@ export async function render(container) {
         savePresetBtn.disabled = true;
         savePresetBtn.textContent = 'Saving...';
         try {
-          await saveCustomPrompt(preset.prompt_id || null, label, icon, instructions, provider);
+          // Generate the id up front for a new preset — saveCustomPrompt
+          // appends with the id it is given. Guessing `label` as the id
+          // afterwards meant a second Save in the same session appended a
+          // duplicate row (and Delete targeted a row that didn't exist).
+          const promptId = preset.prompt_id
+            || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `p_${Date.now()}`);
+          await saveCustomPrompt(promptId, label, icon, instructions, provider);
           showToast(`Preset saved — runs on ${providerLabel(provider)}`, 'success');
-          preset.prompt_id = preset.prompt_id || label;
+          preset.prompt_id = promptId;
           preset.label = label;
           preset.icon = icon;
           preset.instructions = instructions;

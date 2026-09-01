@@ -5,7 +5,7 @@
 import { readSheetAsObjects } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, collapsibleSection } from '../utils/dom.js';
-import { formatDate } from '../utils/date.js';
+import { formatDate, parseDate } from '../utils/date.js';
 import { renderCalendar } from '../components/calendar.js';
 import { openModal, closeModal } from '../components/modal.js';
 import { setTopbarTitle } from '../components/sidebar.js';
@@ -86,10 +86,14 @@ function buildStatusBreakdown(events) {
 }
 
 function buildNextEventCard(events) {
-  const now = new Date();
+  // Local-midnight comparison (parseDate) so an event happening TODAY still
+  // counts — new Date('YYYY-MM-DD') parses as UTC midnight, which is
+  // already in the past for the whole of today in US timezones.
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
   const nextEvent = events
-    .filter(e => new Date(e.event_date) >= now)
-    .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))[0];
+    .filter(e => { const d = parseDate(e.event_date); return d && d >= todayStart; })
+    .sort((a, b) => (parseDate(a.event_date) || 0) - (parseDate(b.event_date) || 0))[0];
 
   if (!nextEvent) {
     return el('div', { class: 'bento-cell bento-next-event' },
@@ -98,7 +102,7 @@ function buildNextEventCard(events) {
     );
   }
 
-  const daysUntil = Math.max(0, Math.ceil((new Date(nextEvent.event_date) - now) / (1000 * 60 * 60 * 24)));
+  const daysUntil = Math.max(0, Math.ceil(((parseDate(nextEvent.event_date) || todayStart) - todayStart) / (1000 * 60 * 60 * 24)));
 
   return el('div', { class: 'bento-cell bento-next-event', onClick: () => showEventDetail(nextEvent) },
     el('div', { class: 'bento-next-event__countdown' }, String(daysUntil)),
@@ -210,10 +214,11 @@ function renderView(container, events) {
 }
 
 function renderUpcomingEvents(events) {
-  const now = new Date();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
   const upcoming = events
-    .filter(e => new Date(e.event_date) >= now)
-    .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
+    .filter(e => { const d = parseDate(e.event_date); return d && d >= todayStart; })
+    .sort((a, b) => (parseDate(a.event_date) || 0) - (parseDate(b.event_date) || 0))
     .slice(0, 3);
 
   if (upcoming.length === 0) return el('div');

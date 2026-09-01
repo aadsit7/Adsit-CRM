@@ -125,10 +125,14 @@ function drawExecutiveSummary(doc, summary, keyFacts, yStart) {
     y += lines.length * 12 + 10;
   }
 
-  const facts = (keyFacts || []).filter(f => f?.label || f?.value);
+  // Model output is unbounded — the prompt asks for 3-6 facts but nothing
+  // enforces it — so cap the rows and break the page rather than drawing
+  // silently past the bottom edge.
+  const facts = (keyFacts || []).filter(f => f?.label || f?.value).slice(0, 8);
   if (facts.length > 0) {
     const rowH = 20;
     for (let i = 0; i < facts.length; i++) {
+      y = pageBreakIfNeeded(doc, y, rowH);
       setFill(doc, i % 2 === 0 ? BG_LIGHT : WHITE);
       doc.rect(MARGIN, y, CONTENT_W, rowH, 'F');
 
@@ -188,7 +192,9 @@ function drawPhaseEntries(doc, entries, yStart) {
       setText(doc, CHECK_GREEN);
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(9.5);
-      const oLines = wrap(doc, `→ ${outcome}`, CONTENT_W - 16);
+      // » not →: the arrow is outside jsPDF's Latin-1 helvetica coverage
+      // and printed as garbage bytes; the guillemet is WinAnsi-safe.
+      const oLines = wrap(doc, `» ${outcome}`, CONTENT_W - 16);
       doc.text(oLines, MARGIN + 8, y + 4);
       y += oLines.length * 11 + 6;
     }
@@ -206,15 +212,12 @@ function drawStatusTracker(doc, items, yStart) {
   let y = pageBreakIfNeeded(doc, yStart + 8, 80);
   y = drawHeading(doc, 'Current Status Tracker', y);
 
-  const body = items.map(item => {
-    const s = String(item.status || '').toLowerCase();
-    const marker = s === 'completed'
-      ? '✔  completed'
-      : (s === 'in_progress' || s === 'next')
-          ? `■  ${item.status}`
-          : `■  ${item.status}`;
-    return [String(item.item || ''), marker, String(item.detail || '')];
-  });
+  // No ✔/■ glyph prefixes: they sit outside jsPDF's Latin-1 helvetica
+  // coverage and printed as mojibake. The status cell already carries its
+  // meaning through didParseCell below (green bold for completed, blue for
+  // in-progress), so the colored word alone is the marker.
+  const body = items.map(item =>
+    [String(item.item || ''), String(item.status || ''), String(item.detail || '')]);
 
   doc.autoTable({
     startY: y + 4,
