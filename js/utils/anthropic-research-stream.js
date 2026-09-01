@@ -256,7 +256,12 @@ async function consumeStream(response, { abort, onEvent, round, searchOffset }) 
 
           case 'error': {
             const err = new Error(evt.error?.message || 'The research stream failed.');
-            err.status = STREAM_ERROR_STATUS[evt.error?.type] || 0;
+            // Unknown error types map to 400, not 0: a status of 0 reads as
+            // "network-level, worth another go" to isRetryableResearchError,
+            // but an unrecognized mid-stream error (invalid_request_error,
+            // say) is deterministic — retrying re-POSTs the same bad payload
+            // and just delays the message the user needs.
+            err.status = STREAM_ERROR_STATUS[evt.error?.type] || 400;
             err.code = 'RESEARCH_STREAM_ERROR';
             throw err;
           }

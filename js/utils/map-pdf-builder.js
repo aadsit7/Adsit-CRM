@@ -231,6 +231,18 @@ function drawSectionHeading(doc, label, y) {
   return y + HEADING_BAR_H;
 }
 
+// Continue on a fresh page when the next block would run past the footer
+// zone. Page 1 used to accumulate y with no check at all, so a response at
+// the sizes the prompt itself requests (7 recap entries, up to 10
+// infrastructure entries with sublines, pains, stakeholder bullets) drew
+// the tail of the environment section invisibly below the page edge —
+// autotable then moved the MAP table to page 2, masking the loss.
+function breakIfNeeded(doc, y, needed = 24) {
+  if (y + needed <= PAGE_H - MARGIN - 14) return y;
+  doc.addPage();
+  return MARGIN + 14;
+}
+
 function drawCheckBullet(doc, x, y) {
   setFill(doc, GREEN);
   doc.circle(x, y, 3, 'F');
@@ -260,6 +272,7 @@ function drawMeetingRecap(doc, items, yStart) {
     const detail = String(entry.detail || '').trim();
     if (!label && !detail) continue;
 
+    y = breakIfNeeded(doc, y, 28);
     drawCheckBullet(doc, MARGIN + 4, y - 2);
 
     const textX = MARGIN + 14;
@@ -305,6 +318,8 @@ function drawMeetingRecap(doc, items, yStart) {
 function drawEnvSubsection(doc, label, items, color, yStart) {
   const list = (items || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 5);
   if (list.length === 0) return yStart;
+  // Keep the label with at least its first bullet.
+  yStart = breakIfNeeded(doc, yStart, 40);
   setText(doc, INK);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -313,6 +328,7 @@ function drawEnvSubsection(doc, label, items, color, yStart) {
   doc.setFont('helvetica', 'normal');
   for (const line of list) {
     const wrapped = wrapText(doc, line, CONTENT_W - 14);
+    y = breakIfNeeded(doc, y, wrapped.length * 11 + 4);
     drawSquareBullet(doc, MARGIN + 3, y - 2, color);
     doc.text(wrapped, MARGIN + 12, y);
     y += wrapped.length * 11 + 2;
@@ -336,16 +352,20 @@ function drawInfrastructureSubsection(doc, items, yStart) {
     .slice(0, 10);
   if (entries.length === 0) return yStart;
 
+  // Keep the label with at least its first entry.
+  yStart = breakIfNeeded(doc, yStart, 44);
   setText(doc, INK);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.text('Infrastructure', MARGIN, yStart);
   let y = yStart + 14;
   for (const entry of entries) {
-    drawSquareBullet(doc, MARGIN + 3, y - 2, CYAN);
     setText(doc, INK);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
     const nameWrapped = wrapText(doc, entry.name, CONTENT_W - 14);
+    y = breakIfNeeded(doc, y, nameWrapped.length * 11 + (entry.subline ? 20 : 4));
+    drawSquareBullet(doc, MARGIN + 3, y - 2, CYAN);
     doc.text(nameWrapped, MARGIN + 12, y);
     y += nameWrapped.length * 11;
 
@@ -377,6 +397,8 @@ function drawCurrentEnvironment(doc, env, yStart) {
     || stakeholders.some(s => String(s || '').trim());
   if (!hasAny) return yStart;
 
+  // Keep the section heading with at least the first subsection label.
+  yStart = breakIfNeeded(doc, yStart, HEADING_BAR_H + 44);
   let y = drawSectionHeading(doc, 'Your Current Environment', yStart);
   y += 14;
   y = drawInfrastructureSubsection(doc, infra, y);

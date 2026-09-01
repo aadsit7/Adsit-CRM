@@ -986,8 +986,10 @@ function buildRequestBody(messages, sheetData, userMessage, systemPrompt, { stre
   };
 }
 
-// Combine a caller-supplied AbortSignal with a 90-second hard timeout so a
-// hung network connection never leaves the UI frozen indefinitely.
+// Combine a caller-supplied AbortSignal with a hard wall-clock timeout so a
+// hung network connection never leaves the UI frozen indefinitely. For
+// STREAMING responses prefer an idle watchdog (see callClaudeStream) — a
+// wall clock can't tell a wedged request from a long healthy answer.
 function withTimeout(signal, ms = 90_000) {
   const timeoutSignal = typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(ms)
@@ -1030,14 +1032,48 @@ export async function callClaudeStream(messages, sheetData, userMessage, signal,
 
   const apiKey = requireApiKey();
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: buildRequestHeaders(apiKey),
-    body: JSON.stringify(buildRequestBody(messages, sheetData, userMessage, systemPrompt, { stream: true, activeMode })),
-    signal: withTimeout(signal),
-  });
+  // Idle watchdog rather than a total-duration cap. The old 90-second wall
+  // clock governed the whole response body, so it aborted a perfectly
+  // healthy long answer mid-stream — exactly what the complex tier
+  // (adaptive thinking, 16k max_tokens over a large data context) produces.
+  // What identifies a wedged request is silence, not duration, so the clock
+  // re-arms on every chunk and only sustained silence aborts. Same design
+  // as anthropic-research-stream.js, which documents the reasoning at
+  // length. The caller's own AbortSignal still cancels immediately.
+  const STREAM_IDLE_TIMEOUT_MS = 90_000;
+  const watchdog = new AbortController();
+  const onOuterAbort = () => { watchdog.abort(signal.reason); };
+  if (signal) {
+    if (signal.aborted) watchdog.abort(signal.reason);
+    else signal.addEventListener('abort', onOuterAbort, { once: true });
+  }
+  let idleTimer = null;
+  const armIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(
+      () => watchdog.abort(new DOMException('Request timed out', 'TimeoutError')),
+      STREAM_IDLE_TIMEOUT_MS,
+    );
+  };
+  armIdle();
+
+  let response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: buildRequestHeaders(apiKey),
+      body: JSON.stringify(buildRequestBody(messages, sheetData, userMessage, systemPrompt, { stream: true, activeMode })),
+      signal: watchdog.signal,
+    });
+  } catch (err) {
+    clearTimeout(idleTimer);
+    if (signal) signal.removeEventListener('abort', onOuterAbort);
+    throw err;
+  }
 
   if (!response.ok) {
+    clearTimeout(idleTimer);
+    if (signal) signal.removeEventListener('abort', onOuterAbort);
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error?.message || `API error: ${response.status}`);
   }
@@ -1051,6 +1087,7 @@ export async function callClaudeStream(messages, sheetData, userMessage, signal,
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
+      armIdle();
       buffer += decoder.decode(value, { stream: true });
 
       // Parse SSE events — each event ends with a blank line.
@@ -1085,6 +1122,8 @@ export async function callClaudeStream(messages, sheetData, userMessage, signal,
       }
     }
   } finally {
+    clearTimeout(idleTimer);
+    if (signal) signal.removeEventListener('abort', onOuterAbort);
     try { reader.releaseLock(); } catch { /* ok */ }
   }
 
@@ -1096,6 +1135,10 @@ export async function callClaudeStream(messages, sheetData, userMessage, signal,
  * view and any other caller that expects a single awaited string.
  * Uses the same prompt-cached request body as callClaudeStream so it
  * benefits from caching even without the SSE machinery.
+ *
+ * 300s cap, not the old 90: a non-streaming body can't be idle-watched,
+ * and a complex-tier answer legitimately takes minutes — the same budget
+ * standardizeDescription already uses for long inputs.
  */
 export async function callClaude(messages, sheetData, userMessage, signal, systemPrompt) {
   const apiKey = requireApiKey();
@@ -1104,7 +1147,7 @@ export async function callClaude(messages, sheetData, userMessage, signal, syste
     method: 'POST',
     headers: buildRequestHeaders(apiKey),
     body: JSON.stringify(buildRequestBody(messages, sheetData, userMessage, systemPrompt, { stream: false })),
-    signal: withTimeout(signal),
+    signal: withTimeout(signal, 300_000),
   });
 
   if (!response.ok) {
@@ -1198,12 +1241,16 @@ export async function callKimiStream(messages, sheetData, userMessage, signal, s
     messages, sheetData, userMessage, systemPrompt, activeMode
   );
 
+  // 300s, not the default 90: the proxy returns the WHOLE completion in one
+  // response, and kimi-k3 runs with thinking always on — a long answer
+  // routinely needs more than 90s of wall clock while being perfectly
+  // healthy. Apps Script's own execution ceiling (~6 min) still backstops.
   const data = await fileApiRequest({
     action: 'kimiChat',
     model: KIMI_MODEL,
     max_tokens,
     messages: kimiMessages,
-  }, { signal: withTimeout(signal) });
+  }, { signal: withTimeout(signal, 300_000) });
 
   const full = (data && typeof data.text === 'string') ? data.text : '';
   if (full && onChunk) onChunk(full, full);

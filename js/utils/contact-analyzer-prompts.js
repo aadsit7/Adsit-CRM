@@ -55,11 +55,15 @@ export function buildPartnerContextBlock({ partner = {}, opportunities = [], not
     lines.push('');
     lines.push(`Opportunities (${opps.length}):`);
     for (const o of opps.slice(0, 12)) {
+      // Column names come from the Opportunities sheet schema
+      // (js/sheets.js SHEET_HEADERS): deal_value / expected_close. The
+      // previous `amount` / `close_date` reads matched nothing, so every
+      // brief silently omitted deal value and close date.
       const bits = [
         String(o.deal_name || o.opportunity_name || 'Untitled deal').trim(),
         o.stage ? `stage: ${String(o.stage).trim()}` : '',
-        o.amount ? `amount: ${String(o.amount).trim()}` : '',
-        o.close_date ? `close: ${String(o.close_date).trim()}` : '',
+        o.deal_value ? `value: ${String(o.deal_value).trim()}` : '',
+        o.expected_close ? `close: ${String(o.expected_close).trim()}` : '',
         o.status ? `status: ${String(o.status).trim()}` : '',
       ].filter(Boolean);
       lines.push(`  • ${bits.join(' · ')}`);

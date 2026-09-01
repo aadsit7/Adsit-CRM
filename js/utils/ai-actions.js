@@ -4,7 +4,7 @@
 // Used by both the AI Assistant chat view and the Randy voice assistant
 
 import { loadSheetData, invalidateSheetCache } from './ai.js';
-import { appendRow, updateRowById, deleteRowById, keyFieldFor, SHEET_HEADERS as ALL_SHEET_HEADERS } from '../sheets.js';
+import { appendRow, updateRowById, deleteRowById, keyFieldFor, readSheetAsObjects, SHEET_HEADERS as ALL_SHEET_HEADERS } from '../sheets.js';
 
 // ── Sheets the AI may write to ─────────────────────────────────────
 // The allowlist is the sheet NAMES; the column order comes from sheets.js, so
@@ -93,7 +93,14 @@ export async function executeAction(action) {
   const sheetData = await loadSheetData(true);
   const headers = SHEET_HEADERS[action.sheet];
   const sheetKey = { Partners: 'partners', Opportunities: 'opportunities', Events: 'events', Transcripts: 'fullTranscripts', Meeting_Index: 'meetingIndex' }[action.sheet];
-  const rows = (sheetKey && sheetData[sheetKey]) || [];
+  // Writable sheets that are not part of the AI's loaded context —
+  // AI_Conversations, whose rows are whole conversations and far too big to
+  // feed the model — are resolved with a direct fresh read instead. Without
+  // this, `rows` was always [] for them and every advertised update/delete
+  // failed with "No matching row found".
+  const rows = sheetKey
+    ? (sheetData[sheetKey] || [])
+    : await readSheetAsObjects(action.sheet, { forceRefresh: true });
 
   console.log(`[AI Action] ${new Date().toISOString()} — ${action.type} on ${action.sheet}`, action);
 

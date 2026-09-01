@@ -65,7 +65,9 @@ function hasSpeechSupport() {
 }
 
 function isOptedOut() {
-  return localStorage.getItem(STORAGE_KEY) === 'off';
+  // Guarded: with storage blocked the accessor itself throws, and this runs
+  // on every page load via initFieldDictation.
+  try { return localStorage.getItem(STORAGE_KEY) === 'off'; } catch { return false; }
 }
 
 // ── Eligibility ────────────────────────────────────────────────────
@@ -469,10 +471,10 @@ export function stopExternalDictation() {
 // Optional programmatic opt-out/opt-in (defaults to on).
 export function setFieldDictationEnabled(enabled) {
   if (enabled) {
-    localStorage.removeItem(STORAGE_KEY);
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage blocked */ }
     disabled = false;
   } else {
-    localStorage.setItem(STORAGE_KEY, 'off');
+    try { localStorage.setItem(STORAGE_KEY, 'off'); } catch { /* storage blocked */ }
     detach();
   }
 }

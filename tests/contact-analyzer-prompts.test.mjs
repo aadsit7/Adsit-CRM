@@ -69,10 +69,14 @@ test('notes when no prior LeadCheck exists', () => {
 
 // ── buildPartnerContextBlock ────────────────────────────────────────
 test('partner context lists tier/status and opportunities', () => {
+  // Rows carry the Opportunities sheet's real column names (deal_value /
+  // expected_close — see SHEET_HEADERS in js/sheets.js). The block used to
+  // read `amount`/`close_date`, which exist nowhere, so every brief silently
+  // omitted deal value and close date.
   const block = buildPartnerContextBlock({
     partner: { display_name: 'Insight', tier: 'Premier', status: 'active' },
     opportunities: [
-      { deal_name: 'Managed Endpoint 2.0', stage: 'Negotiation', amount: '600000', status: 'Open' },
+      { deal_name: 'Managed Endpoint 2.0', stage: 'Negotiation', deal_value: '600000', expected_close: '2026-11-30', status: 'Open' },
     ],
     notes: [],
   });
@@ -80,6 +84,7 @@ test('partner context lists tier/status and opportunities', () => {
   assert.ok(block.includes('Premier'));
   assert.ok(block.includes('Managed Endpoint 2.0'));
   assert.ok(block.includes('600000'));
+  assert.ok(block.includes('2026-11-30'));
 });
 
 test('partner context includes notes and is bounded', () => {
