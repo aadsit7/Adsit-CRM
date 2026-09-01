@@ -485,6 +485,11 @@ function stopAll() {
   conversationHistory = [];
   pendingActions = null;
   pendingOpenItem = null;
+  // These survived stopAll while the Close/New Chat buttons clear them —
+  // so a "make a MAP" ask-back abandoned with "stop" hijacked the NEXT
+  // session's first message as an opportunity hint.
+  pendingMapIntent = null;
+  pendingTimelineIntent = null;
   confirmAttempts = 0;
   accumulatedTranscript = '';
   currentConvId = null;
@@ -527,6 +532,25 @@ function initRecognition() {
 
     // During speaking: check for intentional interrupt vs echo
     if (isRandySpeaking) {
+      // A yes/no spoken while the confirmation prompt is still being read
+      // is the ANSWER, not an interruption or echo. Without this, the echo
+      // heuristic swallowed it ("yes" appears in the prompt's own words),
+      // or the interrupt path nulled the completion callback that enters
+      // CONFIRMING — orphaning pendingActions so the confirmed write never
+      // ran.
+      if (pendingActions) {
+        const lowerT = transcript.toLowerCase();
+        if (CONFIRM_WORDS.some(w => lowerT.includes(w)) || DENY_WORDS.some(w => lowerT.includes(w))) {
+          synth.cancel();
+          speechChainCancelled = true;
+          isRandySpeaking = false;
+          currentSpokenText = '';
+          currentSpeechOnComplete = null;
+          transition(STATES.CONFIRMING, true);
+          handleConfirmation(lowerT);
+          return;
+        }
+      }
       if (isInterrupt(transcript)) {
         synth.cancel();
         speechChainCancelled = true;
@@ -543,7 +567,18 @@ function initRecognition() {
           accumulatedTranscript = '';
           updateWidgetUI();
         }
-        handleTranscript(transcript);
+        // The aborted turn still holds isProcessing until its rejection
+        // unwinds (a later microtask), so a synchronous handleTranscript
+        // here hit processUserInput's re-entry guard and the interrupting
+        // words simply evaporated. Hand them to a fresh turn as soon as
+        // the old one has let go.
+        const bargeIn = transcript;
+        const resumeBargeIn = (attempts = 0) => {
+          if (!isProcessing) { handleTranscript(bargeIn); return; }
+          if (attempts < 20) setTimeout(() => resumeBargeIn(attempts + 1), 50);
+          // else: the old turn never unwound — drop rather than queue forever.
+        };
+        resumeBargeIn();
       }
       return;
     }
@@ -2233,10 +2268,29 @@ function startConfirmTimeout() {
 
 // ── Speech Synthesis ──────────────────────────────────────────────
 function speakText(text, onComplete) {
-  if (isMuted) { if (onComplete) onComplete(); return; }
   // Clean text for speech
   const clean = cleanForSpeech(text);
-  if (!clean) { if (onComplete) onComplete(); return; }
+  if (isMuted || !clean) {
+    // Muted (or nothing sayable) still has to move the state machine the
+    // way a spoken reply would. Returning early used to strand a voice
+    // turn in PROCESSING forever: startRecognition refuses there, the
+    // Voice button and Alt+Z are no-ops there, and the ask-back callbacks'
+    // PROCESSING → ACTIVE_LISTENING hop is not an allowed transition — so
+    // one muted question bricked voice until New Chat. Walk the same legal
+    // hops the spoken path takes (→ SPEAKING, then the completion), which
+    // also re-opens the mic via ACTIVE_LISTENING's enter hook.
+    if (currentState !== STATES.CONFIRMING && currentState !== STATES.PASSIVE) {
+      if (currentState === STATES.PROCESSING || currentState === STATES.ACTIVE_LISTENING) {
+        transition(STATES.SPEAKING);
+      }
+    }
+    if (onComplete) {
+      onComplete();
+    } else if (currentState === STATES.SPEAKING) {
+      transition(STATES.ACTIVE_LISTENING);
+    }
+    return;
+  }
 
   // Set echo prevention flag — mic stays running for barge-in
   isRandySpeaking = true;
@@ -2259,8 +2313,10 @@ function speakText(text, onComplete) {
 }
 
 function finishSpeaking() {
+  const chainId = speechChainId;
   clearSpeakingHighlight();
   setTimeout(() => {
+    if (chainId !== speechChainId) return; // a newer chain owns the state now
     lastSpokenText = currentSpokenText;
     lastSpeechEndTime = Date.now();
     isRandySpeaking = false;
@@ -2274,6 +2330,13 @@ function finishSpeaking() {
     }
   }, 300);
 }
+
+// Monotonic id of the CURRENT speech chain. A new speakText cancels the old
+// chain, but the old utterances' 'canceled'/'interrupted'/onend events land
+// asynchronously — without the token they mutated the shared speech state
+// (speechChainCancelled, currentSpeechOnComplete) out from under the NEW
+// chain, truncating it after one sentence or firing/losing its completion.
+let speechChainId = 0;
 
 function speakWithWebSpeech(clean) {
   // Split into sentences at . ? ! boundaries
@@ -2292,7 +2355,10 @@ function speakWithWebSpeech(clean) {
   const wordCount = clean.split(/\s+/).length;
   const isShort = wordCount < 6;
 
+  const chainId = ++speechChainId;
+
   function handleError(e) {
+    if (chainId !== speechChainId) return; // stale event from a superseded chain
     clearSpeakingHighlight();
     if (e.error === 'canceled') {
       speechChainCancelled = true;
@@ -2316,7 +2382,7 @@ function speakWithWebSpeech(clean) {
   }
 
   function speakPart(i) {
-    if (speechChainCancelled || i >= parts.length) return;
+    if (speechChainCancelled || chainId !== speechChainId || i >= parts.length) return;
 
     const utterance = new SpeechSynthesisUtterance(parts[i]);
     if (selectedVoice) utterance.voice = selectedVoice;
@@ -2331,6 +2397,7 @@ function speakWithWebSpeech(clean) {
     const isLast = i === parts.length - 1;
 
     utterance.onend = () => {
+      if (chainId !== speechChainId) return; // superseded mid-utterance
       if (isLast) {
         finishSpeaking();
       } else if (!speechChainCancelled) {

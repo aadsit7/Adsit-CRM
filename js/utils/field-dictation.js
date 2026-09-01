@@ -251,6 +251,7 @@ function initRecognition() {
 
   rec.onresult = (event) => {
     if (!currentInsert) return;
+    if (!sinkStillMounted()) { stopDictation(); return; }
     let interim = '';
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
@@ -279,13 +280,28 @@ function initRecognition() {
 
   rec.onend = () => {
     // Chrome ends recognition after a stretch of silence even with
-    // continuous=true. Restart automatically while we're still listening.
+    // continuous=true. Restart automatically while we're still listening —
+    // unless the sink's DOM is gone, in which case the session dies here
+    // instead of restarting forever.
     if (listening && currentInsert) {
+      if (!sinkStillMounted()) { stopDictation(); return; }
       try { rec.start(); } catch { /* already starting */ }
     }
   };
 
   return rec;
+}
+
+// The element the active sink lives in — a plain field, or an external
+// editor's anchor (Quill passes its container). When it leaves the document
+// (its modal was closed without toggling the mic off), the dictation session
+// must die with it: recognition otherwise held the device mic open
+// indefinitely — recording indicator lit, "Listening…" pill stranded —
+// inserting transcripts into a detached editor. A sink that registered no
+// anchor can't be checked and keeps the old behavior.
+function sinkStillMounted() {
+  const target = activeField || currentAnchor;
+  return !target || target.isConnected;
 }
 
 // Fire (and clear) the current sink's teardown callback. Used when a new sink
