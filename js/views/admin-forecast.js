@@ -44,7 +44,7 @@ import {
   EVENT_STAGES,
 } from '../utils/event-analyzer-stages.js';
 import { computeEventTiming } from '../utils/event-analyzer-prompts.js';
-import { selectEventDescriptions, selectEventContacts } from '../utils/event-analyzer-evidence.js';
+import { assembleStagesFromPlaybookRows, selectEventDescriptions, selectEventContacts } from '../utils/event-analyzer-evidence.js';
 import { buildEventAnalysisPdf, eventAnalysisFilename } from '../utils/event-analyzer-pdf-builder.js';
 // openEventModal is imported lazily inside the click handler (see openEventSource)
 // to avoid a static import cycle with admin-events.js.
@@ -1427,8 +1427,16 @@ function restoreEventJob() {
 async function loadSavedPlaybookRaw(eventId) {
   try {
     const rows = await readSheetAsObjects(CONFIG.SHEET_EVENT_PLAYBOOK);
-    const row = (rows || []).find(r => String(r.event_id || '').trim() === eventId);
-    return { raw: row ? (row.stages_json || '') : null, warning: null };
+    const mine = (rows || []).filter(r => String(r.event_id || '').trim() === eventId);
+    if (!mine.length) return { raw: null, warning: null };
+    // Two storage shapes exist: the portal's declared single-row
+    // `stages_json` column, and the multi-row schema the deployed Apps
+    // Script actually writes (one row per activity/gate/note). The sheet
+    // the backend creates has NO stages_json column, so reading only that
+    // silently dropped every manually-checked activity from the analysis.
+    const jsonRow = mine.find(r => String(r.stages_json || '').trim());
+    if (jsonRow) return { raw: jsonRow.stages_json, warning: null };
+    return { raw: assembleStagesFromPlaybookRows(mine), warning: null };
   } catch {
     return {
       raw: null,

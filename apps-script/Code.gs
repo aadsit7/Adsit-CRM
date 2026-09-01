@@ -55,9 +55,60 @@ var ANTHROPIC_API_KEY = PropertiesService.getScriptProperties().getProperty('ANT
 // server-side and the call is not blocked by browser CORS.
 var KIMI_API_KEY = PropertiesService.getScriptProperties().getProperty('KIMI_API_KEY');
 
+// ── Admin gate for the portal-only actions ─────────────────────────
+// The deployment must be "Anyone" so the static site can call it — which
+// used to mean ANY anonymous caller could read the Anthropic key via
+// getConfig, write/delete Drive files and sheet rows, and burn AI quota.
+// The portal now sends the signed-in admin's Google OAuth access token
+// (it already holds one for Sheets writes) with every portal action, and
+// this verifies it against Google's tokeninfo endpoint + the admin list.
+// The Event-Workspace actions (listEvents/openEvent/saveEventContacts/
+// playbook…) are NOT gated: that external tool has no Google sign-in and
+// carries its own event-password model.
+//
+// Keep in step with ADMIN_EMAILS in js/config.js.
+var PORTAL_ADMIN_EMAILS = ['aadsit7@gmail.com', 'adsitvideo@gmail.com'];
+var PORTAL_GATED_ACTIONS = {
+  getConfig: true, uploadFile: true, listFiles: true, deleteFile: true,
+  analyzeDocument: true, updateDescription: true, kimiChat: true
+};
+
+function requirePortalAdmin_(payload) {
+  var token = payload && payload.accessToken;
+  if (!token) {
+    throw new Error('Sign-in required: reload the portal so it can reconnect your Google session, then try again.');
+  }
+  // Cache positive verifications briefly so every request doesn't cost a
+  // tokeninfo round-trip. Keyed by token hash — the raw token never
+  // touches the cache.
+  var cache = CacheService.getScriptCache();
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token)
+    .map(function (b) { return ((b + 256) % 256).toString(16); }).join('');
+  var cacheKey = 'ptok_' + digest;
+  if (cache.get(cacheKey)) return;
+
+  var res = UrlFetchApp.fetch(
+    'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + encodeURIComponent(token),
+    { muteHttpExceptions: true }
+  );
+  if (res.getResponseCode() !== 200) {
+    throw new Error('Your Google sign-in has expired — reload the portal and try again.');
+  }
+  var info = JSON.parse(res.getContentText());
+  var email = String(info.email || '').toLowerCase();
+  if (!email || String(info.email_verified) !== 'true' || PORTAL_ADMIN_EMAILS.indexOf(email) === -1) {
+    throw new Error('This Google account is not authorized for the Partner Portal backend.');
+  }
+  cache.put(cacheKey, '1', 300);
+}
+
 function doPost(e) {
   try {
     var payload = JSON.parse(e.postData.contents);
+
+    if (PORTAL_GATED_ACTIONS[payload.action] === true) {
+      requirePortalAdmin_(payload);
+    }
 
     if (payload.action === 'uploadFile') {
       return doUploadFile(payload);
@@ -156,6 +207,8 @@ function doPost(e) {
 // ============================================================
 // GET CONFIG — Return the Anthropic key so the portal can read it
 // automatically instead of pasting it into the Setup page.
+// Gated by requirePortalAdmin_ in doPost: only a verified admin
+// Google token can read the key.
 // ============================================================
 
 function doGetConfig() {
@@ -305,6 +358,10 @@ function doDeleteFile(docId) {
   var sheet = ss.getSheetByName('Opportunity_Documents');
   if (!sheet) throw new Error('No documents tab found');
 
+  // Header-only sheet: getRange(2,1,0,1) would throw an opaque "number of
+  // rows must be at least 1" — answer with the real condition instead.
+  if (sheet.getLastRow() < 2) throw new Error('Document not found: ' + docId);
+
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
   for (var i = 0; i < data.length; i++) {
     if (data[i][0] == docId) {
@@ -372,6 +429,11 @@ function doAnalyzeDocument(docId, driveUrl) {
     extractedText = file.getBlob().getDataAsString('UTF-8');
   } else if (mimeType === 'text/plain') {
     extractedText = file.getBlob().getDataAsString();
+  } else if (/^image\//i.test(mimeType)) {
+    // Images are uploadable, but reading their bytes "as text" feeds
+    // mojibake to the model and produces garbage analysis — fail with the
+    // real reason instead.
+    throw new Error('Image files cannot be text-analyzed. Supported: PDF, CSV, spreadsheets, and text documents.');
   } else {
     // Try to get as text
     try {
@@ -1799,36 +1861,54 @@ function doSavePlaybook(payload) {
   if (!key) return jsonOut({ ok: false, code: 'bad_request', error: 'No event specified' });
   var stages = (payload.stages && payload.stages.length) ? payload.stages : [];
   if (stages.length > 20) stages = stages.slice(0, 20); // safety cap
-  var ss = SpreadsheetApp.openById(SHEET_ID);
-  var sheet = getEventPlaybookSheet(ss);
-  var lastCol = sheet.getLastColumn();
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
-  var idCol = headers.indexOf('event_id');
-  // Remove this event's existing rows (bottom-up).
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1 && idCol !== -1) {
-    var ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
-    for (var r = ids.length - 1; r >= 0; r--) {
-      if (String(ids[r][0]).trim() === key) sheet.deleteRow(r + 2);
+
+  // Script lock, like doSaveEventContacts (and as the README promises):
+  // the read-filter-rewrite below is not atomic, and two concurrent saves
+  // used to interleave the unlocked per-row delete loop and corrupt an
+  // event's playbook.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = getEventPlaybookSheet(ss);
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
+    var idCol = headers.indexOf('event_id');
+
+    // One batched rewrite instead of row-by-row deleteRow calls: read every
+    // data row, keep the other events' rows, append this event's fresh rows,
+    // clear, and write once — same pattern as the Event_Contacts save.
+    var lastRow = sheet.getLastRow();
+    var kept = [];
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+      kept = (idCol === -1) ? data : data.filter(function (row) {
+        return String(row[idCol]).trim() !== key;
+      });
     }
-  }
-  // Build fresh rows.
-  var stamp = new Date();
-  var rows = [];
-  stages.forEach(function (s) {
-    var sk = String(s.key || '');
-    (s.acts || []).slice(0, 30).forEach(function (a2, j) {
-      rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'activity', j,
-        a2.x, a2.o, a2.dt, a2.d ? 'TRUE' : 'FALSE', '', stamp));
+
+    var stamp = new Date();
+    var rows = [];
+    stages.forEach(function (s) {
+      var sk = String(s.key || '');
+      (s.acts || []).slice(0, 30).forEach(function (a2, j) {
+        rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'activity', j,
+          a2.x, a2.o, a2.dt, a2.d ? 'TRUE' : 'FALSE', '', stamp));
+      });
+      rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'gate', '',
+        '', '', '', s.gate ? 'TRUE' : 'FALSE', '', stamp));
+      rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'note', '',
+        '', '', '', '', String(s.note || ''), stamp));
     });
-    rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'gate', '',
-      '', '', '', s.gate ? 'TRUE' : 'FALSE', '', stamp));
-    rows.push(pbRowFor(headers, key, payload.eventTitle, sk, 'note', '',
-      '', '', '', '', String(s.note || ''), stamp));
-  });
-  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-  syncNotesToEventDescription(ss, key, stages); // best-effort, never fatal
-  return jsonOut({ ok: true, saved: rows.length });
+
+    var all = kept.concat(rows);
+    if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
+    if (all.length) sheet.getRange(2, 1, all.length, headers.length).setValues(all);
+    syncNotesToEventDescription(ss, key, stages); // best-effort, never fatal
+    return jsonOut({ ok: true, saved: rows.length });
+  } finally {
+    lock.releaseLock();
+  }
 }
 function pbRowFor(headers, eventKey, eventTitle, stageKey, rowType, actIndex, text, owner, dueDate, done, noteText, stamp) {
   var map = {

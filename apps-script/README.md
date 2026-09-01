@@ -15,6 +15,25 @@ The live script runs at script.google.com — GitHub does not deploy it.
    Version: New version → Deploy.** The `/exec` URL stays the same, so
    nothing changes in the portal or playbook config.
 
+## Access control
+
+The deployment stays "Anyone" (a static site cannot hold a secret), but the
+portal-only actions — `getConfig`, `uploadFile`, `listFiles`, `deleteFile`,
+`analyzeDocument`, `updateDescription`, `kimiChat` — now require the
+signed-in admin's Google OAuth access token, which `requirePortalAdmin_`
+verifies against Google's tokeninfo endpoint and the `PORTAL_ADMIN_EMAILS`
+list (keep it in step with `ADMIN_EMAILS` in `js/config.js`). The portal
+attaches the token automatically (see `js/utils/file-api.js`). Before this
+gate, ANY anonymous caller who knew the public `/exec` URL could read the
+Anthropic key and write/delete Drive files and sheet rows. The Events
+Playbook actions are deliberately NOT gated — that external tool has no
+Google sign-in and carries its own event-password model.
+
+**Redeploy required:** until the new `Code.gs` is pasted and redeployed,
+the old backend still answers unauthenticated. (The rollout is safe in
+either order: the old backend ignores the extra token field, and the new
+backend rejects tokenless calls with a clear "reload the portal" message.)
+
 ## What the script serves
 
 | Action | Used by | Purpose |

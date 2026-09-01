@@ -9,6 +9,11 @@ web app, and the portal reads it automatically on load.
 
 On a cold load, an admin session calls the Apps Script with
 `{ action: 'getConfig' }`. The Apps Script returns the `ANTHROPIC_API_KEY`
+only to a verified admin: the portal attaches the signed-in admin's
+Google OAuth access token and the backend checks it against
+`PORTAL_ADMIN_EMAILS` (see `requirePortalAdmin_` in `apps-script/Code.gs`)
+— an unauthenticated `getConfig` used to hand the raw key to anyone with
+the public `/exec` URL.
 Script Property, and the portal caches it in the browser so every existing
 AI feature picks it up with no change. See:
 

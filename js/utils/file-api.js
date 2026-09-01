@@ -14,11 +14,20 @@
 // ============================================================
 
 import { CONFIG, setRuntimeConfig } from '../config.js';
+import { getAccessToken } from '../auth.js';
 
 export async function fileApiRequest(payload, { signal } = {}) {
+  // Attach the signed-in admin's Google OAuth token: the Apps Script's
+  // portal actions (getConfig, uploadFile, deleteFile, analyzeDocument,
+  // updateDescription, kimiChat…) verify it server-side against the admin
+  // list, so the "Anyone"-accessible deployment no longer hands out the
+  // AI key or Drive/sheet writes to anonymous callers. An older deployed
+  // backend simply ignores the extra field.
+  const accessToken = getAccessToken();
+  const body = accessToken ? { ...payload, accessToken } : payload;
   const res = await fetch(CONFIG.FILE_API_URL, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
     // Optional AbortSignal so long-running proxied calls (e.g. the Kimi
     // chat proxy) can be cancelled/timed out. Omitted → no signal, exactly
     // as before, so every existing single-arg caller is unaffected.

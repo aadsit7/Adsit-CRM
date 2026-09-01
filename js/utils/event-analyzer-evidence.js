@@ -135,6 +135,44 @@ export function buildLinkedOppFacts(opportunities, eventId) {
 
 // ── Saved playbook state ────────────────────────────────────────────
 /**
+ * Assemble the standalone-serializer stage shape from Event_Playbook rows in
+ * the MULTI-ROW schema the deployed Apps Script writes (one row per
+ * activity/gate/note — EVENT_PLAYBOOK_HEADERS in apps-script/Code.gs):
+ *   { stage_key, row_type: 'activity'|'gate'|'note', act_index, text,
+ *     owner, due_date, done, note_text }
+ * The portal's declared single-row `stages_json` shape never appears in a
+ * sheet the backend created, so without this bridge every saved playbook
+ * check was silently invisible to the Event Analyzer.
+ *
+ * Returns an array parseSavedPlaybook() accepts (acts carry their original
+ * `i` index so positional id mapping stays exact), or null when the rows
+ * hold no stage data.
+ */
+export function assembleStagesFromPlaybookRows(rows) {
+  const byStage = new Map();
+  for (const r of rows || []) {
+    const key = String(r?.stage_key || '').trim();
+    if (!key) continue;
+    if (!byStage.has(key)) byStage.set(key, { key, gate: false, note: '', acts: [] });
+    const stage = byStage.get(key);
+    const type = String(r.row_type || '').trim().toLowerCase();
+    const done = String(r.done || '').trim().toUpperCase() === 'TRUE';
+    if (type === 'activity') {
+      const idx = Number(r.act_index);
+      stage.acts.push({
+        i: Number.isFinite(idx) ? idx : undefined,
+        x: r.text || '', o: r.owner || '', dt: r.due_date || '', d: done,
+      });
+    } else if (type === 'gate') {
+      stage.gate = done;
+    } else if (type === 'note' && String(r.note_text || '').trim()) {
+      stage.note = String(r.note_text);
+    }
+  }
+  return byStage.size ? [...byStage.values()] : null;
+}
+
+/**
  * Parse saved Event_Playbook state into checked-activity facts. Accepts the
  * standalone serialized shape — an array of
  *   { key, gate, note, acts:[{ x, o, dt, d }] }
