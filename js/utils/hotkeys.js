@@ -8,7 +8,8 @@ let helpVisible = false;
 let helpEl = null;
 
 // Parse "Alt+R", "?", "Ctrl+Shift+O" into a structured descriptor.
-function parseCombo(combo) {
+// Exposed for tests — pure helper with no DOM cost.
+export function parseCombo(combo) {
   const parts = combo.split('+');
   const key = parts[parts.length - 1];
   return {
@@ -29,13 +30,18 @@ function comboLabel(combo) {
   return pieces;
 }
 
-function matches(e, parsed) {
-  return (
-    e.altKey   === parsed.alt   &&
-    e.ctrlKey  === parsed.ctrl  &&
-    e.shiftKey === parsed.shift &&
-    (e.key === parsed.key || e.key.toLowerCase() === parsed.key.toLowerCase())
-  );
+// Exposed for tests — pure helper with no DOM cost.
+export function matches(e, parsed) {
+  if (e.altKey !== parsed.alt || e.ctrlKey !== parsed.ctrl) return false;
+  if (e.key !== parsed.key && e.key.toLowerCase() !== parsed.key.toLowerCase()) return false;
+  // Symbol keys live on the shifted layer of most layouts — typing "?" sends
+  // shiftKey=true — so a combo naming a symbol without an explicit Shift
+  // accepts either shift state; the produced character already proves the
+  // right key was pressed. Letters keep the strict comparison so Alt+P and
+  // Alt+Shift+P stay distinct combos.
+  const isSymbol = parsed.key.length === 1 && parsed.key.toLowerCase() === parsed.key.toUpperCase();
+  if (isSymbol && !parsed.shift) return true;
+  return e.shiftKey === parsed.shift;
 }
 
 // Register a shortcut.
