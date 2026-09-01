@@ -42,12 +42,32 @@ export function getQueryParams() {
   return Object.fromEntries(new URLSearchParams(full.slice(qIndex + 1)));
 }
 
+// Navigation is serialized, latest-wins. Renders are async (they await
+// sheet reads), so a second hashchange can arrive while the previous
+// route's render is still in flight. Running the two concurrently corrupts
+// the shell: the older render's late DOM writes land on top of the newer
+// view, and its cleanup is registered as current so the NEXT navigation
+// tears down the wrong view. Queuing each hash change behind the one
+// before it keeps every render/cleanup pair atomic; hops that were
+// superseded while still queued are skipped (handleRoute reads the live
+// hash, so the run that does execute lands on the newest route).
+let navChain = Promise.resolve();
+let navSeq = 0;
+
+function scheduleRoute() {
+  const seq = ++navSeq;
+  navChain = navChain.then(() => {
+    if (seq !== navSeq) return; // superseded while queued
+    return handleRoute();
+  }).catch(onRouteError);
+}
+
 /**
  * Initialize the router.
  */
 export function initRouter() {
-  window.addEventListener('hashchange', () => { handleRoute().catch(onRouteError); });
-  handleRoute().catch(onRouteError);
+  window.addEventListener('hashchange', scheduleRoute);
+  scheduleRoute();
 }
 
 function onRouteError(err) {
