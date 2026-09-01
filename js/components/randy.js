@@ -6,6 +6,7 @@
 
 import { SYSTEM_PROMPT, loadSheetData, callClaudeStream, warmSheetData, getOpportunityDescription, requestMapPdfJson } from '../utils/ai.js';
 import { parseActions, executeAction } from '../utils/ai-actions.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
 import { detectMapPdfIntent } from '../utils/map-pdf-intent.js';
 import {
   detectOpenItemIntent, matchDocuments, resolveDescriptionTarget,
@@ -1523,7 +1524,7 @@ function announceTimelinePdfReady({ opportunityName, opportunityId, driveUrl, fi
   if (!isTypeModeActive && randyIsIdle()) {
     speakText(`Timeline PDF saved for ${opportunityName} — sweet. Link's in the chat.`);
   }
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
   if (msgEl && opportunityId) {
     const selectors = ['.randy-timeline-card__btn--in-portal', '.randy-timeline-card__secondary-link'];
     for (const sel of selectors) {
@@ -1560,7 +1561,7 @@ function announceTimelinePdfError(err, opportunity) {
     technicalDetail: msg || String(err || 'Unknown error'),
   });
   if (!isTypeModeActive && randyIsIdle()) speakText(spoken);
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
   if (msgEl && opportunity?.opportunityId) {
     const retry = msgEl.querySelector('.randy-timeline-card__retry');
     if (retry) retry.addEventListener('click', async (e) => {
@@ -1642,7 +1643,7 @@ function announceMapPdfReady({ opportunityName, opportunityId, driveUrl, filenam
   if (!isTypeModeActive && randyIsIdle()) {
     speakText(`Saved to ${opportunityName} — right on. The MAP PDF is in the opportunity's documents — link's in the chat.`);
   }
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
 
   // Wire every in-portal navigation link post-render — sanitizeHTML()
   // strips on* handlers from the string, so we attach listeners now.
@@ -1692,7 +1693,7 @@ function announceMapPdfError(err, opportunity) {
   });
 
   if (!isTypeModeActive && randyIsIdle()) speakText(spoken);
-  const msgEl = renderMessage('assistant', cardHtml);
+  const msgEl = renderMessage('assistant', cardHtml, { trustedHtml: true });
 
   // Wire "Try again" to re-run the flow for the same opportunity.
   if (msgEl && opportunity?.opportunityId) {
@@ -1812,13 +1813,13 @@ ${retry}
 // ambiguous is read back to the user instead of guessed.
 
 // Speak + render the same turn-ending response the other flows use.
-function respondOpenItem(display, spoken) {
+function respondOpenItem(display, spoken, opts) {
   if (isTypeModeActive) {
-    renderMessage('assistant', display);
+    renderMessage('assistant', display, opts);
     transition(STATES.PASSIVE, true);
   } else {
     speakText(spoken || display, () => transition(STATES.ACTIVE_LISTENING));
-    renderMessage('assistant', display);
+    renderMessage('assistant', display, opts);
   }
 }
 
@@ -1925,7 +1926,7 @@ async function resolveAndOpenDocument(opp, docHint) {
     ? `A few documents on ${opp.opportunityName} match that, man.`
     : `I don't see a document matching that on ${opp.opportunityName}, man.`;
   const spoken = `${lead} I've got ${spokenNames.join(', ')}${extra}. Which one?`;
-  respondOpenItem(buildDocListCardHtml(opp, candidates), spoken);
+  respondOpenItem(buildDocListCardHtml(opp, candidates), spoken, { trustedHtml: true });
 }
 
 function openDocumentForRandy(file, opp) {
@@ -1945,7 +1946,7 @@ function openDocumentForRandy(file, opp) {
   } else {
     spoken = `Opening ${human} for ${opp.opportunityName}, man.`;
   }
-  respondOpenItem(buildOpenDocCardHtml(opp, file), spoken);
+  respondOpenItem(buildOpenDocCardHtml(opp, file), spoken, { trustedHtml: true });
 }
 
 async function resolveAndOpenNote(opp, noteHint) {
@@ -2576,22 +2577,17 @@ function containsHTMLResponse(text) {
   return /class\s*=\s*["'][^"']*\bresponse-container\b/.test(text);
 }
 
-function sanitizeHTML(html) {
-  return html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object\b[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed\b[^>]*\/?>/gi, '')
-    .replace(/<link\b[^>]*\/?>/gi, '')
-    .replace(/<meta\b[^>]*\/?>/gi, '')
-    .replace(/<img\b[^>]*\/?>/gi, '')
-    .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-    .replace(/<input\b[^>]*\/?>/gi, '')
-    .replace(/[\s/]+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
-    .replace(/javascript\s*:/gi, '');
-}
+// Shared allowlist sanitizer (js/utils/sanitize-html.js) for MODEL-emitted
+// response-container HTML. The regex blacklist it replaces was bypassable:
+// `<div class="…"onclick=…>` has no whitespace before the handler, and an
+// entity-encoded `javascript:` href survived the literal replace. Randy's
+// OWN card templates (MAP/Timeline/doc cards — escaped data, svg icons,
+// retry buttons) don't go through it: their call sites pass
+// { trustedHtml: true } instead, because the strict pass would strip the
+// very svg/button elements those trusted templates rely on.
+const sanitizeHTML = sanitizeHtml;
 
-function renderMessage(role, text) {
+function renderMessage(role, text, { trustedHtml = false } = {}) {
   const chat = document.getElementById('randy-chat');
   if (!chat) return;
 
@@ -2619,6 +2615,10 @@ function renderMessage(role, text) {
   bubble.className = 'randy-bubble';
   if (isUser) {
     bubble.textContent = text;
+  } else if (trustedHtml) {
+    // App-built card templates: every interpolation goes through
+    // escapeMapHtml at the build site, so the markup itself is ours.
+    bubble.innerHTML = text;
   } else if (containsHTMLResponse(text)) {
     bubble.innerHTML = sanitizeHTML(text);
   } else {
@@ -2639,7 +2639,7 @@ function renderMessage(role, text) {
           copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
           copyBtn.classList.remove('randy-copy-btn--copied');
         }, 1500);
-      });
+      }).catch(() => { /* clipboard denied or unfocused — leave the button as-is */ });
     });
     bubble.appendChild(copyBtn);
   }
@@ -2903,7 +2903,7 @@ function selectPreset(promptId) {
     const presetName = promptId
       ? (loadedPresets.find(p => p.prompt_id === promptId)?.label || 'this mode')
       : 'Default';
-    chat.innerHTML = `<div class="randy-welcome"><p>Switched to <strong>${presetName}</strong>. How can I help?</p></div>`;
+    chat.innerHTML = `<div class="randy-welcome"><p>Switched to <strong>${escapeMapHtml(presetName)}</strong>. How can I help?</p></div>`;
   }
 
   renderPresets();

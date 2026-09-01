@@ -13,6 +13,7 @@ import { showToast } from '../components/toast.js';
 import { setTopbarTitle } from '../components/sidebar.js';
 import { statCard } from '../components/card.js';
 import { filterPartners, filterOpportunities } from '../utils/filters.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
 import { ensureHtml, stripHtml } from '../components/quill-editor.js';
 import { loadTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
 import { generateMapPdfFromSelection } from '../utils/map-pdf-from-selection.js';
@@ -1054,7 +1055,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
     });
 
     // Mutable ref so the standardize handler can update the displayed text.
-    const bodyTextEl = el('div', { class: 'transcript-card__text', html: ensureHtml(desc.description_text || '') });
+    const bodyTextEl = el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(desc.description_text || '')) });
     const body = el('div', { class: 'transcript-card__body' }, bodyTextEl);
     body.style.display = 'none';
 
@@ -1177,7 +1178,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
 
                 // Update the DOM in place if the card is still mounted.
                 try {
-                  bodyTextEl.innerHTML = ensureHtml(result.standardizedText);
+                  bodyTextEl.innerHTML = sanitizeHtml(ensureHtml(result.standardizedText));
                   const newCatPill = makeCategoryPill(result.category);
                   categoryPillSlot.replaceChildren();
                   if (newCatPill) categoryPillSlot.appendChild(newCatPill);
@@ -1228,7 +1229,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
                   const plain = stripHtml(desc.description_text || '');
                   previewEl.textContent = plain ? plain.slice(0, 120) + (plain.length > 120 ? '...' : '') : 'Empty';
                 }
-                bodyTextEl.innerHTML = ensureHtml(desc.description_text || '');
+                bodyTextEl.innerHTML = sanitizeHtml(ensureHtml(desc.description_text || ''));
               },
             });
           },

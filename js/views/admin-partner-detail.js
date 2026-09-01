@@ -15,6 +15,7 @@ import { openOppModal } from './admin-opportunities.js';
 import { setTopbar, setTopbarTitle } from '../components/sidebar.js';
 import { showToast } from '../components/toast.js';
 import { filterOpportunities, filterEvents } from '../utils/filters.js';
+import { sanitizeHtml, safeUrl } from '../utils/sanitize-html.js';
 import { stripHtml, ensureHtml, initQuillEditor } from '../components/quill-editor.js';
 import { buildDocumentsPanel, listEntityDocuments } from '../components/documents-panel.js';
 import { fileApiRequest } from '../utils/file-api.js';
@@ -561,7 +562,7 @@ function bioLinkCell(href) {
   if (!s || s === NA) return bioValueCell(NA);
   return el('a', {
     class: 'partner-bio__link',
-    href: s,
+    href: safeUrl(s),
     target: '_blank',
     rel: 'noopener',
     title: s,
@@ -1001,7 +1002,7 @@ function openNextStepNoteModal(transcript) {
     title: `Description Note · ${noteDateLabel(transcript)}`,
     className: 'modal--wide',
     content: el('div', { class: 'partner-next-steps__note-view' },
-      el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
+      el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(transcript.transcript_text || '')) }),
     ),
     footer: [
       el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
@@ -3112,7 +3113,7 @@ function lcBadge(value) {
 
 function lcLink(url, label) {
   if (!url) return el('span', { class: 'partner-contacts__muted' }, '—');
-  return el('a', { class: 'partner-lc__link', href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url);
+  return el('a', { class: 'partner-lc__link', href: safeUrl(url), target: '_blank', rel: 'noopener noreferrer' }, label || url);
 }
 
 function lcKV(label, value) {
@@ -3435,7 +3436,7 @@ function transcriptCard(transcript, partner) {
   });
 
   const body = el('div', { class: 'transcript-card__body' },
-    el('div', { class: 'transcript-card__text', html: ensureHtml(transcript.transcript_text || '') }),
+    el('div', { class: 'transcript-card__text', html: sanitizeHtml(ensureHtml(transcript.transcript_text || '')) }),
     el('div', { class: 'transcript-card__actions' },
       iconButton({
         icon: ICONS.copy,

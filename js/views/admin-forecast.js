@@ -12,6 +12,7 @@
 // the timeline-PDF flow; the source-note link reuses openOppDetailsModal.
 // ============================================================
 
+import { safeUrl } from '../utils/sanitize-html.js';
 import { readSheetAsObjects, appendRow, addDemoRow, isConfigured, invalidateSheetCache } from '../sheets.js';
 import { CONFIG } from '../config.js';
 import { el, mount, $, uuid } from '../utils/dom.js';
@@ -3286,7 +3287,7 @@ function buildBriefSources(sources) {
     const label = String(s.label || s.url || '').trim();
     const url = String(s.url || '').trim();
     if (url) {
-      return el('li', {}, el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url));
+      return el('li', {}, el('a', { href: safeUrl(url), target: '_blank', rel: 'noopener noreferrer' }, label || url));
     }
     return el('li', {}, label);
   });

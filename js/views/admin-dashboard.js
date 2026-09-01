@@ -730,15 +730,18 @@ function initMap(partners) {
       popupAnchor: [0, -46],
     });
 
+    // Popup content is raw HTML to Leaflet — partner fields are sheet data,
+    // so they are escaped like every other render path in this file.
+    const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const marker = L.marker(coords, { icon }).addTo(mapInstance);
     marker.bindPopup(`
       <div class="map-popup">
-        <div class="map-popup__name">${partner.display_name}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Type:</span> ${partner.partner_type || '—'}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Region:</span> ${partner.region || '—'}</div>
-        <div class="map-popup__row"><span class="map-popup__label">HQ:</span> ${partner.hq_location}</div>
-        <div class="map-popup__row"><span class="map-popup__label">Tier:</span> ${partner.tier || '—'}</div>
-        <div class="map-popup__link"><a href="#/admin/partner-detail?id=${partner.partner_id}">View Partner →</a></div>
+        <div class="map-popup__name">${escAttr(partner.display_name)}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Type:</span> ${escAttr(partner.partner_type || '—')}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Region:</span> ${escAttr(partner.region || '—')}</div>
+        <div class="map-popup__row"><span class="map-popup__label">HQ:</span> ${escAttr(partner.hq_location)}</div>
+        <div class="map-popup__row"><span class="map-popup__label">Tier:</span> ${escAttr(partner.tier || '—')}</div>
+        <div class="map-popup__link"><a href="#/admin/partner-detail?id=${encodeURIComponent(partner.partner_id || '')}">View Partner →</a></div>
       </div>
     `, { maxWidth: 250 });
 
