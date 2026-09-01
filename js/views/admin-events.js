@@ -872,7 +872,7 @@ function renderList(events) {
             el('td', { class: numCellClass(oppCount) }, String(oppCount)),
             el('td', { class: numCellClass(revenue) }, formatCurrency(revenue)),
             el('td', { class: 'events-page__td--actions' },
-              el('div', { class: 'events-page__actions' },
+              el('div', { class: 'events-page__row-actions' },
                 iconButton({
                   icon: ICONS.edit,
                   label: 'Edit',

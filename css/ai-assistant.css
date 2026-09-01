@@ -584,7 +584,7 @@
   cursor: pointer;
   transition: background 150ms;
 }
-.action-card__confirm:hover { background: #0f7a3f; }
+.action-card__confirm:hover { background: #0c6634; } /* darker than the #0f7a3f base — was identical */
 .action-card__confirm:disabled { background: #67677A; cursor: default; }
 .action-card__cancel {
   padding: 5px 14px;

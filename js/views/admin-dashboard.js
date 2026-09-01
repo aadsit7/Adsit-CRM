@@ -747,7 +747,7 @@ function initMap(partners) {
 
     const icon = L.divIcon({
       className: 'map-marker',
-      html: `<div class="map-marker__pin" style="background:${color}">
+      html: `<div class="map-marker__pin" style="background:${color}; --pin-color:${color}">
         <span>${(partner.display_name || '?').slice(0, 2).toUpperCase()}</span>
       </div>`,
       iconSize: [36, 44],

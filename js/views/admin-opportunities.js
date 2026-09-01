@@ -1159,7 +1159,7 @@ function buildDetailsDescriptionsSection(descriptions, options = {}) {
         const standardizeIdleHtml = `${sparkleSvg}<span class="standardize-btn__label">Standardize</span>`;
         const standardizeRunningHtml = '<span class="standardize-btn__label">Standardizing…</span>';
         const standardizeBtn = el('button', {
-          class: 'btn btn--xs btn--secondary standardize-btn',
+          class: 'btn btn--sm btn--secondary standardize-btn',
           type: 'button',
           disabled: !realId || isJobRunning,
           title: !realId

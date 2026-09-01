@@ -52,6 +52,8 @@
   --color-surface: #FFFFFF;
   --color-surface-hover: #FAFAFE;     /* Row tint */
   --color-surface-tint: #F6F8FF;      /* Quote background */
+  --color-surface-muted: #F0F0F6;     /* Muted panel fill (was only a var() fallback) */
+  --color-white: #FFFFFF;             /* Fixed white (was only a var() fallback) */
   --color-sidebar-bg: #FFFFFF;
   --color-sidebar-hover: #F0F0F6;
   --color-sidebar-active: #E6E6F7;
