@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { __dashboardInternals } = await import('../js/views/admin-dashboard.js');
-const { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT } = __dashboardInternals;
+const { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS } = __dashboardInternals;
 
 const note = (partner_id, conversation_date, transcript_text, created_at = '2026-01-01T00:00:00Z', extra = {}) => ({
   transcript_id: `trn_${partner_id}_${conversation_date}_${created_at}`,
@@ -20,6 +20,10 @@ const note = (partner_id, conversation_date, transcript_text, created_at = '2026
 
 test('the limit is three notes per card', () => {
   assert.equal(RECENT_NOTES_LIMIT, 3);
+});
+
+test('the Upcoming Joint Events timeline looks 90 days ahead', () => {
+  assert.equal(UPCOMING_WINDOW_DAYS, 90);
 });
 
 test('only this partner\'s notes, newest conversation first, capped at the limit', () => {

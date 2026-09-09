@@ -36,6 +36,9 @@ let refreshGeneration = 0;
 // How many description notes each Partner Activity card shows.
 const RECENT_NOTES_LIMIT = 3;
 
+// How far ahead the Upcoming Joint Events timeline looks.
+const UPCOMING_WINDOW_DAYS = 90;
+
 // ============================================
 // Partner Type Filter — localStorage helpers
 // ============================================
@@ -529,7 +532,7 @@ function buildNoteChip(note, partner) {
 }
 
 // Exposed for unit tests (same hook pattern as __partnerViewInternals).
-export const __dashboardInternals = { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT };
+export const __dashboardInternals = { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS };
 
 // ============================================
 // Activity Hub View
@@ -664,13 +667,13 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
   // counted it), and the month badge below showed "Sep" for an Oct 1 event.
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const sixtyDaysOut = new Date(todayStart);
-  sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
+  const windowEnd = new Date(todayStart);
+  windowEnd.setDate(windowEnd.getDate() + UPCOMING_WINDOW_DAYS);
 
   const timelineEvents = upcomingEvents
     .filter(evt => {
       const d = parseDate(evt.event_date);
-      return d && d >= todayStart && d <= sixtyDaysOut;
+      return d && d >= todayStart && d <= windowEnd;
     })
     .sort((a, b) => (parseDate(a.event_date) || 0) - (parseDate(b.event_date) || 0));
 
@@ -679,8 +682,8 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
       el('h3', { class: 'section-header__title' }, 'Upcoming Joint Events'),
       el('p', { class: 'section-header__subtitle' },
         timelineEvents.length === 0
-          ? 'Next 60 days'
-          : `${timelineEvents.length} event${timelineEvents.length === 1 ? '' : 's'} in the next 60 days`
+          ? `Next ${UPCOMING_WINDOW_DAYS} days`
+          : `${timelineEvents.length} event${timelineEvents.length === 1 ? '' : 's'} in the next ${UPCOMING_WINDOW_DAYS} days`
       )
     )
   );
@@ -726,7 +729,7 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
     ? el('div', { class: 'timeline-list' }, ...timelineCards)
     : el('div', { class: 'empty-state' },
         el('div', { class: 'empty-state__title' }, 'No upcoming events'),
-        el('div', { class: 'empty-state__description' }, 'Events in the next 60 days will appear here.')
+        el('div', { class: 'empty-state__description' }, `Events in the next ${UPCOMING_WINDOW_DAYS} days will appear here.`)
       );
 
   return el('div', { class: 'dashboard-page__events-panel' }, timelineTitle, body);

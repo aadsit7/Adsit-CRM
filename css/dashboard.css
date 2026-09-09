@@ -800,9 +800,9 @@
 
 .dashboard-page__bar-row {
   display: grid;
-  grid-template-columns: 200px 1fr auto;
+  grid-template-columns: minmax(96px, 150px) 1fr auto;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   padding: 4px 6px;
   border-radius: 0;
   transition: background var(--transition-fast);
@@ -874,7 +874,9 @@
    ----------------------------------------------- */
 .dashboard-page__split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* 5/7: the chart column reads fine narrower, and the hub is the page's
+     working surface — it gets the extra room. */
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   align-items: stretch;
   gap: 20px;
 }
@@ -1000,7 +1002,7 @@
 /* Cards inside the half-width panel: one column on a laptop, two on a wide
    monitor — the 320px minimum used full-width was tuned for three across. */
 .dashboard-page__hub .activity-grid {
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
 
 /* Partners tab inside the panel: the donut sits above a grid of type cards
@@ -1166,56 +1168,116 @@
 .dashboard-page__quickform-host .qf-panel--embedded {
   width: 100% !important;
   height: auto !important;
-  min-height: 320px;
+  min-height: 0;
   border: 1px solid #DDDDEE !important;
   border-radius: 0 !important;
+}
+
+/* Header bar and type tabs at page width: the tabs sit left as a compact
+   strip instead of stretching to a third of the page each. */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-header {
+  height: 44px;
+  padding: 0 20px;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-type-selector {
+  justify-content: flex-start;
+  padding: 0 12px;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-type-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 22px;
+  font-size: 13px;
 }
 
 .dashboard-page__quickform-host .qf-panel--embedded .qf-body {
   flex: 0 0 auto;
   overflow: visible;
-  padding: 20px 24px 16px;
+  padding: 22px 24px 20px;
   gap: 12px;
 }
 
-/* A 340px-wide floating form stretched across the page would put 1100px
-   inputs in front of the user. Keep each block at a readable measure and
-   centre it; the compose flows (partner note / opportunity description)
-   get a wider two-column measure so the editor has room to write in. */
-.dashboard-page__quickform-host .qf-panel--embedded .qf-body > * {
+/* The "New …?" toggle keeps its label and switch together rather than
+   pinning them to opposite ends of a wide bar. */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-mode-toggle {
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 8px 12px;
+}
+
+/* ── New-record forms (opportunity / partner / event) ──
+   A 340px-wide floating form stretched across the page would put 1100px
+   inputs in front of the user. Each block sits at a readable measure,
+   centred in the band. */
+.dashboard-page__quickform-host .qf-panel--embedded:not(.qf-panel--compose) .qf-body > * {
   width: 100%;
-  max-width: 720px;
+  max-width: 680px;
   margin-left: auto;
   margin-right: auto;
 }
 
-.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-body > * {
-  max-width: 1040px;
-}
-
-/* Compose: pickers on the left, note editor filling the right. The phone
-   summary line stays hidden (it is display:none above 768px already). */
-.dashboard-page__quickform-host .qf-panel--embedded .qf-compose {
+/* ── Compose forms (partner note / opportunity description) ──
+   A two-column workspace: the left rail holds the mode toggle and the
+   record pickers, the right side is the editor, filling the rest of the
+   band. .qf-mode-body and .qf-compose are structural wrappers the narrow
+   layout needs; here they dissolve (display: contents) so the toggle,
+   picker and editor place directly on the body grid. */
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-body {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 10px 28px;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: 12px 0;
   align-items: start;
 }
 
-.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-picker {
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-mode-body,
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose {
+  display: contents;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-mode-toggle {
   grid-column: 1;
   grid-row: 1;
 }
 
-.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor {
-  grid-column: 2;
-  grid-row: 1;
-  min-width: 0;
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-picker {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor .ql-editor {
-  min-height: 240px;
-  max-height: 60vh;
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-editor {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  /* start, not stretch: stretched to the rail's height, the field's flex
+     column shrank the editor wrapper and Quill's writing surface spilled
+     out of it with no bottom edge. The editor sizes itself instead. */
+  align-self: start;
+  margin-left: 32px;
+  padding-left: 32px;
+  border-left: 1px solid #F0F0F6;
+}
+
+/* The editor reads as one bounded control — toolbar and writing surface in
+   a single input-style box — rather than an open void beside the rail.
+   quick-form.css already rounds the toolbar's top and the container's
+   bottom corners to match. No overflow clipping: the toolbar's header
+   dropdown must be free to open past the box. */
+.dashboard-page__quickform-host .qf-panel--embedded .quill-editor-wrapper {
+  flex: none;
+  border: 1.5px solid #DDDDEE;
+  border-radius: 6px;
+  background: #FFFFFF;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-editor .ql-editor {
+  min-height: 260px;
+  max-height: 55vh;
 }
 
 /* Footer: the single submit button no longer spans the whole band. */
@@ -1247,13 +1309,20 @@
     overflow: visible;
     padding: 14px;
   }
-  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose {
+  .dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-body {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
   }
-  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose-picker,
-  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor {
+  .dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-mode-toggle,
+  .dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-picker,
+  .dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-editor {
     grid-column: 1;
     grid-row: auto;
+  }
+  .dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-compose-editor {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
   }
 }
 
