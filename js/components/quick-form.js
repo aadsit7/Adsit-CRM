@@ -64,6 +64,12 @@ function isComposeMode() {
 
 // ── Public API ────────────────────────────────────────────────────
 
+// Fired on document after a successful submit, once the form has been reset
+// (embedded) or dismissed (floating). detail: { type, isNew }. The dashboard
+// listens so a note, deal, partner or event saved here shows up in its cards
+// without a manual reload.
+export const QUICK_FORM_SAVED_EVENT = 'quickform:saved';
+
 export function initQuickForm() {
   if (panelEl) return;
   backdropEl = document.createElement('div');
@@ -980,6 +986,10 @@ async function handleSubmit() {
         await submitEvent(data);
         break;
     }
+    const savedDetail = {
+      type: activeType,
+      isNew: activeType === 'event' ? true : !!modeIsNew[activeType],
+    };
     if (isEmbedded) {
       // hidePanel() is a deliberate no-op while embedded on the Randy page,
       // which used to leave the submitted values (Quill text included) live
@@ -988,6 +998,13 @@ async function handleSubmit() {
       renderTypeForm(activeType);
     } else {
       hidePanel();
+    }
+    // The row is written and the form is already reset, so a listener that
+    // throws must not surface as "Failed to save".
+    try {
+      document.dispatchEvent(new CustomEvent(QUICK_FORM_SAVED_EVENT, { detail: savedDetail }));
+    } catch (listenerErr) {
+      console.warn('quickform:saved listener failed:', listenerErr);
     }
   } catch (err) {
     showToast(err.message || 'Failed to save. Please try again.', 'error');

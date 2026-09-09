@@ -12,12 +12,29 @@ import { formatDate, parseDate } from '../utils/date.js';
 import { openEventModal } from './admin-events.js';
 import { filterPartners, filterOpportunities, filterEvents } from '../utils/filters.js';
 import { loadTypeFilter, saveTypeFilter, computeTypeData, buildTypeFilterBar, applyTypeFilter } from '../components/type-filter.js';
-import { mountQuickFormInline, unmountQuickFormInline } from '../components/quick-form.js';
+import { mountQuickFormInline, unmountQuickFormInline, QUICK_FORM_SAVED_EVENT } from '../components/quick-form.js';
+import { openModal, closeModal } from '../components/modal.js';
+import { sanitizeHtml } from '../utils/sanitize-html.js';
+import { ensureHtml, stripHtml } from '../components/quill-editor.js';
 
 export const title = 'Admin Dashboard';
 
 let mapInstance = null;
 let mapMarkers = [];
+
+// Activity Hub / Partners tab. Module-level so an in-place repaint (type
+// filter click, a Quick Add save) keeps the tab the user was on; reset in
+// cleanup() so a fresh visit always opens on Activity Hub.
+let activeTabState = 'activity';
+
+// Quick Add lives at the bottom of this page. When it writes a row, the
+// dashboard re-reads the sheets and repaints in place so the new note, deal,
+// partner or event appears in the cards above without a manual reload.
+let quickAddSavedHandler = null;
+let refreshGeneration = 0;
+
+// How many description notes each Partner Activity card shows.
+const RECENT_NOTES_LIMIT = 3;
 
 // ============================================
 // Partner Type Filter — localStorage helpers
@@ -126,17 +143,25 @@ function buildDashboardStatCell(label, value, onClick) {
   );
 }
 
+async function loadDashboardData() {
+  const [partners, opportunities, events, transcripts] = await Promise.all([
+    readSheetAsObjects(CONFIG.SHEET_PARTNERS),
+    readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
+    readSheetAsObjects(CONFIG.SHEET_EVENTS),
+    // Description notes are optional — a workbook without the Transcripts
+    // sheet still gets its dashboard, just without the notes rows.
+    readSheetAsObjects(CONFIG.SHEET_TRANSCRIPTS).catch(() => []),
+  ]);
+  return { partners, opportunities, events, transcripts };
+}
+
 export async function render(container) {
   setTopbarTitle('Dashboard');
   mount(container, el('div', { class: 'loading-overlay' }, el('div', { class: 'spinner' })));
 
   try {
-    const [partners, opportunities, events] = await Promise.all([
-      readSheetAsObjects(CONFIG.SHEET_PARTNERS),
-      readSheetAsObjects(CONFIG.SHEET_OPPORTUNITIES),
-      readSheetAsObjects(CONFIG.SHEET_EVENTS),
-    ]);
-    renderDashboard(container, partners, opportunities, events);
+    const data = await loadDashboardData();
+    renderDashboard(container, data);
   } catch (err) {
     mount(container, el('div', { class: 'empty-state' },
       el('div', { class: 'empty-state__title' }, 'Error loading data'),
@@ -145,7 +170,36 @@ export async function render(container) {
   }
 }
 
-function renderDashboard(container, partners, opportunities, events) {
+// In-place repaint after a Quick Add save: no spinner, and the result is
+// dropped if the user has left the route or a newer refresh has started.
+async function refreshDashboard(container) {
+  const generation = ++refreshGeneration;
+  try {
+    const data = await loadDashboardData();
+    if (generation !== refreshGeneration) return;
+    if (getCurrentPath() !== '/admin/dashboard' || !container.isConnected) return;
+    renderDashboard(container, data);
+  } catch (err) {
+    // The row was saved (Quick Add already toasted); the cards just stay as
+    // they were until the next visit.
+    console.warn('Dashboard refresh after Quick Add save failed:', err);
+  }
+}
+
+function bindQuickAddRefresh(container) {
+  unbindQuickAddRefresh();
+  quickAddSavedHandler = () => { refreshDashboard(container); };
+  document.addEventListener(QUICK_FORM_SAVED_EVENT, quickAddSavedHandler);
+}
+
+function unbindQuickAddRefresh() {
+  if (!quickAddSavedHandler) return;
+  document.removeEventListener(QUICK_FORM_SAVED_EVENT, quickAddSavedHandler);
+  quickAddSavedHandler = null;
+}
+
+function renderDashboard(container, data) {
+  const { partners, opportunities, events, transcripts } = data;
   // An in-place re-render (type-filter click) replaces the DOM holding the
   // Leaflet map, but the module-level mapInstance survived — the next Map
   // View click then called invalidateSize() on a map bound to the detached
@@ -203,6 +257,7 @@ function renderDashboard(container, partners, opportunities, events) {
       stats: { totalDeals: total, totalValue: pipelineVal, wonValue: wonVal },
       events: partnerEvents,
       upcomingEvents: upcomingPartnerEvents,
+      notes: pickRecentNotes(transcripts, partner.partner_id, RECENT_NOTES_LIMIT),
     };
   }).sort((a, b) => b.stats.totalValue - a.stats.totalValue);
 
@@ -213,15 +268,15 @@ function renderDashboard(container, partners, opportunities, events) {
   // --- Type filter button bar (shared module) ---
   const typeFilterBar = buildTypeFilterBar({
     allUniqueTypes, allTypeData, allTotalPipeline, validSelected,
-    onChanged: () => renderDashboard(container, partners, opportunities, events),
+    onChanged: () => renderDashboard(container, data),
   });
 
-  // Tab state
-  let activeTab = 'activity';
+  // Tab state — persisted across in-place repaints (see activeTabState).
+  let activeTab = activeTabState;
 
-  // Tab buttons
+  // Tab buttons (switchTab below sets the active class once mounted)
   const activityTabBtn = el('button', {
-    class: 'btn btn--primary btn--sm',
+    class: 'btn btn--secondary btn--sm',
     onClick: () => switchTab('activity'),
   }, 'Activity Hub');
 
@@ -230,12 +285,16 @@ function renderDashboard(container, partners, opportunities, events) {
     onClick: () => switchTab('partners'),
   }, 'Partners');
 
-  // Tab containers
+  // Tab containers, inside the hub's own scroll body (the hub is a bounded
+  // panel beside the chart so the Quick Add form below stays within reach
+  // no matter how many partners are active).
   const activityView = el('div', { id: 'dashboard-activity-view' });
   const partnersView = el('div', { id: 'dashboard-partners-view', style: { display: 'none' } });
+  const hubBody = el('div', { class: 'dashboard-page__hub-body' }, activityView, partnersView);
 
   function switchTab(tab) {
     activeTab = tab;
+    activeTabState = tab;
     activityTabBtn.className = tab === 'activity' ? 'btn btn--primary btn--sm' : 'btn btn--secondary btn--sm';
     partnersTabBtn.className = tab === 'partners' ? 'btn btn--primary btn--sm' : 'btn btn--secondary btn--sm';
     activityView.style.display = tab === 'activity' ? '' : 'none';
@@ -246,9 +305,9 @@ function renderDashboard(container, partners, opportunities, events) {
     }
   }
 
-  // Build activity view content (partner activity cards). The Upcoming
-  // Joint Events timeline now lives in the top split's left column, so it
-  // is no longer rendered inside the Activity Hub tab.
+  // Build activity view content (partner activity cards with their joint
+  // events and latest description notes). The Upcoming Joint Events
+  // timeline lives in the top split's left column, not in this tab.
   buildActivityView(activityView, partnerStats, container);
 
   // Interactive stat card handlers
@@ -273,8 +332,21 @@ function renderDashboard(container, partners, opportunities, events) {
     }
   }
 
-  // Partner bar click handler — filters Activity Hub to that partner
+  // Partner bar click handler — filters Activity Hub to that partner. The
+  // hub header names the active filter and offers a way back, so a list
+  // narrowed by a chart click never reads as "partners went missing".
   let activeBarPartner = null;
+  const hubFilterName = el('span', { class: 'dashboard-page__hub-filter__name' });
+  const hubFilter = el('div', { class: 'dashboard-page__hub-filter', hidden: true },
+    el('span', { class: 'dashboard-page__hub-filter__label' }, 'Showing'),
+    hubFilterName,
+    el('button', {
+      type: 'button',
+      class: 'dashboard-page__hub-filter__clear',
+      onClick: () => { if (activeBarPartner) onBarClick(activeBarPartner); },
+    }, 'Show all'),
+  );
+
   function onBarClick(partnerName) {
     if (activeBarPartner === partnerName) { activeBarPartner = null; } else { activeBarPartner = partnerName; }
     document.querySelectorAll('.dashboard-page__bar-row--clickable').forEach(row => {
@@ -290,6 +362,9 @@ function renderDashboard(container, partners, opportunities, events) {
         card.style.display = 'none';
       }
     });
+    hubFilterName.textContent = activeBarPartner || '';
+    hubFilter.hidden = !activeBarPartner;
+    hubBody.scrollTop = 0;
   }
 
   // Topbar header: eyebrow title + meta + type-filter chips
@@ -301,16 +376,26 @@ function renderDashboard(container, partners, opportunities, events) {
     chips: typeFilterBar,
   });
 
-  // Right half of the split: host the singleton Quick Add form inline
-  // (moved here from the dedicated Randy page). Mounted after the content
-  // is in the DOM, below.
+  // Bottom band: host for the singleton Quick Add form (the same panel the
+  // floating Randy "Add" button uses). Mounted after the content is in the
+  // DOM, below.
   const quickFormHost = el('div', { class: 'dashboard-page__quickform-host' });
+
+  // Right half of the split: the Activity Hub / Partners panel. Tabs sit in
+  // a fixed header; the views scroll inside the panel body.
+  const hub = el('section', { class: 'dashboard-page__hub', 'aria-label': 'Activity Hub' },
+    el('div', { class: 'dashboard-page__hub-header' },
+      el('div', { class: 'view-toggle dashboard-page__hub-tabs' }, activityTabBtn, partnersTabBtn),
+      hubFilter,
+    ),
+    hubBody,
+  );
 
   const content = el('div', { class: 'dashboard-page' },
     // Top zone: full-width KPI strip, then a 50/50 split. The left column
     // stacks the flat Opportunity Source chart above the Upcoming Joint
-    // Events timeline, so it fills the height evenly beside the taller
-    // Quick Add form on the right.
+    // Events timeline; the right column is the Activity Hub panel, capped
+    // to the viewport so Quick Add below is always one scroll away.
     el('div', { class: 'dashboard-page__top' },
       el('div', { class: 'dashboard-page__stat-strip stagger' },
         buildDashboardStatCell('Total Partners', tfPartners.length, () => toggleStat('partners')),
@@ -323,23 +408,128 @@ function renderDashboard(container, partners, opportunities, events) {
           buildPartnerSourceChart(tfOpps, tfPartners, onBarClick),
           buildUpcomingEventsPanel(tfUpcoming, partnerStats, container),
         ),
-        quickFormHost,
+        hub,
       ),
     ),
 
-    // Tabs + views (full width below)
-    el('div', { class: 'view-toggle' }, activityTabBtn, partnersTabBtn),
-    activityView,
-    partnersView,
+    // Quick Add — full width at the bottom of the page.
+    el('section', { class: 'dashboard-page__quickadd', 'aria-label': 'Quick Add' }, quickFormHost),
   );
 
   mount(container, content);
 
-  // Embed the shared Quick Add form into the right half of the split. It's
-  // the same singleton the floating Randy "Add" button uses; cleanup()
-  // returns it to the body so that toggle keeps working elsewhere.
+  // Apply the (possibly persisted) tab now that the views are in the DOM.
+  switchTab(activeTab);
+
+  // Embed the shared Quick Add form into the bottom band. cleanup() returns
+  // it to the body so the floating Randy "Add" toggle keeps working on
+  // other pages.
   mountQuickFormInline(quickFormHost);
+  bindQuickAddRefresh(container);
 }
+
+// ============================================
+// Description notes (Transcripts rows) shown on the activity cards
+// ============================================
+
+function noteTime(note) {
+  // Same ordering key the partner page's Descriptions section sorts by, so
+  // "the last three" here are the top three there.
+  const t = new Date(note.conversation_date || note.created_at || '').getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function noteCreatedTime(note) {
+  const t = new Date(note.created_at || '').getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * The newest `limit` non-empty description notes for one partner, newest
+ * first. Ties on conversation date fall back to created_at so two notes
+ * logged the same day keep the order they were written in.
+ */
+function pickRecentNotes(transcripts, partnerId, limit = RECENT_NOTES_LIMIT) {
+  const pid = String(partnerId || '').trim();
+  if (!pid || !Array.isArray(transcripts)) return [];
+  return transcripts
+    .filter(t => t && String(t.partner_id || '').trim() === pid)
+    .filter(t => stripHtml(t.transcript_text || '').trim() !== '')
+    .sort((a, b) => (noteTime(b) - noteTime(a)) || (noteCreatedTime(b) - noteCreatedTime(a)))
+    .slice(0, limit);
+}
+
+/** One-line plain-text preview of a note's rich text. */
+function notePreview(note, maxChars = 140) {
+  const text = stripHtml(note.transcript_text || '').replace(/\s+/g, ' ').trim();
+  return text.length > maxChars ? text.slice(0, maxChars - 1).trimEnd() + '\u2026' : text;
+}
+
+function noteDateLabel(note) {
+  const conv = formatDate(note.conversation_date);
+  return conv !== '\u2014' ? conv : formatDate(note.created_at);
+}
+
+function partnerInitials(partner) {
+  return (partner.display_name || '')
+    .split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase() || '?';
+}
+
+// Read-only viewer for a note chip: the full rich text, who it belongs to,
+// and a jump to the partner page where it can be edited.
+function openNoteModal(note, partner) {
+  const tc = tierSlug(partner.tier);
+  const dateLabel = noteDateLabel(note);
+  openModal({
+    title: `Description Note \u00B7 ${dateLabel}`,
+    className: 'modal--wide dashboard-note-modal',
+    content: el('div', { class: 'dashboard-note-view' },
+      el('div', { class: 'dashboard-note-view__meta' },
+        el('div', { class: `partner-avatar partner-avatar--${tc} partner-avatar--sm` }, partnerInitials(partner)),
+        el('div', { class: 'dashboard-note-view__who' },
+          el('div', { class: 'dashboard-note-view__partner' }, partner.display_name),
+          el('div', { class: 'dashboard-note-view__date' }, `Logged ${dateLabel}`),
+        ),
+      ),
+      el('div', {
+        class: 'transcript-card__text dashboard-note-view__text',
+        html: sanitizeHtml(ensureHtml(note.transcript_text || '')),
+      }),
+    ),
+    footer: [
+      el('button', { class: 'btn btn--secondary', onClick: closeModal }, 'Close'),
+      el('button', {
+        class: 'btn btn--primary',
+        onClick: () => {
+          closeModal();
+          navigate(`/admin/partner-detail?id=${partner.partner_id}`);
+        },
+      }, 'Open Partner'),
+    ],
+  });
+}
+
+const NOTE_CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
+
+function buildNoteChip(note, partner) {
+  const dateLabel = noteDateLabel(note);
+  return el('button', {
+    type: 'button',
+    class: 'activity-card__note',
+    title: `Open the description note of ${dateLabel}`,
+    onClick: (e) => {
+      e.stopPropagation();
+      openNoteModal(note, partner);
+    },
+  },
+    el('span', { class: 'activity-card__note-date' }, dateLabel),
+    el('span', { class: 'activity-card__note-text' }, notePreview(note)),
+    el('span', { class: 'activity-card__note-arrow', html: NOTE_CHEVRON_SVG }),
+  );
+}
+
+// Exposed for unit tests (same hook pattern as __partnerViewInternals).
+export const __dashboardInternals = { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT };
 
 // ============================================
 // Activity Hub View
@@ -359,10 +549,9 @@ function buildActivityView(container, partnerStats, viewContainer) {
   );
 
   const partnerCards = activePartners
-    .map(({ partner, stats, upcomingEvents: partnerUpcoming }) => {
+    .map(({ partner, stats, upcomingEvents: partnerUpcoming, notes = [] }) => {
       const tc = tierSlug(partner.tier);
-      const initials = (partner.display_name || '')
-        .split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase() || '?';
+      const initials = partnerInitials(partner);
 
       const eventChips = partnerUpcoming.slice(0, 3).map(evt =>
         el('div', {
@@ -434,6 +623,16 @@ function buildActivityView(container, partnerStats, viewContainer) {
           ? el('div', { class: 'activity-card__events' },
               el('div', { class: 'activity-card__events-title' }, 'Joint Events'),
               ...eventChips
+            )
+          : null,
+        // Latest description notes, each opening a read-only viewer. Sits
+        // beneath Joint Events (or where Joint Events would be).
+        notes.length > 0
+          ? el('div', { class: 'activity-card__notes' },
+              el('div', { class: 'activity-card__notes-title' },
+                notes.length === 1 ? 'Latest Description Note' : 'Latest Description Notes'
+              ),
+              ...notes.map(note => buildNoteChip(note, partner)),
             )
           : null
       );
@@ -811,6 +1010,9 @@ export function cleanup() {
   // Return the shared Quick Add form to the body so the floating Randy
   // "Add" button toggle keeps working on other pages.
   unmountQuickFormInline();
+  unbindQuickAddRefresh();
+  refreshGeneration++; // drop any in-flight refresh
+  activeTabState = 'activity';
   if (mapInstance) {
     mapInstance.remove();
     mapInstance = null;

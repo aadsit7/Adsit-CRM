@@ -870,52 +870,414 @@
 /* -----------------------------------------------
    Top split — left column (Opportunity Source chart
    stacked above the Upcoming Joint Events timeline)
-   beside the embedded Quick Add form (right half)
+   beside the Activity Hub / Partners panel (right half)
    ----------------------------------------------- */
 .dashboard-page__split {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
   gap: 20px;
 }
 
 .dashboard-page__split > .dashboard-page__split-left {
-  flex: 1 1 50%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.dashboard-page__quickform-host {
-  flex: 1 1 50%;
+/* -----------------------------------------------
+   Activity Hub panel — flat white card matching the
+   Opportunity Source chart. The tab strip is pinned at
+   the top; the views scroll inside the body so the
+   panel never grows past the viewport (and the Quick
+   Add form beneath stays one scroll away).
+   ----------------------------------------------- */
+.dashboard-page__hub {
   min-width: 0;
   display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
+  border: 1px solid #DDDDEE;
+  border-radius: 0;
+  box-shadow: none;
+  /* Same height budget the Quick Add form used in this slot, so the split
+     still fills evenly beside the chart + timeline column. */
+  max-height: clamp(520px, calc(100vh - 220px), 860px);
+}
+
+.dashboard-page__hub-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 18px 0;
+  background: #FAFAFE;
+  border-bottom: 1px solid #DDDDEE;
+}
+
+/* The tab strip keeps its underline treatment but drops the margins and
+   rule it carries elsewhere — the header supplies both. Same specificity
+   as the base .view-toggle:not(.type-filter-bar) rule above, so this wins
+   here by source order and mobile.css's segmented control wins on phones. */
+.dashboard-page__hub-header .view-toggle {
+  margin: 0;
+  border-bottom: 0;
+  flex-wrap: nowrap;
+}
+
+/* Chart-click filter status: "Showing <partner> · Show all" */
+.dashboard-page__hub-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #4A4A5A;
+}
+
+.dashboard-page__hub-filter[hidden] {
+  display: none;
+}
+
+.dashboard-page__hub-filter__label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #67677A;
+}
+
+.dashboard-page__hub-filter__name {
+  font-weight: 700;
+  color: #1A1A2E;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.dashboard-page__hub-filter__clear {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0000CC;
+  background: #FFFFFF;
+  border: 1px solid #DDDDEE;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dashboard-page__hub-filter__clear:hover {
+  background: #F6F8FF;
+  border-color: #0000CC;
+}
+
+.dashboard-page__hub-filter__clear:focus-visible {
+  outline: 2px solid #0000CC;
+  outline-offset: 1px;
+}
+
+.dashboard-page__hub-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  scrollbar-width: thin;
+  scrollbar-color: #DDDDEE transparent;
+}
+
+.dashboard-page__hub-body::-webkit-scrollbar { width: 6px; }
+.dashboard-page__hub-body::-webkit-scrollbar-track { background: transparent; }
+.dashboard-page__hub-body::-webkit-scrollbar-thumb { background: #DDDDEE; border-radius: 4px; }
+
+/* Cards inside the half-width panel: one column on a laptop, two on a wide
+   monitor — the 320px minimum used full-width was tuned for three across. */
+.dashboard-page__hub .activity-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* Partners tab inside the panel: the donut sits above a grid of type cards
+   instead of beside a column of them squeezed into the leftover width. The
+   thumbnail grid below is already auto-fill. */
+.dashboard-page__hub .type-distribution {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+}
+
+.dashboard-page__hub .type-donut {
+  margin: 0 auto;
+}
+
+.dashboard-page__hub .type-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.dashboard-page__hub .type-card {
+  min-width: 0;
+}
+
+/* -----------------------------------------------
+   Partner Activity cards — latest description notes
+   (beneath Joint Events, each opening a read-only viewer)
+   ----------------------------------------------- */
+.activity-card__notes {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-card__events + .activity-card__notes {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #E4E4F0;
+}
+
+.activity-card__notes-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.activity-card__note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.activity-card__note:hover {
+  background: var(--color-bg);
+}
+
+.activity-card__note:focus-visible {
+  outline: 2px solid #0000CC;
+  outline-offset: 1px;
+}
+
+.activity-card__note-date {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #0000CC;
+  background: #F0F0FF;
+  border: 1px solid #DDDDEE;
+  padding: 2px 7px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-card__note-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-card__note-arrow {
+  display: inline-flex;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.activity-card__note:hover .activity-card__note-arrow {
+  color: #0000CC;
+  transform: translateX(2px);
+}
+
+/* Note viewer modal */
+.dashboard-note-view__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #F0F0F6;
+}
+
+.dashboard-note-view__who {
+  min-width: 0;
+}
+
+.dashboard-note-view__partner {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1A1A2E;
+  letter-spacing: -0.005em;
+}
+
+.dashboard-note-view__date {
+  font-size: 12px;
+  color: #4A4A5A;
+  margin-top: 1px;
+}
+
+/* The shared rich-text rules cap at 300px for the collapsible cards; a
+   dialog can afford most of the viewport. */
+.dashboard-note-view .dashboard-note-view__text {
+  max-height: 60vh;
+}
+
+/* -----------------------------------------------
+   Quick Add — full-width band at the bottom of the page
+   ----------------------------------------------- */
+.dashboard-page__quickadd {
+  margin-top: 24px;
+}
+
+.dashboard-page__quickform-host {
+  display: flex;
+  width: 100%;
+  min-width: 0;
 }
 
 /* The embedded Quick Add form (quick-form.css .qf-panel--embedded) is
-   borderless and 100%-tall by default for the Randy page. On the dashboard
-   it needs a definite height so its flex body can scroll, plus a flat border
-   to match the Opportunity Source card. This selector's higher specificity
-   and later load order beat the quick-form.css !important rules. */
+   borderless and 100%-tall by default. At the bottom of the page it is
+   content-sized — no inner scroller at the end of the page — and wears the
+   same flat border as the cards above. Higher specificity and later load
+   order beat the quick-form.css !important rules. */
 .dashboard-page__quickform-host .qf-panel--embedded {
   width: 100% !important;
-  height: clamp(460px, calc(100vh - 240px), 760px) !important;
+  height: auto !important;
+  min-height: 320px;
   border: 1px solid #DDDDEE !important;
   border-radius: 0 !important;
 }
 
-/* Stack the split (left column above form) once the columns get too narrow. */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-body {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding: 20px 24px 16px;
+  gap: 12px;
+}
+
+/* A 340px-wide floating form stretched across the page would put 1100px
+   inputs in front of the user. Keep each block at a readable measure and
+   centre it; the compose flows (partner note / opportunity description)
+   get a wider two-column measure so the editor has room to write in. */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-body > * {
+  width: 100%;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded.qf-panel--compose .qf-body > * {
+  max-width: 1040px;
+}
+
+/* Compose: pickers on the left, note editor filling the right. The phone
+   summary line stays hidden (it is display:none above 768px already). */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-compose {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 10px 28px;
+  align-items: start;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-picker {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor .ql-editor {
+  min-height: 240px;
+  max-height: 60vh;
+}
+
+/* Footer: the single submit button no longer spans the whole band. */
+.dashboard-page__quickform-host .qf-panel--embedded .qf-footer {
+  justify-content: flex-end;
+  padding: 12px 24px;
+}
+
+.dashboard-page__quickform-host .qf-panel--embedded .qf-footer .qf-btn--primary {
+  flex: 0 0 auto;
+  min-width: 200px;
+}
+
+/* Stack the split (chart column above the hub) once the columns get too
+   narrow. The hub stops being a nested scroller here — on a tablet or phone
+   the page itself scrolls and the Quick Add band follows the hub. */
 @media (max-width: 900px) {
   .dashboard-page__split {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
   }
-  .dashboard-page__split > .dashboard-page__split-left,
-  .dashboard-page__quickform-host {
-    flex: 1 1 auto;
-    width: 100%;
+  .dashboard-page__hub {
+    max-height: none;
   }
-  .dashboard-page__quickform-host .qf-panel--embedded {
-    height: clamp(440px, calc(100vh - 180px), 680px) !important;
+  .dashboard-page__hub-header {
+    flex-wrap: wrap;
+    padding: 2px 14px 0;
+  }
+  .dashboard-page__hub-body {
+    overflow: visible;
+    padding: 14px;
+  }
+  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose-picker,
+  .dashboard-page__quickform-host .qf-panel--embedded .qf-compose-editor {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+/* Phones: the header holds the segmented control (mobile.css) — give it
+   room, and drop the panel chrome so the hub reads as part of the page. */
+@media (max-width: 768px) {
+  .dashboard-page__hub {
+    border: 0;
+    background: transparent;
+  }
+  .dashboard-page__hub-header {
+    display: block;
+    padding: 0;
+    background: transparent;
+    border-bottom: 0;
+  }
+  .dashboard-page__hub-filter {
+    margin-bottom: 12px;
+  }
+  .dashboard-page__hub-body {
+    padding: 0;
+  }
+  .dashboard-page__quickadd {
+    margin-top: 20px;
   }
 }
 
