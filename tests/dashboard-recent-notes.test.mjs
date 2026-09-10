@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { __dashboardInternals } = await import('../js/views/admin-dashboard.js');
-const { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS } = __dashboardInternals;
+const { pickRecentNotes, notePreview, noteDateLabel, selectTimelineEvents, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS } = __dashboardInternals;
 
 const note = (partner_id, conversation_date, transcript_text, created_at = '2026-01-01T00:00:00Z', extra = {}) => ({
   transcript_id: `trn_${partner_id}_${conversation_date}_${created_at}`,
@@ -24,6 +24,50 @@ test('the limit is three notes per card', () => {
 
 test('the Upcoming Joint Events timeline looks 90 days ahead', () => {
   assert.equal(UPCOMING_WINDOW_DAYS, 90);
+});
+
+// ── Timeline selection ──────────────────────────────────────────────
+
+const today = new Date(2026, 8, 10); // Sep 10, 2026, local midnight
+const evt = (title, event_date, end_date = '') => ({ event_id: title, title, event_date, end_date, status: 'Upcoming' });
+
+test('events inside the window are listed by start date; past and beyond-window ones are not', () => {
+  const picked = selectTimelineEvents([
+    evt('day 100', '2026-12-19'),
+    evt('day 67', '2026-11-16'),
+    evt('yesterday', '2026-09-09'),
+    evt('today', '2026-09-10'),
+    evt('day 90', '2026-12-09'),
+    evt('day 47', '2026-10-27'),
+  ], today);
+  assert.deepEqual(picked.map(e => e.title), ['today', 'day 47', 'day 67', 'day 90']);
+});
+
+test('dates in the Sheets display format count the same as ISO ones', () => {
+  const picked = selectTimelineEvents([
+    evt('Microsoft Ignite happy hour', '11/16/2026'),
+    evt('Elantis webinar', '11/10/2026'),
+    evt('SCD webinar', '11/5/2026'),
+    evt('Nerdio webinar', '10/27/2026'),
+    evt('NerdioCon 2027', '3/15/2027', '3/18/2027'),
+    evt('last year', '9/1/2025'),
+  ], today);
+  assert.deepEqual(picked.map(e => e.title), ['Nerdio webinar', 'SCD webinar', 'Elantis webinar', 'Microsoft Ignite happy hour']);
+});
+
+test('a multi-day event already underway stays listed until its last day', () => {
+  const picked = selectTimelineEvents([
+    evt('running now', '2026-09-01', '2026-09-12'),
+    evt('ended yesterday', '2026-09-01', '2026-09-09'),
+    evt('ends today', '2026-08-06', '2026-09-10'),
+    evt('bad end date is ignored', '2026-09-20', '2026-09-01'),
+  ], today);
+  assert.deepEqual(picked.map(e => e.title), ['ends today', 'running now', 'bad end date is ignored']);
+});
+
+test('events without a readable date are skipped rather than crashing the panel', () => {
+  const picked = selectTimelineEvents([evt('TBD', 'TBD'), evt('blank', ''), evt('ok', '2026-09-20')], today);
+  assert.deepEqual(picked.map(e => e.title), ['ok']);
 });
 
 test('only this partner\'s notes, newest conversation first, capped at the limit', () => {
