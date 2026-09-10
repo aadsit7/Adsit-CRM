@@ -532,7 +532,7 @@ function buildNoteChip(note, partner) {
 }
 
 // Exposed for unit tests (same hook pattern as __partnerViewInternals).
-export const __dashboardInternals = { pickRecentNotes, notePreview, noteDateLabel, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS };
+export const __dashboardInternals = { pickRecentNotes, notePreview, noteDateLabel, selectTimelineEvents, RECENT_NOTES_LIMIT, UPCOMING_WINDOW_DAYS };
 
 // ============================================
 // Activity Hub View
@@ -660,22 +660,41 @@ function buildActivityView(container, partnerStats, viewContainer) {
 // Activity Hub tab).
 // ============================================
 
+/**
+ * The events that belong on the timeline: anything still to come or still
+ * running inside the window. An event qualifies when it ends on or after
+ * today (a multi-day event already underway stays listed until its last
+ * day) and starts on or before the window's end. Sorted by start date.
+ *
+ * parseDate, not new Date('YYYY-MM-DD'): the bare form parses as UTC
+ * midnight, which in US timezones lands the previous local day — so an
+ * event happening TODAY was excluded (while the KPI counted it). And
+ * parseDate also reads the "11/16/2026" form Google Sheets hands back for
+ * date cells; the old strict parser turned those into Invalid Dates that
+ * failed every comparison, which emptied this panel while the KPI above it
+ * still counted the events.
+ */
+function selectTimelineEvents(events, todayStart, windowDays = UPCOMING_WINDOW_DAYS) {
+  const windowEnd = new Date(todayStart);
+  windowEnd.setDate(windowEnd.getDate() + windowDays);
+
+  return events
+    .map(evt => {
+      const start = parseDate(evt.event_date);
+      if (!start) return null;
+      const end = parseDate(evt.end_date) || start;
+      return { evt, start, end: end < start ? start : end };
+    })
+    .filter(x => x && x.end >= todayStart && x.start <= windowEnd)
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+    .map(x => x.evt);
+}
+
 function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
-  // parseDate, not new Date('YYYY-MM-DD'): the bare form parses as UTC
-  // midnight, which in US timezones lands the previous local day — so an
-  // event happening TODAY was excluded from this panel (while the KPI
-  // counted it), and the month badge below showed "Sep" for an Oct 1 event.
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const windowEnd = new Date(todayStart);
-  windowEnd.setDate(windowEnd.getDate() + UPCOMING_WINDOW_DAYS);
 
-  const timelineEvents = upcomingEvents
-    .filter(evt => {
-      const d = parseDate(evt.event_date);
-      return d && d >= todayStart && d <= windowEnd;
-    })
-    .sort((a, b) => (parseDate(a.event_date) || 0) - (parseDate(b.event_date) || 0));
+  const timelineEvents = selectTimelineEvents(upcomingEvents, todayStart);
 
   const timelineTitle = el('div', { class: 'section-header' },
     el('div', {},
@@ -695,6 +714,7 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
   };
 
   const timelineCards = timelineEvents.map(evt => {
+    const start = parseDate(evt.event_date) || new Date();
     return el('div', {
       class: 'timeline-card',
       onClick: () => openEventModal(evt, viewContainer, () => {
@@ -703,11 +723,9 @@ function buildUpcomingEventsPanel(upcomingEvents, partnerStats, viewContainer) {
     },
       el('div', { class: 'timeline-card__date-col' },
         el('div', { class: 'timeline-card__month' },
-          (parseDate(evt.event_date) || new Date()).toLocaleDateString('en-US', { month: 'short' })
+          start.toLocaleDateString('en-US', { month: 'short' })
         ),
-        el('div', { class: 'timeline-card__day' },
-          String(parseInt((evt.event_date || '').split('-')[2], 10) || (parseDate(evt.event_date) || new Date()).getDate())
-        )
+        el('div', { class: 'timeline-card__day' }, String(start.getDate()))
       ),
       el('div', { class: 'timeline-card__content' },
         el('div', { class: 'timeline-card__title' }, evt.title),

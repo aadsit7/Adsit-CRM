@@ -29,23 +29,11 @@ export function dayNames() {
   return [...DAYS];
 }
 
-/** Format an ISO date string to "Mar 15, 2026" */
-export function formatDate(isoString) {
-  if (!isoString) return '—';
-  // Strip any time portion and parse as local date parts to avoid
-  // timezone shift (new Date('YYYY-MM-DD') parses as UTC midnight,
-  // which displays as the previous day in western timezones).
-  const parts = String(isoString).split('T')[0].split('-');
-  if (parts.length < 3) {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return '—';
-    return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-  }
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1; // 0-indexed
-  const day = parseInt(parts[2], 10);
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return '—';
-  return `${MONTHS_SHORT[month]} ${day}, ${year}`;
+/** Format a date value to "Mar 15, 2026" (any form parseDate accepts) */
+export function formatDate(value) {
+  const d = parseDate(value);
+  if (!d) return '—';
+  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
 /** Format to "March 2026" */
@@ -101,11 +89,60 @@ export function shiftMonth(date, offset) {
   return new Date(date.getFullYear(), date.getMonth() + offset, 1);
 }
 
-/** Parse an ISO date string into a Date at local midnight */
-export function parseDate(isoString) {
-  if (!isoString) return null;
-  const parts = isoString.split('T')[0].split('-');
-  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+/** Build a local-midnight Date, or null when the parts don't make a real date. */
+function localDate(year, monthIndex, day) {
+  const d = new Date(year, monthIndex, day);
+  if (isNaN(d.getTime())) return null;
+  // new Date(2026, 1, 30) silently rolls to Mar 2 — reject that.
+  if (d.getFullYear() !== year || d.getMonth() !== monthIndex || d.getDate() !== day) return null;
+  return d;
+}
+
+/**
+ * Parse a date value into a Date at local midnight, or null when it can't
+ * be read. The portal writes dates as YYYY-MM-DD, but Google Sheets turns
+ * that into a date cell and hands it back in the spreadsheet's DISPLAY
+ * format (US locale: "11/16/2026"), so every reader has to accept:
+ *   - "2026-11-16" and "2026-11-16T05:00:00.000Z"   (ISO, date part only)
+ *   - "11/16/2026"                                  (Sheets US display format)
+ *   - a Sheets serial number, e.g. 46342           (UNFORMATTED_VALUE reads)
+ *   - a Date object, or anything else Date can read ("Nov 16, 2026")
+ * Only the calendar day matters — the time part is dropped, never shifted
+ * through UTC (new Date('YYYY-MM-DD') is UTC midnight, which in US
+ * timezones is the previous local day).
+ */
+export function parseDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : localDate(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  const str = String(value).trim();
+  if (!str) return null;
+
+  // ISO date, optionally followed by a time part.
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]|$)/);
+  if (m) return localDate(+m[1], +m[2] - 1, +m[3]);
+
+  // US display format M/D/YYYY (what a Sheets date cell reads back as).
+  m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]|$)/);
+  if (m) return localDate(+m[3], +m[1] - 1, +m[2]);
+
+  // Sheets serial day number (days since 1899-12-30), 1954..2119.
+  if (/^\d+(?:\.\d+)?$/.test(str)) {
+    const n = Number(str);
+    if (n >= 20000 && n <= 80000) {
+      const utc = new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 86400000);
+      return localDate(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
+    }
+    return null;
+  }
+
+  // Anything else the engine can read, e.g. "Nov 16, 2026".
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return null;
+  return localDate(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
 /** Check if a date falls within a range (inclusive) */
