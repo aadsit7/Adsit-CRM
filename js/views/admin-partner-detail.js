@@ -320,17 +320,18 @@ function renderDetail(container, partner, opportunities, partnerEvents, transcri
           )
     ),
 
-    // Section 3: Contacts — extracted from this partner's description notes
-    // and attachments, shown as a branded table matrix on click.
-    buildPartnerContactsSection(partner, partnerContacts, contactPdfIndex),
-
-    // Section 4: Call Transcripts
+    // Section 3: Call Transcripts
     el('div', { class: 'partner-detail-page__section' },
       buildTranscriptsPanel(partner, transcripts),
     ),
 
-    // Section 5: Documents (file uploader + AI Analyze)
+    // Section 4: Documents (file uploader + AI Analyze)
     documentsSection,
+
+    // Section 5: Contacts — extracted from this partner's description notes
+    // and attachments, shown as a branded table matrix on click. Last on the
+    // page, beneath Documents.
+    buildPartnerContactsSection(partner, partnerContacts, contactPdfIndex),
   );
 
   mount(container, content);
