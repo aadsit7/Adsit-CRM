@@ -3,7 +3,7 @@
 // ============================================
 //
 // The partner-detail page stacks seven full sections — bio,
-// joint events, opportunities, contacts, descriptions, documents — into one
+// joint events, opportunities, descriptions, documents, contacts — into one
 // column. On a desktop that reads as a dense dossier. On a 390px iPhone it
 // is a ~3,000px scroll where every section costs most of a screen (an EMPTY
 // one still costs ~500px of headline + empty-state prose), so finding the
