@@ -2,7 +2,7 @@
 // Mobile Section Accordions
 // ============================================
 //
-// The partner-detail page stacks eight full sections — bio, next steps,
+// The partner-detail page stacks seven full sections — bio,
 // joint events, opportunities, contacts, descriptions, documents — into one
 // column. On a desktop that reads as a dense dossier. On a 390px iPhone it
 // is a ~3,000px scroll where every section costs most of a screen (an EMPTY
@@ -11,9 +11,8 @@
 //
 // On phones each section collapses to its header, turning the page into a
 // short index you scan and tap into — the iOS Settings pattern. Partner Bio
-// and Next Steps already ship their own collapse, so they are left alone;
-// this module simply matches their chevron language so the whole page reads
-// as one list.
+// already ships its own collapse, so it is left alone; this module simply
+// matches its chevron language so the whole page reads as one list.
 //
 // Implementation note: nothing is re-parented. The JS only tags the header
 // (`pd-collapse__header`), the header's parent (`pd-collapse`), and the
@@ -29,7 +28,7 @@ import { el } from './dom.js';
 const PHONE_QUERY = '(max-width: 768px)';
 
 /** Sections that ship their own collapse keep it (see partner-bio.css). */
-const SELF_MANAGED = '.partner-bio__chevron, .partner-next-steps__chevron';
+const SELF_MANAGED = '.partner-bio__chevron';
 
 /** A section is driven by whichever of these headers comes first inside it. */
 const HEADER_SELECTOR = '.partner-detail-page__section-header, .descriptions-panel__header';

@@ -7,7 +7,6 @@ import { getAccessToken, getCurrentUser, clearAccessToken } from './auth.js';
 import { normalizeProvider } from './utils/ai-providers.js';
 import { PARTNER_CONTACT_HEADERS, isHeaderPrefixOf } from './utils/partner-contacts.js';
 import { PARTNER_BIO_HEADERS } from './utils/partner-bio-schema.js';
-import { PARTNER_NEXT_STEP_HEADERS } from './utils/partner-next-steps-schema.js';
 
 /**
  * Get the effective Spreadsheet ID (runtime override or hardcoded).
@@ -741,10 +740,6 @@ export const SHEET_HEADERS = {
   // Analyze button on the partner page. Header lives with the parser/storage
   // contract so the two can never drift apart.
   [CONFIG.SHEET_PARTNER_BIOS]: PARTNER_BIO_HEADERS,
-  // Partner_Next_Steps: the analysis log on the partner page — every
-  // Analyze run's snapshot plus hand-added steps. Header lives with the
-  // parser/storage contract so the two can never drift apart.
-  [CONFIG.SHEET_PARTNER_NEXT_STEPS]: PARTNER_NEXT_STEP_HEADERS,
   [CONFIG.SHEET_CUSTOM_PROMPTS]: ['prompt_id', 'label', 'icon', 'instructions', 'created_at', 'provider'],
   [CONFIG.SHEET_AI_CONVERSATIONS]: ['conversation_id', 'username', 'started_at', 'title', 'messages', 'status'],
   [CONFIG.SHEET_MEETING_INDEX]: ['meeting_id', 'transcript_id', 'partner_id', 'partner_name', 'meeting_date', 'meeting_title', 'attendees', 'summary', 'key_decisions', 'topics_discussed'],
@@ -788,7 +783,7 @@ export async function initializeSheet() {
 
   // 2. Build batchUpdate requests to add missing tabs
   const requests = [];
-  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_PARTNER_NEXT_STEPS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabsToCreate = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabsToCreate) {
     if (!existingSheets.includes(tabName)) {
@@ -910,7 +905,7 @@ export async function syncHeaders() {
   if (!token) throw new Error('OAuth token required — please log in with Google SSO first.');
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_PARTNER_NEXT_STEPS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
+  const tabs = [CONFIG.SHEET_PARTNERS, CONFIG.SHEET_OPPORTUNITIES, CONFIG.SHEET_EVENTS, CONFIG.SHEET_TRANSCRIPTS, CONFIG.SHEET_OPP_DESCRIPTIONS, CONFIG.SHEET_EVENT_DESCRIPTIONS, CONFIG.SHEET_PARTNER_DOCUMENTS, CONFIG.SHEET_PARTNER_CONTACTS, CONFIG.SHEET_PARTNER_BIOS, CONFIG.SHEET_CUSTOM_PROMPTS, CONFIG.SHEET_AI_CONVERSATIONS, CONFIG.SHEET_MEETING_INDEX];
 
   for (const tabName of tabs) {
     const headerRow = SHEET_HEADERS[tabName];
@@ -1152,10 +1147,6 @@ let demoPartnerContacts = [
   [...PARTNER_CONTACT_HEADERS],
 ];
 
-let demoNextSteps = [
-  [...PARTNER_NEXT_STEP_HEADERS],
-];
-
 // ============================================
 // Demo data localStorage persistence
 // ============================================
@@ -1176,7 +1167,6 @@ function persistDemoData() {
       partnerDocuments: demoPartnerDocuments,
       eventContacts: demoEventContacts,
       partnerContacts: demoPartnerContacts,
-      nextSteps: demoNextSteps,
     }));
   } catch { /* quota exceeded — silently ignore */ }
 }
@@ -1200,7 +1190,6 @@ function loadPersistedDemoData() {
     if (data.partnerDocuments) demoPartnerDocuments = data.partnerDocuments;
     if (data.eventContacts) demoEventContacts = data.eventContacts;
     if (data.partnerContacts) demoPartnerContacts = data.partnerContacts;
-    if (data.nextSteps) demoNextSteps = data.nextSteps;
     return true;
   } catch {
     return false;
@@ -1229,7 +1218,6 @@ function getDemoData(sheetName) {
     case CONFIG.SHEET_PARTNER_DOCUMENTS: return [...demoPartnerDocuments.map(r => [...r])];
     case CONFIG.SHEET_EVENT_CONTACTS: return [...demoEventContacts.map(r => [...r])];
     case CONFIG.SHEET_PARTNER_CONTACTS: return [...demoPartnerContacts.map(r => [...r])];
-    case CONFIG.SHEET_PARTNER_NEXT_STEPS: return [...demoNextSteps.map(r => [...r])];
     default: return [];
   }
 }
@@ -1248,7 +1236,6 @@ export function addDemoRow(sheetName, values) {
     case CONFIG.SHEET_PARTNER_DOCUMENTS: demoPartnerDocuments.push(values); break;
     case CONFIG.SHEET_EVENT_CONTACTS: demoEventContacts.push(values); break;
     case CONFIG.SHEET_PARTNER_CONTACTS: demoPartnerContacts.push(values); break;
-    case CONFIG.SHEET_PARTNER_NEXT_STEPS: demoNextSteps.push(values); break;
   }
   invalidateSheetCache(sheetName);
   persistDemoData();
@@ -1269,7 +1256,6 @@ export function updateDemoRow(sheetName, rowIndex, values) {
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
     case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
     case CONFIG.SHEET_PARTNER_CONTACTS: data = demoPartnerContacts; break;
-    case CONFIG.SHEET_PARTNER_NEXT_STEPS: data = demoNextSteps; break;
     default: return;
   }
   if (data[rowIndex - 1]) {
@@ -1294,7 +1280,6 @@ export function deleteDemoRow(sheetName, rowIndex) {
     case CONFIG.SHEET_PARTNER_DOCUMENTS: data = demoPartnerDocuments; break;
     case CONFIG.SHEET_EVENT_CONTACTS: data = demoEventContacts; break;
     case CONFIG.SHEET_PARTNER_CONTACTS: data = demoPartnerContacts; break;
-    case CONFIG.SHEET_PARTNER_NEXT_STEPS: data = demoNextSteps; break;
     default: return;
   }
   data.splice(rowIndex - 1, 1);
