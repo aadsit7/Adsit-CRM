@@ -988,20 +988,18 @@ html {
     display: none;
   }
 
-  /* Partner Bio and Next Steps run their own collapse (they predate this
-     module and stay in charge of their own state), so match their folded
-     look here: a folded body means folded CTAs, and the whole page reads as
-     one list instead of five one-line rows between two 80px blocks.
+  /* Partner Bio runs its own collapse (it predates this module and stays
+     in charge of its own state), so match its folded look here: a folded
+     body means folded CTAs, and the whole page reads as one list instead
+     of five one-line rows around an 80px block.
      Nothing becomes unreachable — Analyze also sits beside the partner's
      name as a glyph, and a running analysis reports through the global
      Randy progress pill, which outlives this page entirely. */
-  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-detail-page__section-actions,
-  .partner-detail-page__section:has(> .partner-next-steps__body--collapsed) .partner-detail-page__section-actions {
+  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-detail-page__section-actions {
     display: none;
   }
 
-  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-bio__header,
-  .partner-detail-page__section:has(> .partner-next-steps__body--collapsed) .partner-next-steps__header {
+  .partner-detail-page__section:has(> .partner-bio__body--collapsed) .partner-bio__header {
     margin-bottom: 0;
     padding-bottom: 0;
     min-height: 48px;

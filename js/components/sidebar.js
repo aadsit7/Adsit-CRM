@@ -23,6 +23,9 @@ const ADMIN_NAV = [
   { label: 'Pricing', icon: 'pricing', externalUrl: 'https://aadsit7.github.io/Partner-Calculator/' },
   { path: '/admin/comp', label: 'Comp', icon: 'comp' },
   { path: '/admin/randy', label: 'Randy', icon: 'ai' },
+  // Partner AI — the Claude project holding the partner-team workspace.
+  // External like Pricing: opens in a new tab, never a routed view.
+  { label: 'Partner AI', icon: 'claude', externalUrl: 'https://claude.ai/project/01a06cf5-3ca3-771e-b127-4e06cf8de91a' },
   { path: '/admin/setup', label: 'Setup', icon: 'setup' },
 ];
 
@@ -35,6 +38,7 @@ const ICONS = {
   forecast: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 17h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.5 17V13M9 17V9M13.5 17V11M18 17V5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M14.5 5.5L18 5v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   events: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 9h14" stroke="currentColor" stroke-width="1.5"/><path d="M7 2v4M13 2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 13h6M7 16h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   ai: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3.5l1.55 3.15L15 7.55l-2.3 2.25.55 3.2L10 11.5l-3.25 1.5.55-3.2L5 7.55l3.45-.9L10 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M15.5 13.5l.8 1.6 1.7.4-1.25 1.2.3 1.75-1.55-.85-1.55.85.3-1.75L13 15.5l1.7-.4.8-1.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  claude: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12.00 10.00L17.50 10.00M11.73 11.00L15.20 13.00M11.00 11.73L13.00 15.20M10.00 12.00L10.00 17.50M9.00 11.73L7.00 15.20M8.27 11.00L4.80 13.00M8.00 10.00L2.50 10.00M8.27 9.00L4.80 7.00M9.00 8.27L7.00 4.80M10.00 8.00L10.00 2.50M11.00 8.27L13.00 4.80M11.73 9.00L15.20 7.00" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   setup: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h2m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h8M3 10h8m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h2M3 15h2m0 0a2 2 0 004 0m-4 0a2 2 0 014 0m0 0h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   leadcheck: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13.5 13.5L18 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.5 8.5l1.5 1.5 2.5-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   pricing: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M13.5 6.5h-5a2 2 0 100 4h3a2 2 0 110 4h-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
